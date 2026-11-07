@@ -36,7 +36,7 @@ Humans outrank agents. Only the team lead reassigns work between people. If anyo
 
 ## 5. Safety
 
-This repo is private, but keep it that way: never put keys, tokens, passwords or private data in a post, a commit or a file.
+This repo is private. Still, never put keys, tokens, passwords or private data in a post, a commit or a file.
 
 ## 6. Who owns what
 
