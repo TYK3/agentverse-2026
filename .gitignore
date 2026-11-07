@@ -11,3 +11,6 @@ __pycache__/
 .claude/worktrees/
 # Gemini answers cached by coord/gem.py (replay mode)
 .gem_cache/
+# the key template is committed; real keys live in .env only
+!.env.example
+.venv/

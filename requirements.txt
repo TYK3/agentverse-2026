@@ -1,2 +1,13 @@
 mujoco
 numpy
+google-genai>=2.3.0
+fastapi
+uvicorn[standard]
+websockets
+pydantic>=2
+pillow
+psutil
+sounddevice
+python-dotenv
+pytest
+ruff

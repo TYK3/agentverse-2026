@@ -148,7 +148,7 @@ jobs:
           done
       - name: No secrets or local state committed
         run: |
-          bad=$(git ls-files '.env' '.env.*' '.board/*' '.claude/settings.local.json' '.claude/worktrees/*')
+          bad=$(git ls-files '.env' '.env.*' ':(exclude).env.example' '.board/*' '.claude/settings.local.json' '.claude/worktrees/*')
           [ -z "$bad" ] || { echo "These must stay gitignored: $bad"; exit 1; }
 
   # Only while the repo is public: a commit must carry a GitHub noreply address, never a personal or
