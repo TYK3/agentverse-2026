@@ -1,0 +1,10 @@
+{
+  "topic": "world/change",
+  "data": {
+    "kind": "aftershock",
+    "t": 20,
+    "moved_blocks": [
+      "b7"
+    ]
+  }
+}

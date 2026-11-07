@@ -1,0 +1,140 @@
+"""Run with: uvicorn coord.hub:app --port 8000 --reload."""
+
+import asyncio
+import importlib
+import inspect
+import json
+import logging
+from collections import defaultdict, deque
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+
+from coord.messages import Envelope, validate_payload
+
+log = logging.getLogger(__name__)
+LANES = ("sim", "perception", "planner", "voice")
+BROWSER_TOPICS = {"operator/command", "gate/answer"}
+
+
+class Bus:
+    def __init__(self):
+        self.subs = defaultdict(list)
+        self.clients = set()
+        self.history = deque(maxlen=200)
+        self._delivery_lock = asyncio.Lock()
+
+    def subscribe(self, topic, fn):
+        self.subs[topic].append(fn)
+
+    async def publish(self, topic, data):
+        data = validate_payload(topic, data)
+        # Deliver before callbacks: a callback may recursively publish a response.
+        if topic != "sensors/scout":
+            msg = {"topic": topic, "data": data}
+            async with self._delivery_lock:
+                self.history.append(msg)
+                for client in tuple(self.clients):
+                    try:
+                        await client.send_text(json.dumps(msg, allow_nan=False))
+                    except Exception:
+                        log.debug("Dropping disconnected browser client", exc_info=True)
+                        self.clients.discard(client)
+        for fn in tuple(self.subs[topic]):
+            try:
+                result = fn(data)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                log.exception("Subscriber failed for %s", topic)
+
+    async def connect(self, websocket):
+        # Replay and registration are atomic relative to live delivery.
+        async with self._delivery_lock:
+            for msg in self.history:
+                await websocket.send_text(json.dumps(msg))
+            self.clients.add(websocket)
+
+
+bus = Bus()
+
+
+async def publish_checked(topic, data):
+    await bus.publish(topic, data)
+
+
+async def publish_gemini_status(target_bus, gem, interval=2):
+    while True:
+        await target_bus.publish("status/gemini", gem.status())
+        await asyncio.sleep(interval)
+
+
+@asynccontextmanager
+async def lifespan(application):
+    tasks = []
+    try:
+        for name in LANES:
+            try:
+                lane = importlib.import_module(name)
+            except ModuleNotFoundError as exc:
+                if exc.name != name:
+                    raise
+                log.warning("Lane %s is not installed; skipping", name)
+                continue
+            start = getattr(lane, "start", None)
+            if start is None:
+                log.warning("Lane %s has no start(bus); skipping", name)
+                continue
+            # start(bus) wires subscriptions and launches background work, then returns.
+            result = await start(bus)
+            if isinstance(result, asyncio.Task):
+                tasks.append(result)
+            elif isinstance(result, (list, tuple)):
+                tasks.extend(task for task in result if isinstance(task, asyncio.Task))
+        try:
+            gem = importlib.import_module("coord.gem")
+        except ModuleNotFoundError as exc:
+            if exc.name != "coord.gem":
+                raise
+            log.warning("coord.gem is not installed; status/gemini publisher skipped")
+        else:
+            tasks.append(asyncio.create_task(publish_gemini_status(bus, gem)))
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        bus.subs.clear()
+
+
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.websocket("/ws")
+async def websocket_gateway(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        await bus.connect(websocket)
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                message = Envelope.model_validate_json(raw, strict=True)
+                if message.topic not in BROWSER_TOPICS:
+                    raise ValueError("topic is not writable by browser clients")
+                data = validate_payload(message.topic, message.data)
+            except (ValueError, TypeError):
+                await websocket.close(code=1008)
+                return
+            await publish_checked(message.topic, data)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        bus.clients.discard(websocket)

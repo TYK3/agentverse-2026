@@ -1,0 +1,14 @@
+{
+  "topic": "report/handover",
+  "data": {
+    "json": {
+      "summary": "Development example; no live run.",
+      "casualties": [],
+      "hazards": [],
+      "actions": [],
+      "approvals": [],
+      "open_risks": []
+    },
+    "markdown": "# Development example\nNo live run."
+  }
+}

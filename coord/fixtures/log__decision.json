@@ -1,0 +1,11 @@
+{
+  "topic": "log/decision",
+  "data": {
+    "t": 0,
+    "perception": "unknown cell",
+    "model": "local-astar",
+    "physics": "pending",
+    "outcome": "relook",
+    "reason": "rescan before acting"
+  }
+}

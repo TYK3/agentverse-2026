@@ -1,0 +1,11 @@
+{
+  "topic": "scout/goto",
+  "data": {
+    "target": [
+      1,
+      2,
+      0
+    ],
+    "reason": "re-look at cell [3,4,0]"
+  }
+}

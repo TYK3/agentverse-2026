@@ -1,0 +1,22 @@
+{
+  "topic": "scene/loaded",
+  "data": {
+    "scene": "backup",
+    "blocks": [
+      {
+        "id": "b7",
+        "label": "wall",
+        "pos": [
+          1,
+          2,
+          0.5
+        ],
+        "size": [
+          0.2,
+          1,
+          0.5
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "topic": "route/verified",
+  "data": {
+    "id": "r3",
+    "ok": false,
+    "unstable_cells": [
+      [
+        3,
+        4,
+        0
+      ]
+    ],
+    "detail": "block b7 falls"
+  }
+}

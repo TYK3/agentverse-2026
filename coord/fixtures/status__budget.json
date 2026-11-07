@@ -1,0 +1,10 @@
+{
+  "topic": "status/budget",
+  "data": {
+    "device": "development host",
+    "mem_mb": 0,
+    "model": "local-astar",
+    "ms_per_step": 0,
+    "limit": {}
+  }
+}
