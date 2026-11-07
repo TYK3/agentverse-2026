@@ -119,7 +119,10 @@ def test_propose_verify_fail_replan_verify_ok_then_act():
     decision = bus.of("gate/decision")[-1]
     assert decision["outcome"] == "act" and decision["confidence"] == 0.9
     assert lp.state == L.EXECUTING
-    assert bus.of("responder/action") == [{"action": "move", "route": "r2", "item": "water"}]
+    assert bus.of("responder/action") == [
+        {"action": action, "route": "r2", "item": "water"}
+        for action in ("move", "place_supply", "release")
+    ]
     assert "stand-in (gemini off)" in decision["reason"]
 
 
