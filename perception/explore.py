@@ -8,7 +8,7 @@ import math
 import re
 from collections import deque
 
-from perception.grid import RES, cell_of
+from perception.grid import GROUND, RES, cell_of
 
 CLEAR = 2             # a Scout path keeps this many cells (0.1 m) from anything occupied, measured
                       # as a radius: a square would also count its corners (0.14 m away) and close the
@@ -138,12 +138,17 @@ class Explorer:
             return None
         self.target, unknown, path = found
         if self.rescan:
-            why = f"{self.change}: frontier at cell {list(self.target)}"
+            why = f"{self.change}: frontier at cell {self._plan(self.target)}"
         else:
-            why = f"frontier at cell {list(self.target)}"
+            why = f"frontier at cell {self._plan(self.target)}"
         return self._send(path, f"{why}, {unknown} unknown neighbours")
 
     # ---- map helpers ------------------------------------------------------------
+
+    @staticmethod
+    def _plan(cell):
+        """A cell as the planner and console name it: map/cells is flat, every cell is k = 0."""
+        return [cell[0], cell[1], GROUND]
 
     def _k(self):
         return cell_of(self.pose)[2]

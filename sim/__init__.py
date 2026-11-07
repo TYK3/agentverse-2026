@@ -16,6 +16,7 @@ async def run(world, bus, rate_hz=RATE_HZ):
     dt = 1.0 / rate_hz
     while True:
         started = time.monotonic()
+        world.responder.step(dt)      # the Responder (T06) moves on the same tick as the physics
         for topic, data in [*world.tick(dt), ("sensors/scout", world.sensors_message())]:
             try:
                 await bus.publish(topic, data)
@@ -42,7 +43,7 @@ async def start(bus, loop=True):
 
     bus.subscribe("route/proposed", on_route)
     inject.install(world, bus)
-    world.responder = responder.attach(world, bus, loop=loop)
+    world.responder = responder.attach(world, bus)
     if loop:
         world.task = asyncio.create_task(run(world, bus))
     return world

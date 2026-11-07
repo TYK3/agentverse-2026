@@ -1,14 +1,15 @@
 """Live occupancy map from the Scout's LiDAR, every 0.05 m cell seen, inferred or unknown (T08).
 
-A cell is `[i, j, k]` = floor(position / 0.05) in the scene frame; map/cells sends k = 0 (see GROUND).
+A cell is `[i, j, k]` = floor(position / 0.05) in the scene frame. The LiDAR layer is k = 1 (0.075 m), but
+map/cells is a 2D plan for the planner, which routes on k = 0: each (i, j) column is sent once, as k = 0.
 Only `seen` cells were measured; `inferred` cells are guesses (a wall's hidden interior); a cell not in the map is `unknown`.
 """
 
 import math
 
 RES = 0.05
-GROUND = 0            # map/cells reports the LiDAR layer as the ground layer k=0 the planner routes on:
-                      # free at LiDAR height means drivable floor, occupied means blocked (decided with planner)
+GROUND = 0            # map/cells flattens every layer onto the ground layer k=0 the planner routes on:
+                      # occupied in any layer means blocked, seen free means drivable floor (see column())
 MAX_RANGE = 6.0
 FACES = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
 SIDES = FACES[:4]     # in-layer neighbours: the map is one LiDAR layer thick, so up and down are unknown
@@ -25,6 +26,7 @@ class Grid:
         self.res = res
         self.cells = {}        # (i, j, k) -> {"state", "occupied", "hits"}; missing means unknown
         self.changed = set()   # cells whose state or occupied flag changed since the last message
+        self.layers = set()    # every k a cell was ever set in (the LiDAR layer, k = 1, in practice)
 
     def state(self, c):
         cur = self.cells.get(tuple(c))
@@ -33,6 +35,7 @@ class Grid:
     def _set(self, c, state, occupied):
         cur = self.cells.get(c)
         if cur is None:
+            self.layers.add(c[2])
             cur = self.cells[c] = {"state": state, "occupied": occupied, "hits": 0}
             self.changed.add(c)
         elif (cur["state"], cur["occupied"]) != (state, occupied):
@@ -121,11 +124,24 @@ class Grid:
         """map/cells with every cell observed so far: it replaces the whole map."""
         return self._message(t, self.cells)
 
+    def column(self, i, j):
+        """(state, occupied) of the plan-view cell (i, j), flattened over every layer the map holds.
+
+        Occupied if any layer is occupied: the Scout and Responder are taller than one layer, so
+        anything at any measured height blocks them. Seen if any layer was measured, inferred if only
+        guessed, unknown if no layer is in the map.
+        """
+        layers = [cur for k in self.layers if (cur := self.cells.get((i, j, k)))]
+        if not layers:
+            return "unknown", False
+        state = "seen" if any(cur["state"] == "seen" for cur in layers) else "inferred"
+        return state, any(cur["occupied"] for cur in layers)
+
     def _message(self, t, keys):
-        unknown = {"state": "unknown", "occupied": False}
+        """One k=0 cell per (i, j) column among `keys`, never two cells with the same (i, j)."""
         cells = []
-        for c in sorted(keys):
-            cur = self.cells.get(c, unknown)
-            cells.append({"cell": [c[0], c[1], GROUND], "state": cur["state"], "occupied": cur["occupied"]})
+        for i, j in sorted({(c[0], c[1]) for c in keys}):
+            state, occupied = self.column(i, j)
+            cells.append({"cell": [i, j, GROUND], "state": state, "occupied": occupied})
         self.changed = set()
         return {"t": round(t, 2), "res": self.res, "cells": cells}
