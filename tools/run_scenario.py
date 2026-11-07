@@ -11,7 +11,8 @@ happened in order; 1 if one timed out; 2 if --require-live found a stand-in.
 
 Lanes listed in --real are imported and started with `await <lane>.start(bus)` (the hub's rule);
 the rest run from tools/scenario_fakes.py and count as stand-ins. A real sim must expose
-`trigger_aftershock()` and `inject(cell)`, either plain or async.
+`trigger_aftershock()` and `inject(cell)`, plain or async, on the object its start(bus) returns
+(for example sim.World) or on the sim module.
 """
 
 import argparse
@@ -163,8 +164,8 @@ async def main(args):
     mods = {}
     for lane in ("voice", "planner", "perception", "sim"):
         if lane in real:
-            mods[lane] = importlib.import_module(lane)
-            await call(mods[lane].start, bus)
+            mod = importlib.import_module(lane)
+            mods[lane] = (await call(mod.start, bus), mod)
         elif lane == "planner":
             await fakes.fake_planner(bus, world, step=args.step)
         else:
@@ -192,7 +193,7 @@ async def main(args):
 
         mark = len(run.seen)
         if "sim" in real:
-            await call(mods["sim"].trigger_aftershock)
+            await call(hook(mods["sim"], "trigger_aftershock"))
         else:
             await world.aftershock(bus)
         await run.expect("aftershock fired", "world/change", since=mark)
@@ -210,7 +211,7 @@ async def main(args):
             mark = len(run.seen)
             print(f"  ..  injecting a block at {cell} (unscripted change)")
             if "sim" in real:
-                await call(mods["sim"].inject, cell)
+                await call(hook(mods["sim"], "inject"), cell)
             else:
                 await world.inject(cell)
             r3 = await run.expect("re-planned after injection", "route/proposed",
@@ -235,6 +236,14 @@ async def main(args):
             return 2
     print(f"scenario complete: {len(run.seen)} messages")
     return 0
+
+
+def hook(started, name):
+    """`name` on what the lane's start(bus) returned, else on the lane module."""
+    for obj in started:
+        if callable(getattr(obj, name, None)):
+            return getattr(obj, name)
+    raise SystemExit(f"real sim has no {name}(); needed for this step (T05, issue #13)")
 
 
 def pick_inject_cell(route, given):
