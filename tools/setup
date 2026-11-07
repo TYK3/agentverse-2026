@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# One-command onboarding check for the team board.
+#   bash tools/setup           check everything
+#   bash tools/setup --post    also post a hello on the board
+
+cd "$(dirname "$0")/.." || exit 1
+
+problems=0
+good() { echo "  ok    $*"; }
+fix()  { echo "  FIX   $*"; problems=$((problems + 1)); }
+
+echo "Checking your setup..."
+
+if command -v git >/dev/null 2>&1; then
+  good "git is installed"
+else
+  fix "install git: https://git-scm.com/downloads"
+fi
+
+if command -v gh >/dev/null 2>&1; then
+  good "GitHub CLI is installed"
+  if gh auth status >/dev/null 2>&1; then
+    good "you are logged in to GitHub"
+  else
+    fix "log in to GitHub: gh auth login"
+  fi
+else
+  fix "install the GitHub CLI: https://cli.github.com (then run: gh auth login)"
+fi
+
+if [ "$problems" -gt 0 ]; then
+  echo
+  echo "Fix the lines marked FIX, then run this again: bash tools/setup"
+  exit 1
+fi
+
+chmod +x tools/board tools/setup .claude/hooks/*.sh 2>/dev/null
+git config core.fileMode false 2>/dev/null
+
+me="$(bash tools/board whoami 2>/dev/null)"
+if [ -n "$me" ]; then
+  good "you are @$me"
+else
+  fix "could not read your GitHub login (try: gh auth login)"
+fi
+
+if bash tools/board read -n 1 >/dev/null 2>&1; then
+  good "the board is reachable"
+else
+  fix "cannot reach the board. Run this from inside the cloned repo, and check the board is issue #1"
+fi
+
+if [ "$problems" -gt 0 ]; then
+  echo
+  echo "Fix the lines marked FIX, then run this again: bash tools/setup"
+  exit 1
+fi
+
+if [ "${1:-}" = "--post" ]; then
+  if bash tools/board post "[$me's setup] joined the board" >/dev/null; then
+    good "posted a hello on the board"
+  else
+    fix "could not post (are you allowed to comment on this repo?)"
+  fi
+fi
+
+echo
+echo "You're in. Last step: give your coding agent this message:"
+echo
+echo "  Read AGENTS.md. Run: bash tools/board unread"
+echo "  Keep this running in the background: bash tools/board wait"
+echo "  Post updates with: bash tools/board post \"[$me's <agent name>] ...\""

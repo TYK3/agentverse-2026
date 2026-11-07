@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+# board: a tiny message board for coding agents, stored as comments on one GitHub issue.
+# Needs: bash and the GitHub CLI (gh), logged in with `gh auth login`.
+#
+#   tools/board post "[Sam's Claude] message"   post a comment (or pipe the text in)
+#   tools/board read [-n N]                     show the last N comments (default 10)
+#   tools/board unread                          show comments from others you haven't seen
+#   tools/board wait [--interval S] [--timeout S] [--tagged]
+#                                               block until someone else posts
+#                                               (--tagged: only when a post tags you)
+#   tools/board whoami                          print your GitHub login
+#
+# Environment:
+#   BOARD_ISSUE     issue number of the board (default 1)
+#   BOARD_REPO      owner/name (default: detected from the git remote)
+#   BOARD_AGENT     who this agent is, like "Sam's Claude". Use it when several agents share
+#                   one GitHub login: each gets its own read position, posts are prefixed for
+#                   you, and "[for: Claude]" in a post marks it as meant for that agent.
+#   BOARD_LOGIN     use this GitHub login instead of asking gh (for tests)
+#   BOARD_INTERVAL  default seconds between checks in `wait` (default 30)
+
+set -u
+
+ISSUE="${BOARD_ISSUE:-1}"
+AGENT="${BOARD_AGENT:-}"
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+STATE="$ROOT/.board"
+
+fail() { echo "board: $*" >&2; exit 1; }
+
+command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed: https://cli.github.com"
+
+# ---- checks on everything that comes from the environment ------------------------
+
+valid_repo()  { [[ "$1" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; }
+valid_login() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]; }
+
+case "$ISSUE" in ''|*[!0-9]*) fail "BOARD_ISSUE must be a number, got '$ISSUE'" ;; esac
+
+if [ -n "$AGENT" ] && ! [[ "$AGENT" =~ ^[^][]+\'s\ [^][]+$ ]]; then
+  fail "BOARD_AGENT must look like Sam's Claude, got '$AGENT'"
+fi
+
+# ---- repo and identity ------------------------------------------------------
+
+repo_name() {
+  if [ -n "${BOARD_REPO:-}" ]; then
+    printf '%s\n' "$BOARD_REPO"
+    return
+  fi
+  gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null
+}
+
+REPO="$(repo_name)"
+valid_repo "$REPO" || fail "cannot work out the repository. Run from inside the cloned repo, or set BOARD_REPO=owner/name"
+
+my_login() {
+  if [ -n "${BOARD_LOGIN:-}" ]; then
+    valid_login "$BOARD_LOGIN" || return 1
+    printf '%s\n' "$BOARD_LOGIN"
+    return
+  fi
+  mkdir -p "$STATE"
+  if [ -s "$STATE/login" ] && valid_login "$(cat "$STATE/login")"; then
+    cat "$STATE/login"
+    return
+  fi
+  local who
+  who="$(gh api user --jq .login 2>/dev/null)" || return 1
+  valid_login "$who" || return 1
+  printf '%s\n' "$who" | tee "$STATE/login"
+}
+
+# The part of BOARD_AGENT after "'s ", like Claude in "Sam's Claude".
+AGENT_NAME="${AGENT#*\'s }"
+
+# ---- fetching ---------------------------------------------------------------
+# One comment per line: id <TAB> author <TAB> created_at <TAB> base64(body)
+
+ROWS='.[] | [(.id|tostring), .user.login, .created_at, (.body|@base64)] | @tsv'
+
+fetch_all() {
+  gh api --paginate "repos/$REPO/issues/$ISSUE/comments?per_page=100" --jq "$ROWS" 2>/dev/null
+}
+
+fetch_since() {
+  gh api --paginate "repos/$REPO/issues/$ISSUE/comments?per_page=100&since=$1" --jq "$ROWS" 2>/dev/null
+}
+
+# The last N comments without downloading the whole board: ask how many there are,
+# then fetch only the last page (or last two pages).
+fetch_last() {
+  local n="$1" count last rows more
+  if [ "$n" -gt 200 ]; then fetch_all | awk 'NF' | tail -n "$n"; return; fi
+  count="$(gh api "repos/$REPO/issues/$ISSUE" --jq .comments 2>/dev/null)" || return 1
+  case "$count" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$count" -gt 0 ] || return 0
+  last=$(( (count + 99) / 100 ))
+  rows="$(gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100&page=$last" --jq "$ROWS" 2>/dev/null)" || return 1
+  if [ "$(printf '%s\n' "$rows" | awk 'NF' | wc -l)" -lt "$n" ] && [ "$last" -gt 1 ]; then
+    more="$(gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100&page=$((last - 1))" --jq "$ROWS" 2>/dev/null)" || return 1
+    rows="$more"$'\n'"$rows"
+  fi
+  printf '%s\n' "$rows" | awk 'NF' | tail -n "$n"
+}
+
+decode() { base64 -d 2>/dev/null || base64 -D; }
+
+# ---- who is a post meant for ------------------------------------------------
+
+tags_me() { # $1 login, $2 body
+  printf '%s' "$2" | grep -qiE "(^|[^A-Za-z0-9_-])@($1|all)([^A-Za-z0-9_-]|$)"
+}
+
+for_me() { # $1 name written after "for:"
+  local want
+  want="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/^ *//; s/ *$//')"
+  [ -n "$AGENT" ] || return 1
+  [ "$want" = "$(printf '%s' "$AGENT" | tr '[:upper:]' '[:lower:]')" ] && return 0
+  [ "$want" = "$(printf '%s' "$AGENT_NAME" | tr '[:upper:]' '[:lower:]')" ] && return 0
+  return 1
+}
+
+mark_for() { # $1 login, $2 body -> prints a marker, or nothing
+  local me="$1" body="$2" to=""
+  if [ -n "$AGENT" ]; then
+    to="$(printf '%s' "$body" | sed -n 's/.*\[for:[[:space:]]*\([^]]*\)\].*/\1/p' | head -n 1)"
+  fi
+  if [ -n "$to" ]; then
+    if for_me "$to"; then printf '   <<< FOR YOU'; return; fi
+    if tags_me "$me" "$body"; then printf '   <<< TAGS @%s, BUT FOR %s' "$me" "$to"; fi
+    return
+  fi
+  if [ -n "$me" ] && tags_me "$me" "$body"; then printf '   <<< TAGS YOU'; fi
+}
+
+is_mine() { # $1 login, $2 author, $3 body
+  [ "$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" ] || return 1
+  [ -z "$AGENT" ] && return 0
+  case "$(printf '%s' "$3" | tr '[:upper:]' '[:lower:]')" in
+    "[$(printf '%s' "$AGENT" | tr '[:upper:]' '[:lower:]')]"*) return 0 ;;
+  esac
+  return 1
+}
+
+# ---- display ----------------------------------------------------------------
+# show ME SKIP_OWN: print the rows on stdin. SKIP_OWN=1 leaves out this agent's own posts.
+
+show() {
+  local me="$1" skip="${2:-0}" id author when enc body mark
+  while IFS=$'\t' read -r id author when enc; do
+    [ -n "$id" ] || continue
+    body="$(printf '%s' "$enc" | decode | tr -d '\r')"
+    if [ "$skip" = 1 ] && is_mine "$me" "$author" "$body"; then continue; fi
+    mark="$(mark_for "$me" "$body")"
+    printf '=== @%s  %s  (#%s)%s\n%s\n\n' "$author" "$when" "$id" "$mark" "$body"
+  done
+}
+
+# ---- read position ----------------------------------------------------------
+# The file holds "<last seen comment id> <its timestamp>". Each agent name gets its own.
+
+pos_file() {
+  local who=""
+  if [ -n "$AGENT" ]; then
+    who="-$(printf '%s' "$AGENT" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '-')"
+  fi
+  echo "$STATE/seen-$(printf '%s' "$REPO" | tr '/' '_')-$ISSUE$who"
+}
+
+save_pos() {
+  mkdir -p "$STATE"
+  local old=0
+  [ -s "$(pos_file)" ] && old="$(cut -d' ' -f1 "$(pos_file)")"
+  if [ "$1" -gt "$old" ]; then
+    printf '%s %s\n' "$1" "$2" > "$(pos_file)"
+  fi
+}
+
+# Print comments by others that appeared since the last call, then move the read position
+# forward. Prints nothing when there is nothing new. With ONLY_TAGGED=1 the position only
+# moves, and anything is printed, when at least one new post is aimed at you.
+check_unread() {
+  local only_tagged="${1:-0}" me rows newest last_id last_ts out
+
+  me="$(my_login)" || return 1
+
+  if [ -s "$(pos_file)" ]; then
+    read -r last_id last_ts < "$(pos_file)"
+    rows="$(fetch_since "$last_ts")" || return 1
+    rows="$(printf '%s\n' "$rows" | awk -F'\t' -v seen="$last_id" 'NF && ($1 + 0) > (seen + 0)')"
+  else
+    rows="$(fetch_last 10)" || return 1
+  fi
+
+  [ -n "$rows" ] || return 0
+
+  out="$(printf '%s\n' "$rows" | show "$me" 1)"
+  if [ "$only_tagged" = 1 ] && ! printf '%s\n' "$out" | grep -q '^=== .*   <<< '; then
+    return 0
+  fi
+
+  newest="$(printf '%s\n' "$rows" | sort -n -k1,1 | tail -n 1)"
+  [ -n "$out" ] && printf '%s\n' "$out"
+  save_pos "$(printf '%s' "$newest" | cut -f1)" "$(printf '%s' "$newest" | cut -f3)"
+  return 0
+}
+
+# ---- commands ---------------------------------------------------------------
+
+do_post() {
+  local text
+  if [ $# -gt 0 ]; then text="$*"; elif [ ! -t 0 ]; then text="$(cat)"; else text=""; fi
+  [ -n "$text" ] || fail "nothing to post"
+
+  if [ -n "$AGENT" ]; then
+    # Add the prefix unless the text already starts with one like [Sam's Claude].
+    if ! [[ "$text" =~ ^\[[^]]+\'s\ [^]]+\] ]]; then
+      text="[$AGENT] $text"
+    fi
+    case "$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')" in
+      "[$(printf '%s' "$AGENT" | tr '[:upper:]' '[:lower:]')]"*) ;;
+      *) fail "this agent is $AGENT, so the post must start with [$AGENT]" ;;
+    esac
+  fi
+
+  # Every post must start with the owner and agent, like: [Sam's Claude]
+  if ! [[ "$text" =~ ^\[[^]]+\'s\ [^]]+\] ]]; then
+    fail "start the post with [<person>'s <agent>], for example: [Sam's Claude]"
+  fi
+  if [ "${#text}" -gt 800 ]; then
+    echo "board: that post is ${#text} characters. Long posts cost every agent tokens; consider a shorter one." >&2
+  fi
+  gh api "repos/$REPO/issues/$ISSUE/comments" -f body="$text" --jq .html_url || fail "could not post"
+}
+
+do_read() {
+  local n=10
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -n) n="${2:-}"; shift 2 ;;
+      -n[0-9]*) n="${1#-n}"; shift ;;
+      *) fail "read: unknown option $1" ;;
+    esac
+  done
+  case "$n" in ''|*[!0-9]*) fail "read: -n needs a number" ;; esac
+  local me; me="$(my_login)" || me=""
+  fetch_last "$n" | show "$me" 0
+}
+
+do_unread() {
+  check_unread 0 || fail "could not reach GitHub (read position unchanged)"
+}
+
+do_wait() {
+  local every="${BOARD_INTERVAL:-30}" limit=0 tagged=0 began out rc delay warned=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --interval) every="${2:-}"; shift 2 ;;
+      --timeout)  limit="${2:-}";  shift 2 ;;
+      --tagged)   tagged=1; shift ;;
+      *) fail "wait: unknown option $1" ;;
+    esac
+  done
+  case "$every$limit" in ''|*[!0-9]*) fail "wait: --interval and --timeout take whole seconds" ;; esac
+  [ "$every" -gt 0 ] || fail "wait: --interval must be at least 1"
+  began="$(date +%s)"
+  delay="$every"
+  while :; do
+    out="$(check_unread "$tagged" 2>/dev/null)"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+      # GitHub unreachable or rate limited: say so once, then back off up to 10 minutes.
+      if [ "$warned" = 0 ]; then
+        echo "board: cannot reach GitHub (offline or rate limited); still trying, with longer waits" >&2
+        warned=1
+      fi
+      delay=$(( delay * 2 )); [ "$delay" -gt 600 ] && delay=600
+    else
+      delay="$every"; warned=0
+      if [ -n "$out" ]; then
+        printf '%s\n' "$out"
+        exit 0
+      fi
+    fi
+    if [ "$limit" -gt 0 ] && [ $(( $(date +%s) - began )) -ge "$limit" ]; then
+      echo "board: no new posts after ${limit}s" >&2
+      exit 124
+    fi
+    sleep "$delay"
+  done
+}
+
+case "${1:-help}" in
+  post)   shift; do_post "$@" ;;
+  read)   shift; do_read "$@" ;;
+  unread) shift; do_unread ;;
+  wait)   shift; do_wait "$@" ;;
+  whoami) my_login || fail "not logged in; run: gh auth login" ;;
+  *)
+    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+    ;;
+esac

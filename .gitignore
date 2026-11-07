@@ -1,0 +1,7 @@
+# local read position and cached login for tools/board
+.board/
+
+.DS_Store
+node_modules/
+.env
+.env.*
