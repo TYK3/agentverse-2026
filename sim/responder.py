@@ -63,11 +63,13 @@ def cells_along(points, res=RES, k=0):
 
 
 class Responder:
-    def __init__(self, m, d, publish=None, clock=None):
-        """`publish(topic, data)` sends a message (default: drop it); `clock()` gives sim time in seconds."""
+    def __init__(self, m, d, publish=None, clock=None, shaking=None):
+        """`publish(topic, data)` sends a message (default: drop it); `clock()` gives sim time in seconds;
+        `shaking()` is true while a live aftershock runs (World.shaking): the Responder freezes at once."""
         self.m, self.d = m, d
         self.publish = publish or (lambda topic, data: None)
         self.clock = clock or (lambda: float(d.time))
+        self.shaking = shaking or (lambda: False)
         self.body = m.body("responder").id
         self.mocap = int(m.body_mocapid[self.body])
         self.routes = {}           # route id -> list of cells
@@ -289,6 +291,13 @@ class Responder:
         """Advance along the current route by up to SPEED * dt; stop and report if a block is in the way."""
         if self.state != "moving":
             return
+        if self.shaking():
+            # Freeze at the first tick of the shake, not 3 s later when world/change arrives.
+            dropped = len(self.queue)
+            self.path, self.queue, self.state = [], [], "frozen"
+            self._decide("frozen", f"aftershock shaking: stopped, dropped {dropped} queued action(s), "
+                                   "waiting for a new action")
+            return
         budget = SPEED * dt
         while self.path and budget > 1e-9:
             delta = self.path[0] - self.pos[:2]
@@ -318,8 +327,12 @@ class Responder:
                 "carrying": [n for n in SUPPLIES if self.holding(n)]}
 
 
-def attach(world, bus, rate_hz=10, loop=True):
-    """Wire a Responder into a running sim World and the hub Bus; returns it (task in `.task`)."""
+def attach(world, bus):
+    """Wire a Responder into a sim World and the hub Bus and return it.
+
+    It has no task of its own: sim.run() calls `world.responder.step(dt)` on every tick, so the hub's
+    shutdown (which cancels world.task) stops it too, and it never runs out of step with the physics.
+    """
     pending = set()
 
     def publish(topic, data):
@@ -327,19 +340,10 @@ def attach(world, bus, rate_hz=10, loop=True):
         pending.add(task)
         task.add_done_callback(pending.discard)
 
-    r = Responder(world.m, world.d, publish, clock=lambda: world.t)
+    r = Responder(world.m, world.d, publish, clock=lambda: world.t, shaking=lambda: world.shaking)
     bus.subscribe("route/proposed", r.on_route)
     bus.subscribe("gate/request", r.on_gate_request)
     bus.subscribe("gate/answer", r.on_gate_answer)
     bus.subscribe("responder/action", r.on_action)
     bus.subscribe("world/change", r.on_world_change)
-
-    async def run():
-        dt = 1.0 / rate_hz
-        while True:
-            r.step(dt)
-            await asyncio.sleep(dt)
-
-    if loop:
-        r.task = asyncio.get_running_loop().create_task(run())
     return r

@@ -253,7 +253,7 @@ def test_attach_wires_the_bus():
 
     async def go():
         bus, world = FakeBus(), World(render=False)
-        r = R.attach(world, bus, loop=False)
+        r = R.attach(world, bus)
         assert {"route/proposed", "gate/request", "gate/answer", "responder/action", "world/change"} <= set(bus.subs)
         await bus.publish("responder/action", {"action": "move", "route": "missing", "item": "water"})
         await asyncio.sleep(0)
@@ -262,3 +262,68 @@ def test_attach_wires_the_bus():
     _, bus = asyncio.run(go())
     logged = [d for t, d in bus.sent if t == "log/decision"]
     assert logged and logged[-1]["outcome"] == "refused"
+
+
+def test_freezes_as_soon_as_the_shake_starts(world):
+    """Review #57 follow-up 1: stop at the first tick of the aftershock, not 3 s later at world/change."""
+    r = R.Responder(world.m, world.d, clock=lambda: world.t, shaking=lambda: world.shaking)
+    route(r, "r1", demo_responder.ROUTES["r1"])
+    r.on_action({"action": "move", "route": "r1", "item": "water"})
+    r.on_action({"action": "place_supply", "route": "r1", "item": "water"})
+    for _ in range(10):
+        r.step(0.1)
+        world.tick(0.1)
+    assert world.trigger_aftershock()
+    r.step(0.1)
+    assert r.state == "frozen" and not r.queue and r.log[-1]["outcome"] == "frozen"
+    here = r.pos
+    for _ in range(10):                      # 1 s into the 3 s shake
+        r.step(0.1)
+        world.tick(0.1)
+    assert world.shaking and np.allclose(r.pos, here)
+
+
+def test_robot_geoms_are_group_3():
+    """Review #57 follow-up 2: the Scout's sensors can skip robot geoms by group."""
+    m, _ = scene.load()
+    for g in ("responder_chassis", "responder_gripper"):
+        assert m.geom_group[m.geom(g).id] == 3, g
+
+
+def test_sim_loop_steps_the_responder_without_its_own_task():
+    """Review #57 follow-up 3: one task (world.task) runs physics and Responder, so the hub cancels both."""
+    import sim
+
+    class Bus:
+        def __init__(self):
+            self.subs = {}
+
+        def subscribe(self, topic, fn):
+            self.subs.setdefault(topic, []).append(fn)
+
+        async def publish(self, topic, data):
+            for fn in self.subs.get(topic, []):
+                out = fn(data)
+                if asyncio.iscoroutine(out):
+                    await out
+
+    async def go():
+        bus = Bus()
+        world = await sim.start(bus)
+        world._set_pose((-1.2, -1.7), 0.0)
+        assert not hasattr(world.responder, "task")
+        await bus.publish("route/proposed", {"id": "r1", "robot": "responder", "goal": "test", "model": "local-astar",
+                                             "cells": R.cells_along(demo_responder.ROUTES["r1"])})
+        await bus.publish("responder/action", {"action": "move", "route": "r1", "item": "water"})
+        start = world.responder.pos
+        await asyncio.sleep(0.5)
+        moved = float(np.linalg.norm(world.responder.pos - start))
+        world.task.cancel()
+        await asyncio.gather(world.task, return_exceptions=True)
+        after = world.responder.pos
+        await asyncio.sleep(0.3)
+        return moved, float(np.linalg.norm(world.responder.pos - after))
+
+    moved, after_cancel = asyncio.run(go())
+    assert moved > 0.02, "the sim loop should drive the Responder"
+    assert after_cancel == 0.0, "cancelling world.task stops the Responder too"
