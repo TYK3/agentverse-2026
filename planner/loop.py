@@ -121,7 +121,8 @@ class Loop:
         self.verified_route = None
         m = self.mission_args
         self.router.hazards = self.hazards + [
-            {"cell": list(c), "status": "at_risk", "why": w, "estimate": True} for c, w in self.unstable.items()]
+            {"cell": list(c), "status": "at_risk", "why": w, "estimate": True, "blocked": True}
+            for c, w in self.unstable.items()]  # physics-rejected: never routed through (route.find_route)
         with self._step():
             result = await self.router.propose(m["start"], m["goal"], goal_text=m["goal_text"], publish=False)
         if result["status"] == "ok":
