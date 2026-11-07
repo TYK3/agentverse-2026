@@ -79,12 +79,18 @@ def test_scout_visits_every_room_unscripted(explored, room, x0, x1):
 
 
 def test_rescans_moved_area_within_20_s(explored):
-    explored.explorer.on_change({"kind": "aftershock", "t": explored.t, "moved_blocks": ["b11"]})
+    """b11 sits in the room 2/3 gap, so after it moves the gap is at_risk and the Scout must not cross:
+    it comes back from room 1 and re-scans the room 2 side (x < 1.2 m, the wall line is x = 1.25)."""
+    explored.aftershock(["b11"])                            # b11 collapsed, its surroundings at_risk
     forgot = set(explored.explorer.rescan)
+    near_side = {c for c in forgot if (c[0] + 0.5) * 0.05 < 1.2}
+    step = len(explored.trail)
     explored.run(20)
-    back = sum(explored.grid.state(c) != "unknown" for c in forgot) / len(forgot)
-    assert back > 0.8, f"only {back:.0%} of the moved area re-seen in 20 s"
+    back = sum(explored.grid.state(c) != "unknown" for c in near_side) / len(near_side)
+    assert back > 0.8, f"only {back:.0%} of the reachable moved area re-seen in 20 s"
     assert any(r.startswith("re-scan after the aftershock moved b11") for r in explored.reasons)
+    entered = {explored.hazards.status((int(x // 0.05), int(y // 0.05))) for x, y in explored.trail[step:]}
+    assert entered <= {"stable"}, f"the Scout drove into {entered - {'stable'}} cells"
 
 
 def test_waypoint_never_cuts_through_hazard_cells():

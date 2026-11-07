@@ -11,6 +11,7 @@ import numpy as np
 from perception.explore import Explorer
 from perception.fixtures.make_standin import SCENE, Z, lidar
 from perception.grid import Grid
+from perception.hazards import Hazards
 from sim import scene
 
 HZ, SPEED, STOP = 10, 0.3, 0.15
@@ -23,9 +24,10 @@ class Loop:
         mujoco.mj_forward(self.m, self.d)
         self.grid = Grid()
         self.explorer = Explorer(self.grid)
-        self.explorer.on_scene({"blocks": [
-            {"id": b["id"], "label": b["label"], "pos": b["pos"], "size": b["size"]}
-            for b in scene.blocks(self.m, self.d)]})
+        loaded = scene.scene_loaded(self.m, self.d)
+        self.explorer.on_scene(loaded)
+        self.hazards = Hazards()
+        self.explorer.on_hazards(self.hazards.on_scene(loaded))
         self.pos = [start[0], start[1], Z]
         self.goto = None
         self.t = 0.0
@@ -58,6 +60,12 @@ class Loop:
                     self.pos[1] += vec[1] * move
         self.trail.append(tuple(self.pos[:2]))
         self.t = round(self.t + 1 / HZ, 2)
+
+    def aftershock(self, moved):
+        """What start(bus) does on world/change: hazards first, then the explorer forgets the moved area."""
+        change = {"kind": "aftershock", "t": self.t, "moved_blocks": moved}
+        self.explorer.on_hazards(self.hazards.on_change(change))
+        self.explorer.on_change(change)
 
     def run(self, seconds):
         for _ in range(int(seconds * HZ)):
