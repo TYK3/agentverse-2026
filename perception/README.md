@@ -24,3 +24,18 @@ k=1 (the Scout's LiDAR layer), always with `estimate: true`:
 
 In the backup scene only b10 (the slab leaning on b8) is `at_risk` before the shake. Fixtures:
 `perception/fixtures/map_hazards_before.json` and `map_hazards_after.json` (b10 and b11 moved).
+
+## Casualties (T10, `perception/casualties.py`)
+
+`map/casualties` (contract shape, `vitals.simulated: true`) is published at 2 Hz when it changes, and is
+`[]` while nobody is found. Clues, each scored 0..1, confidence = 0.4 thermal + 0.3 sound + 0.3 vision:
+
+- thermal: the hottest region of the 16x12 grid above 0.6 gives a bearing (60 degree field of view);
+- sound: the acoustic bearing, a 5-sample moving average; sound alone never creates an entry;
+- position: thermal and loud sound rays from Scout poses at least 1 m apart, intersected (median),
+  else the LiDAR range along the thermal bearing;
+- vision (`pose` clue): the camera frame to `gemini-3.8-flash` through `coord/gem.py`, at most once a
+  second and only when thermal or sound already suggests someone. With `GEMINI_MODE=off` it is skipped
+  and marked as a stand-in (`gem.mark_stand_in("vision")`). Frames are never stored or forwarded.
+
+On the T04 recording, c1 is found at (1.95, 0.98) (true (2.0, 1.0)), confidence 0.7, thermal + sound.
