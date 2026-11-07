@@ -1,0 +1,22 @@
+{
+  "topic": "map/casualties",
+  "data": [
+    {
+      "id": "c1",
+      "pos": [
+        1,
+        2,
+        0
+      ],
+      "confidence": 0.8,
+      "clues": [
+        "thermal",
+        "sound"
+      ],
+      "vitals": {
+        "breathing_rate": 14,
+        "simulated": true
+      }
+    }
+  ]
+}

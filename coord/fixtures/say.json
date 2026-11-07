@@ -1,0 +1,9 @@
+{
+  "topic": "say",
+  "data": {
+    "to": "operator",
+    "intent": "reassure",
+    "text": "Development example: awaiting a verified route.",
+    "lang": "en"
+  }
+}

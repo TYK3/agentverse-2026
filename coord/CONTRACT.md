@@ -3,7 +3,17 @@
 Every boundary one lane calls on another goes here first, before code. Change it with a PR that
 touches nothing else, and post the change on the board tagging the affected lanes.
 
-Transport is **Open** (see `coord/CONTEXT.md`). The shapes below are JSON so they hold either way.
+Transport proposed by T02 (#10): one Python process with an asynchronous topic bus and a FastAPI
+WebSocket gateway at `ws://localhost:8000/ws`. The wire envelope is
+`{"topic":"map/cells","data":{...}}`; array payloads remain arrays in `data`.
+Lanes expose `async def start(bus)` and use `bus.subscribe(topic, callback)` (sync or async callback)
+and `await bus.publish(topic, data)`. Every publish is validated against `coord.messages.TOPICS`.
+Browser clients may publish only `operator/command` and `gate/answer`; invalid messages close the
+connection with code 1008 before dispatch. The gateway forwards all topics except `sensors/scout`
+and replays its latest 200 forwarded envelopes to each new connection. This is bounded event
+history, not a complete map snapshot: perception also publishes full map snapshots every 5 s (T08).
+
+The shapes below are JSON.
 Coordinates are metres in the scene frame; `cell` is a grid index `[i, j, k]`; `t` is seconds since the
 run started. These are first drafts: the owning lane refines them by PR.
 
@@ -29,6 +39,33 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `status/budget` | planner | console | `{"device":"<open>","mem_mb":0,"model":"gemma-4-e2b","ms_per_step":0,"limit":{...}}` |
 | `say` | planner | voice, console (shown as text) | `{"to":"casualty"\|"operator","intent":"first_aid"\|"guide_exit"\|"reassure","text":"...","lang":"auto"}` |
 | `report/handover` | planner | console | Map, casualties with confidence, hazards, routes and re-plans, supplies delivered, human approvals |
+| `status/gemini` | hub | console | `{"mode":"off"\|"replay"\|"live","calls_last_hour":0,"stand_ins":["vision","tts"]}`, published every 2 s from `coord.gem.status()` |
+
+## T02 schema details (proposed, #10)
+
+- `coord/fixtures/<topic with / replaced by __>.json` contains the whole wire envelope, not just
+  its payload. These are labelled development examples, never a claimed live run.
+- `sensors/scout`: `{"t":0,"pose":{"pos":[x,y,z],"yaw":0},"lidar":[1.2,6.0],
+  "camera":null,"thermal":[[0.1,0.9]],"acoustic":{"bearing":0,"level":0.5}}`.
+  `lidar` is a full horizontal sweep beginning at world +x, evenly spaced counter-clockwise;
+  ranges are metres (T04, PR #42). `camera` is `{"format":"jpeg","b64":"..."}`,
+  a base64 JPEG string or null (recordings omit images).
+  Thermal is a rectangular array of intensities in 0..1; acoustic bearing is degrees relative to yaw.
+  `t` and `camera` may be omitted from a recording. Sensor frames go only to local subscribers and
+  are never retained in gateway history or replayed to browsers (T04).
+- T04 may include `motion: {"state":"idle"|"moving"|"arrived"|"blocked",
+  "target":[x,y]|null}`. Motion is local sensor metadata, not a browser event.
+- `scene/loaded` block `size` is MuJoCo half-extents in metres (T03); Three.js uses `2 * size`.
+- `map/cells` may include the optional nonnegative integer `hits` in each cell (T08).
+- `route/proposed.model` is a nonempty provenance string, including `local-astar` for T12 under
+  POLICY #8. The two model names in the table are examples; core routing never requires Gemini.
+- `status/budget.limit` is an object of named nonnegative numeric limits; device, model, memory and
+  step latency remain the fields in the table. The edge device itself remains an open decision.
+- `report/handover` is `{"json":{...},"markdown":"..."}` (T16). `json` contains the structured
+  summary, casualties, hazards, actions, approvals and open risks; this inner report is extensible.
+- `status/gemini` uses the shape proposed in PR #39: `{"mode":"off","calls_last_hour":0,
+  "stand_ins":[]}`. The hub publishes `coord.gem.status()` every 2 s once T26 is available; it
+  makes no model calls. Until T26 merges, the publisher is skipped with a logged warning.
 
 ## Rules the shapes encode
 - Only `seen` cells count as confirmed safe. A route through `inferred` or `unknown` cells is a re-look,

@@ -1,0 +1,29 @@
+{
+  "topic": "sensors/scout",
+  "data": {
+    "t": 0,
+    "pose": {
+      "pos": [
+        0,
+        0,
+        0.1
+      ],
+      "yaw": 0
+    },
+    "lidar": [
+      1.2,
+      6.0
+    ],
+    "camera": null,
+    "thermal": [
+      [
+        0.1,
+        0.9
+      ]
+    ],
+    "acoustic": {
+      "bearing": 0,
+      "level": 0.5
+    }
+  }
+}
