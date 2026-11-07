@@ -54,6 +54,12 @@ class Grid:
         if cur is None or cur["hits"] == 0:
             self._set(c, "seen", False)
 
+    def forget(self, cells):
+        """Make cells unknown again (after a world/change), so the Scout re-scans them."""
+        for c in cells:
+            if self.cells.pop(c, None) is not None:
+                self.changed.add(c)
+
     def infer(self, around):
         """Unknown side neighbours of `around` with 3 or 4 seen, occupied side neighbours become inferred.
 
@@ -108,15 +114,18 @@ class Grid:
         return out
 
     def delta(self, t):
-        """map/cells with only the cells changed since the last message."""
+        """map/cells with only the cells changed since the last message; forgotten cells say unknown."""
         return self._message(t, self.changed)
 
     def snapshot(self, t):
-        """map/cells with every cell observed so far."""
+        """map/cells with every cell observed so far: it replaces the whole map."""
         return self._message(t, self.cells)
 
     def _message(self, t, keys):
-        cells = [{"cell": [c[0], c[1], GROUND], "state": self.cells[c]["state"], "occupied": self.cells[c]["occupied"]}
-                 for c in sorted(keys)]
+        unknown = {"state": "unknown", "occupied": False}
+        cells = []
+        for c in sorted(keys):
+            cur = self.cells.get(c, unknown)
+            cells.append({"cell": [c[0], c[1], GROUND], "state": cur["state"], "occupied": cur["occupied"]})
         self.changed = set()
         return {"t": round(t, 2), "res": self.res, "cells": cells}
