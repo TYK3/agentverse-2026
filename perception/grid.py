@@ -9,6 +9,8 @@ import math
 RES = 0.05
 MAX_RANGE = 6.0
 FACES = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+SIDES = FACES[:4]     # in-layer neighbours: the map is one LiDAR layer thick, so up and down are unknown
+WALLED = 3            # an unknown cell with this many seen, occupied side neighbours is inferred
 
 
 def cell_of(p, res=RES):
@@ -51,16 +53,20 @@ class Grid:
             self._set(c, "seen", False)
 
     def infer(self, around):
-        """Unknown face neighbours of `around` with 5 or 6 seen, occupied neighbours become inferred."""
+        """Unknown side neighbours of `around` with 3 or 4 seen, occupied side neighbours become inferred.
+
+        Only the four neighbours in the same layer count: the LiDAR scans one layer, so the cells above
+        and below are never seen and a 3D rule (5 of 6 faces) would never fire.
+        """
         for c in around:
-            for f in FACES:
+            for f in SIDES:
                 n = (c[0] + f[0], c[1] + f[1], c[2] + f[2])
-                if n not in self.cells and self._walled(n) >= 5:
+                if n not in self.cells and self._walled(n) >= WALLED:
                     self._set(n, "inferred", True)
 
     def _walled(self, c):
         count = 0
-        for f in FACES:
+        for f in SIDES:
             cur = self.cells.get((c[0] + f[0], c[1] + f[1], c[2] + f[2]))
             count += bool(cur and cur["state"] == "seen" and cur["occupied"])
         return count

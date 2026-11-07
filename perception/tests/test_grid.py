@@ -70,11 +70,18 @@ def test_miss_marks_nothing():
 def test_inference_fills_hidden_interior_only():
     g = Grid()
     hidden = (5, 5, 1)
-    walls = [(6, 5, 1), (4, 5, 1), (5, 6, 1), (5, 4, 1), (5, 5, 0)]
+    walls = [(6, 5, 1), (4, 5, 1), (5, 6, 1)]                    # three side neighbours, same layer only
     for c in walls:
         g.hit(c)
     g.infer(walls)
     assert g.cells[hidden] == {"state": "inferred", "occupied": True, "hits": 0}
+    assert g.state((5, 5, 0)) == g.state((5, 5, 2)) == "unknown"  # never infer across layers
+
+    g = Grid()
+    for c in walls[:2]:
+        g.hit(c)
+    g.infer(walls[:2])
+    assert g.state(hidden) == "unknown"                           # two walls is a gap, not an interior
 
     g = Grid()
     for c in walls:
