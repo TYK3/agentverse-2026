@@ -78,8 +78,11 @@ def test_start_publishes_scene_loaded():
         async def publish(self, topic, data):
             self.sent.append((topic, data))
 
+        def subscribe(self, topic, callback):
+            pass
+
     bus = FakeBus()
-    asyncio.run(sim.start(bus))
+    asyncio.run(sim.start(bus, loop=False))
     assert [t for t, _ in bus.sent] == ["scene/loaded"]
     payload = bus.sent[0][1]
     assert payload["scene"] == "backup" and len(payload["blocks"]) == 15
