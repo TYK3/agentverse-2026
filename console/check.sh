@@ -6,3 +6,4 @@ cd "$(dirname "$0")"
 npm install --no-audit --no-fund
 npm run build
 node test_smoke.js
+npm test

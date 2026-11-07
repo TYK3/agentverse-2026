@@ -10,7 +10,7 @@
     <header id="top-bar">
       <strong>AFTERSHOCK</strong>
       <span id="connection-status" role="status">Connecting…</span>
-      <span id="edge-budget-status">Edge budget · pending</span>
+      <span id="gemini-status" title="Awaiting status">GEMINI: …</span><div id="budget-panel">Edge budget · awaiting telemetry</div><span id="link-status" role="status">Link unknown</span>
     </header>
     <main id="workspace">
       <section id="map-panel" aria-label="3D map">
@@ -48,9 +48,10 @@
       <label for="operator-command">Operator command</label>
       <input id="operator-command" placeholder="Enter a command" autocomplete="off"/>
       <button id="send-command" type="button">Send</button>
-      <span id="mode-label"></span>
+      <button id="mic-command" type="button" disabled title="Voice lane will connect microphone input">Mic · pending</button><button id="show-report" type="button">Handover report</button><span id="mode-label"></span><span id="send-status" role="status"></span>
     </footer>
   </div>
+<dialog id="approval-dialog" aria-labelledby="approval-title"><h2 id="approval-title">Operator approval required</h2><p id="approval-summary"></p><p id="approval-meta"></p><p id="approval-error" role="alert"></p><button id="approve" type="button">Approve</button> <button id="reject" type="button">Reject</button></dialog><dialog id="report-dialog" aria-labelledby="report-title"><h2 id="report-title">Handover report</h2><div id="report-content"></div><button id="close-report" type="button">Close</button></dialog>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
