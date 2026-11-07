@@ -109,3 +109,22 @@ def test_record_writes_the_fake(tmp_path):
     assert len(lines) == 50
     assert {line["topic"] for line in lines} == {"sensors/scout"}
     assert all("camera" not in line["data"] for line in lines)
+
+
+def test_sensing_skips_robot_geoms():
+    """The Scout's LiDAR and line of sight ignore group-3 robot geoms (the Responder behind it at start)."""
+    w = World(render=False)
+    responder = w.m.body("responder").id
+    geoms = range(w.m.body_geomadr[responder], w.m.body_geomadr[responder] + w.m.body_geomnum[responder])
+    for g in geoms:
+        w.m.geom_group[g] = 0
+    seen = sensors.lidar(w.m, w.d, w.pos, w.scout)[270]          # straight back (-y), towards the Responder
+    for g in geoms:
+        w.m.geom_group[g] = sensors.ROBOT_GROUP
+    skipped = sensors.lidar(w.m, w.d, w.pos, w.scout)[270]
+    assert seen < 0.6 and skipped > seen + 0.5
+    # The drive check still sees it: the Scout will not reverse into the Responder.
+    w.goto({"target": [-0.5, -2.5, 0.075], "reason": "test"})
+    for _ in range(40):
+        w.tick(0.1)
+    assert w.state == "blocked" and w.pos[1] > -1.8
