@@ -72,6 +72,11 @@ class World:
         self.refresh_unstable()
         self.events.append(("world/change", {"kind": "aftershock", "t": round(self.t, 2), "moved_blocks": moved}))
 
+    def inject(self, cell):
+        """Drop the spare block on grid cell [i, j, k] (the integration runner's hook). Returns its name."""
+        res = aftershock.RES
+        return self.add_block([(cell[0] + 0.5) * res, (cell[1] + 0.5) * res, 0.3])
+
     def add_block(self, pos):
         """Drop the spare rubble block at pos [x, y, z] (z is its centre height). Returns its name or None."""
         spare = [b for b in aftershock.spare_ids(self.m) if self.m.body_gravcomp[b] == 1]

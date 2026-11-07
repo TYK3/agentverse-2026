@@ -140,3 +140,15 @@ def test_shake_offset():
     assert aftershock.shake_offset(-0.1) == [0.0, 0.0, 0.0]
     assert aftershock.shake_offset(1 / 16)[0] == pytest.approx(aftershock.AMPLITUDE)
     assert aftershock.shake_offset(aftershock.SHAKE) == [0.0, 0.0, 0.0]
+
+
+def test_inject_cell_hook():
+    """tools/run_scenario.py (#52) calls world.inject([i, j, k]) on what sim.start returns."""
+    w = World(render=False)
+    assert w.inject(cell(-0.9, 0.25)) == "x1"
+    events = []
+    for _ in range(11):
+        events += w.tick(0.1)
+    x1 = w.d.xpos[w.m.body("x1").id]
+    assert [math.floor(v / aftershock.RES) for v in x1[:2]] == cell(-0.9, 0.25)[:2]
+    assert events[0][1]["kind"] == "block_added"
