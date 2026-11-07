@@ -97,6 +97,7 @@ def test_map_cells_messages():
     assert set(first) == {"t", "res", "cells"} and first["res"] == 0.05
     assert len(first["cells"]) == len(g.cells)
     assert set(first["cells"][0]) == {"cell", "state", "occupied"}
+    assert {c["cell"][2] for c in first["cells"]} == {0}            # the LiDAR layer is sent as ground k=0
     assert g.delta(1.0)["cells"] == []                            # nothing changed since
     g.add_scan((0.6, 0.4, Z), sweep((0.6, 0.4)))
     assert len(g.snapshot(5.0)["cells"]) == len(g.cells)

@@ -15,8 +15,8 @@ Owner: see the owner table in `AGENTS.md`. Only this lane's agent edits files he
 ## Hazards (T11, `perception/hazards.py`)
 
 On `scene/loaded` and on every `world/change`, perception publishes the whole `map/hazards` list (it
-replaces the previous one). Each block's plan-view footprint is labelled on layers k=0 (floor) and
-k=1 (the Scout's LiDAR layer), always with `estimate: true`:
+replaces the previous one). Each block's plan-view footprint is labelled on the ground layer k=0
+(the layer map/cells uses), always with `estimate: true`:
 
 - a wall taller than it is wide with under 50% of its base resting on something: `at_risk`;
 - a rubble block whose centre is outside its contact patches, or with nothing beneath it: `at_risk`;

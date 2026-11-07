@@ -8,8 +8,8 @@ Before the aftershock, from the scene/loaded block boxes (axis-aligned, no rotat
 After a world/change, the cells of each moved block become collapsed and cells within 0.15 m of
 them at_risk; every other cell keeps its label.
 
-Cells are the plan-view footprint of each block on LAYERS: k=0 (the floor layer the planner routes
-on) and k=1 (the Scout's LiDAR layer, where map/cells lives).
+Cells are the plan-view footprint of each block on the ground layer k=0, the layer map/cells uses
+and the planner routes on.
 """
 
 from perception.grid import cell_of
@@ -18,7 +18,7 @@ TOL = 0.02            # metres: a bottom face this close to a top face rests on 
 SUPPORTED = 0.5       # a wall needs at least this share of its base resting on something
 NEAR = 0.15           # metres around a moved block that become at_risk
 FLOOR = ((-3.0, -3.0), (3.0, 3.0))    # the backup scene's ground plate, top at z = 0
-LAYERS = (0, 1)
+LAYERS = (0,)        # the ground layer, like map/cells
 RANK = {"stable": 0, "at_risk": 1, "collapsed": 2}
 
 
