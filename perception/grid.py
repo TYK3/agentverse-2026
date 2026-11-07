@@ -1,12 +1,14 @@
 """Live occupancy map from the Scout's LiDAR, every 0.05 m cell seen, inferred or unknown (T08).
 
-A cell is `[i, j, k]` = floor(position / 0.05) in the scene frame. Only `seen` cells were measured;
-`inferred` cells are guesses (a wall's hidden interior); a cell not in the map is `unknown`.
+A cell is `[i, j, k]` = floor(position / 0.05) in the scene frame; map/cells sends k = 0 (see GROUND).
+Only `seen` cells were measured; `inferred` cells are guesses (a wall's hidden interior); a cell not in the map is `unknown`.
 """
 
 import math
 
 RES = 0.05
+GROUND = 0            # map/cells reports the LiDAR layer as the ground layer k=0 the planner routes on:
+                      # free at LiDAR height means drivable floor, occupied means blocked (decided with planner)
 MAX_RANGE = 6.0
 FACES = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
 SIDES = FACES[:4]     # in-layer neighbours: the map is one LiDAR layer thick, so up and down are unknown
@@ -114,7 +116,7 @@ class Grid:
         return self._message(t, self.cells)
 
     def _message(self, t, keys):
-        cells = [{"cell": list(c), "state": self.cells[c]["state"], "occupied": self.cells[c]["occupied"]}
+        cells = [{"cell": [c[0], c[1], GROUND], "state": self.cells[c]["state"], "occupied": self.cells[c]["occupied"]}
                  for c in sorted(keys)]
         self.changed = set()
         return {"t": round(t, 2), "res": self.res, "cells": cells}
