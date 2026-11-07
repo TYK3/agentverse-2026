@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 import perception
-from perception.hazards import LAYERS, Hazards, risk
+from perception.hazards import LAYERS, Hazards, risk, risks
 
 
 def box(id, label, pos, size):
@@ -66,11 +66,19 @@ def backup():
     return {"blocks": scene.blocks(m, d)}
 
 
-def test_backup_scene_flags_the_leaning_slab_only(backup):
-    blocks = backup["blocks"]
-    flagged = {b["id"]: risk(b, blocks) for b in blocks if risk(b, blocks)}
-    assert list(flagged) == ["b10"], flagged          # b10 leans at 60 degrees against wall b8
-    assert all(risk(b, blocks) is None for b in blocks if b["label"] == "wall")
+def test_backup_scene_flags_what_the_aftershock_moves(backup):
+    """#51's shake moves exactly b10 (the slab leaning on b8) and b8; the prediction flags the same two."""
+    flagged = risks(backup["blocks"])
+    assert set(flagged) == {"b10", "b8"}, flagged
+    assert flagged["b8"] == "wall b8 carries leaning rubble b10"
+
+
+def test_wall_touching_leaning_rubble_is_at_risk():
+    wall = box("b1", "wall", (0, 0, 0.5), (0.05, 0.5, 0.5))
+    slab = box("b2", "rubble", (-0.3, 0, 0.4), (0.26, 0.2, 0.03))       # nothing beneath, its end on the wall
+    other = box("b3", "wall", (-2, 0, 0.5), (0.05, 0.5, 0.5))
+    flagged = risks([wall, slab, other])
+    assert set(flagged) == {"b1", "b2"}
 
 
 def test_backup_scene_before_and_after(backup):
