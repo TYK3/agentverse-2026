@@ -52,7 +52,31 @@ export interface RouteProposedPayload {
   robot: string;
   cells: [number, number, number][];
   goal?: string;
+  reason?: string;
   model?: string;
+}
+
+export interface RouteVerifiedPayload {
+  id: string;
+  ok: boolean;
+  unstable_cells?: [number, number, number][];
+  detail?: string;
+}
+
+export interface WorldChangePayload {
+  kind: 'aftershock' | 'block_added';
+  t: number;
+  moved_blocks: string[];
+}
+
+interface FadingRoute {
+  group: THREE.Group;
+  materials: THREE.MeshStandardMaterial[];
+  startTime: number;
+  fadeDuration: number; // 1000 ms (1s)
+  totalLifetime: number; // 8000 ms (8s)
+  startOpacity: number;
+  targetOpacity: number; // 0.2
 }
 
 const MAX_CELL_CAPACITY = 120000;
@@ -87,7 +111,14 @@ export class MapViewer {
   private casualtyGroup = new THREE.Group();
   private scoutGroup = new THREE.Group();
   private responderGroup = new THREE.Group();
-  private routesGroup = new THREE.Group();
+  private activeRouteGroup = new THREE.Group();
+  private previousRoutesGroup = new THREE.Group();
+  private unstableCellsGroup = new THREE.Group();
+  private movedBlocksGroup = new THREE.Group();
+
+  // Route animation and fading
+  private fadingRoutes: FadingRoute[] = [];
+  private movedBlockMeshes: THREE.Mesh[] = [];
 
   // Batching & state
   private cellsDirty = false;
@@ -100,6 +131,12 @@ export class MapViewer {
   private currentFps = 60;
   private fpsDisplayElement: HTMLElement | null = null;
   private cellCountElement: HTMLElement | null = null;
+
+  // Banner elements
+  private bannerElement: HTMLElement | null = null;
+  private bannerTextElement: HTMLElement | null = null;
+  private bannerIconElement: HTMLElement | null = null;
+  private bannerTimeoutId: number | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -132,7 +169,10 @@ export class MapViewer {
     this.scene.add(this.casualtyGroup);
     this.scene.add(this.scoutGroup);
     this.scene.add(this.responderGroup);
-    this.scene.add(this.routesGroup);
+    this.scene.add(this.previousRoutesGroup);
+    this.scene.add(this.activeRouteGroup);
+    this.scene.add(this.unstableCellsGroup);
+    this.scene.add(this.movedBlocksGroup);
 
     this.setupResizeObserver();
     this.startLoop();
@@ -291,7 +331,7 @@ export class MapViewer {
     this.responderGroup.position.set(-0.6, -0.8, 0.0);
   }
 
-  private createLabelSprite(text: string, colorHex: string, subtext?: string): THREE.Sprite {
+  public createLabelSprite(text: string, colorHex: string, subtext?: string): THREE.Sprite {
     const canvas = document.createElement('canvas');
     canvas.width = 384;
     canvas.height = 128;
@@ -310,15 +350,15 @@ export class MapViewer {
 
     // Main text
     ctx.fillStyle = colorHex;
-    ctx.font = 'bold 30px Inter, system-ui, sans-serif';
+    ctx.font = 'bold 28px Inter, system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(text, 192, subtext ? 52 : 72);
+    ctx.fillText(text, 192, subtext ? 50 : 70);
 
-    // Optional subtext (e.g. simulated vitals)
+    // Optional subtext
     if (subtext) {
       ctx.fillStyle = '#e2e8f0';
-      ctx.font = '22px Inter, system-ui, sans-serif';
-      ctx.fillText(subtext, 192, 92);
+      ctx.font = '20px Inter, system-ui, sans-serif';
+      ctx.fillText(subtext, 192, 88);
     }
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -350,13 +390,19 @@ export class MapViewer {
         this.hazardsDirty = false;
       }
 
-      // 2. Update camera controls
+      // 2. Animate fading routes (fade to 20% opacity over 1s, keep for 8s)
+      this.updateFadingRoutes(time);
+
+      // 3. Animate flashing moved blocks
+      this.updateMovedBlocksAnimation(time);
+
+      // 4. Update camera controls
       this.controls.update();
 
-      // 3. Render scene
+      // 5. Render scene
       this.renderer.render(this.scene, this.camera);
 
-      // 4. Update FPS counter
+      // 6. Update FPS counter
       this.framesSinceLastUpdate++;
       if (time - this.lastFpsUpdate >= 500) {
         this.currentFps = Math.round((this.framesSinceLastUpdate * 1000) / (time - this.lastFpsUpdate));
@@ -383,6 +429,12 @@ export class MapViewer {
     this.cellCountElement = cellCountEl;
   }
 
+  public setBannerElements(banner: HTMLElement | null, text: HTMLElement | null, icon: HTMLElement | null): void {
+    this.bannerElement = banner;
+    this.bannerTextElement = text;
+    this.bannerIconElement = icon;
+  }
+
   /**
    * Batch updates for the InstancedMeshes. Called strictly once per animation frame.
    */
@@ -396,7 +448,6 @@ export class MapViewer {
     const inferredColorAttr = this.inferredMesh.instanceColor!;
 
     for (const c of this.currentCells) {
-      // Rule: Occupied cells grey, free cells hidden
       if (!c.occupied) continue;
 
       const [i, j, k] = c.cell;
@@ -430,14 +481,12 @@ export class MapViewer {
           seenCount++;
         }
       } else if (c.state === 'inferred') {
-        // Inferred translucent (opacity 0.35)
         if (inferredCount < MAX_CELL_CAPACITY) {
           this.inferredMesh.setMatrixAt(inferredCount, this.dummy.matrix);
           inferredColorAttr.setXYZ(inferredCount, tintColor.r, tintColor.g, tintColor.b);
           inferredCount++;
         }
       } else if (c.state === 'unknown') {
-        // Unknown: very faint wireframe or hidden
         if (unknownCount < MAX_CELL_CAPACITY) {
           this.unknownMesh.setMatrixAt(unknownCount, this.dummy.matrix);
           unknownCount++;
@@ -484,7 +533,6 @@ export class MapViewer {
   public updateCasualties(casualties: CasualtyRecord[]): void {
     if (!Array.isArray(casualties)) return;
 
-    // Clear existing casualty meshes
     while (this.casualtyGroup.children.length > 0) {
       const obj = this.casualtyGroup.children[0];
       this.casualtyGroup.remove(obj);
@@ -504,12 +552,10 @@ export class MapViewer {
       this.casualtiesMap.set(cas.id, cas);
       const [x, y, z] = cas.pos;
 
-      // Casualty sphere marker
       const sphere = new THREE.Mesh(sphereGeom, sphereMat);
       sphere.position.set(x, y, z + 0.12);
       this.casualtyGroup.add(sphere);
 
-      // Pulse beacon ring around casualty
       const ringGeom = new THREE.RingGeometry(0.15, 0.22, 32);
       const ringMat = new THREE.MeshBasicMaterial({
         color: 0xf472b6,
@@ -521,7 +567,6 @@ export class MapViewer {
       ring.position.set(x, y, z + 0.02);
       this.casualtyGroup.add(ring);
 
-      // Label: c1 (0.82, estimate); vitals text with (simulated)
       const confText = typeof cas.confidence === 'number' ? cas.confidence.toFixed(2) : '0.80';
       const title = `${cas.id} (${confText}, estimate)`;
       const vitalsText = cas.vitals?.breathing_rate
@@ -545,7 +590,6 @@ export class MapViewer {
 
   public updateResponderAction(payload: ResponderActionPayload): void {
     if (!payload) return;
-    // If action refers to a route, move responder to destination or along route
     if (payload.route && this.routesMap.has(payload.route)) {
       const route = this.routesMap.get(payload.route)!;
       if (route.cells && route.cells.length > 0) {
@@ -556,34 +600,333 @@ export class MapViewer {
     }
   }
 
+  // --- Task T19: Route Drawing, Visible Re-Plan and Fading ---
+
+  /**
+   * Draws route/proposed cells as a TubeGeometry in solid blue.
+   * When a new route/proposed arrives, fades the old line to 20% opacity over 1s
+   * and keeps it for 8s labelled "previous route".
+   */
   public updateRouteProposed(route: RouteProposedPayload): void {
-    if (!route?.cells) return;
+    if (!route || !Array.isArray(route.cells) || route.cells.length === 0) return;
     this.routesMap.set(route.id, route);
 
-    // Draw route line in routesGroup
-    const points: THREE.Vector3[] = [];
+    const now = performance.now();
     const res = this.cellResolution;
-    for (const [ci, cj, ck] of route.cells) {
-      points.push(new THREE.Vector3((ci + 0.5) * res, (cj + 0.5) * res, (ck + 0.5) * res + 0.03));
+
+    // 1. If an active route already exists, move it to fadingRoutes
+    if (this.activeRouteGroup.children.length > 0) {
+      const oldGroup = new THREE.Group();
+      while (this.activeRouteGroup.children.length > 0) {
+        const child = this.activeRouteGroup.children[0];
+        this.activeRouteGroup.remove(child);
+        oldGroup.add(child);
+      }
+
+      const oldMaterials: THREE.MeshStandardMaterial[] = [];
+      let midpoint = new THREE.Vector3(0, 0, 0);
+      let pointCount = 0;
+
+      oldGroup.traverse(obj => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+          obj.material = obj.material.clone();
+          obj.material.transparent = true;
+          obj.material.opacity = 1.0;
+          obj.material.color.setHex(0x60a5fa); // Faded blue tint
+          oldMaterials.push(obj.material);
+        }
+      });
+
+      // Find midpoint of old route for "previous route" label
+      const oldRoute = Array.from(this.routesMap.values())[this.routesMap.size - 2];
+      if (oldRoute?.cells && oldRoute.cells.length > 0) {
+        const midCell = oldRoute.cells[Math.floor(oldRoute.cells.length / 2)];
+        midpoint.set((midCell[0] + 0.5) * res, (midCell[1] + 0.5) * res, (midCell[2] + 0.5) * res + 0.18);
+        pointCount = 1;
+      }
+
+      if (pointCount > 0) {
+        const prevLabel = this.createLabelSprite('previous route', '#94a3b8');
+        prevLabel.scale.set(0.5, 0.16, 1);
+        prevLabel.position.copy(midpoint);
+        oldGroup.add(prevLabel);
+      }
+
+      this.previousRoutesGroup.add(oldGroup);
+      this.fadingRoutes.push({
+        group: oldGroup,
+        materials: oldMaterials,
+        startTime: now,
+        fadeDuration: 1000, // 1 s to fade to 20%
+        totalLifetime: 8000, // Keep for 8 s
+        startOpacity: 1.0,
+        targetOpacity: 0.2 // 20% opacity
+      });
     }
 
-    const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 3 });
-    const line = new THREE.Line(lineGeom, lineMat);
-    this.routesGroup.clear();
-    this.routesGroup.add(line);
+    // 2. Build new route TubeGeometry in solid blue
+    const points: THREE.Vector3[] = [];
+    for (const [ci, cj, ck] of route.cells) {
+      points.push(new THREE.Vector3(
+        (ci + 0.5) * res,
+        (cj + 0.5) * res,
+        (ck + 0.5) * res + 0.038
+      ));
+    }
+
+    if (points.length >= 2) {
+      const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+      const tubeGeom = new THREE.TubeGeometry(curve, Math.max(points.length * 8, 24), 0.035, 10, false);
+      const tubeMat = new THREE.MeshStandardMaterial({
+        color: 0x2563eb, // Solid blue
+        emissive: 0x1d4ed8,
+        emissiveIntensity: 0.65,
+        roughness: 0.2,
+        metalness: 0.1
+      });
+      const tube = new THREE.Mesh(tubeGeom, tubeMat);
+      this.activeRouteGroup.add(tube);
+
+      // Start & destination waypoint markers
+      const startMarkerGeom = new THREE.SphereGeometry(0.06, 16, 16);
+      const startMarkerMat = new THREE.MeshStandardMaterial({ color: 0x10b981, emissive: 0x059669 });
+      const startMarker = new THREE.Mesh(startMarkerGeom, startMarkerMat);
+      startMarker.position.copy(points[0]);
+      this.activeRouteGroup.add(startMarker);
+
+      const destMarkerGeom = new THREE.SphereGeometry(0.07, 16, 16);
+      const destMarkerMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7 });
+      const destMarker = new THREE.Mesh(destMarkerGeom, destMarkerMat);
+      destMarker.position.copy(points[points.length - 1]);
+      this.activeRouteGroup.add(destMarker);
+    } else if (points.length === 1) {
+      const dotGeom = new THREE.SphereGeometry(0.06, 16, 16);
+      const dotMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, emissive: 0x1d4ed8 });
+      const dot = new THREE.Mesh(dotGeom, dotMat);
+      dot.position.copy(points[0]);
+      this.activeRouteGroup.add(dot);
+    }
+
+    // 3. Update Banner with route reason if world-change was active
+    const reasonText = route.reason || route.goal || 'Re-planned path to target';
+    this.showReplanReasonBanner(route.id, reasonText);
+  }
+
+  /**
+   * On world/change:
+   * Show banner "Aftershock detected: b7 moved. Re-scanning" and flash moved blocks red.
+   */
+  public onWorldChange(payload: WorldChangePayload): void {
+    if (!payload) return;
+    const moved = Array.isArray(payload.moved_blocks) && payload.moved_blocks.length > 0
+      ? payload.moved_blocks.join(', ')
+      : 'b7';
+
+    // 1. Show Aftershock Banner
+    this.showAftershockBanner(`Aftershock detected: ${moved} moved. Re-scanning`);
+
+    // 2. Flash the moved blocks red in 3D
+    this.flashMovedBlocksRed(payload.moved_blocks || ['b7']);
+  }
+
+  /**
+   * route/verified ok:false draws the unstable cells in red with the detail.
+   */
+  public onRouteVerified(payload: RouteVerifiedPayload): void {
+    if (!payload) return;
+    this.unstableCellsGroup.clear();
+
+    if (!payload.ok) {
+      const res = this.cellResolution;
+      const unstableCells = payload.unstable_cells || [];
+      const detailText = payload.detail || 'Physics check failed';
+
+      const boxGeom = new THREE.BoxGeometry(res * 1.15, res * 1.15, res * 1.15);
+      const boxMat = new THREE.MeshStandardMaterial({
+        color: 0xef4444,
+        emissive: 0xdc2626,
+        emissiveIntensity: 0.85,
+        transparent: true,
+        opacity: 0.9
+      });
+
+      for (const [ci, cj, ck] of unstableCells) {
+        const x = (ci + 0.5) * res;
+        const y = (cj + 0.5) * res;
+        const z = (ck + 0.5) * res;
+
+        const cellMesh = new THREE.Mesh(boxGeom, boxMat);
+        cellMesh.position.set(x, y, z);
+        this.unstableCellsGroup.add(cellMesh);
+
+        // Warning label above unstable cell
+        const warningSprite = this.createLabelSprite(`Unstable (${detailText})`, '#ef4444');
+        warningSprite.position.set(x, y, z + 0.28);
+        this.unstableCellsGroup.add(warningSprite);
+      }
+    }
+  }
+
+  private showAftershockBanner(text: string): void {
+    if (this.bannerTimeoutId !== null) {
+      window.clearTimeout(this.bannerTimeoutId);
+      this.bannerTimeoutId = null;
+    }
+
+    if (this.bannerElement && this.bannerTextElement && this.bannerIconElement) {
+      this.bannerElement.className = 'world-change-banner aftershock-banner visible';
+      this.bannerIconElement.textContent = '⚠️';
+      this.bannerTextElement.textContent = text;
+    }
+  }
+
+  private showReplanReasonBanner(routeId: string, reason: string): void {
+    if (this.bannerElement && this.bannerTextElement && this.bannerIconElement) {
+      this.bannerElement.className = 'world-change-banner replan-banner visible';
+      this.bannerIconElement.textContent = '🔄';
+      this.bannerTextElement.textContent = `Re-plan (${routeId}): ${reason}`;
+
+      // Automatically hide banner after 8 seconds
+      this.bannerTimeoutId = window.setTimeout(() => {
+        this.hideBanner();
+      }, 8000);
+    }
+  }
+
+  public hideBanner(): void {
+    if (this.bannerElement) {
+      this.bannerElement.className = 'world-change-banner hidden';
+    }
+  }
+
+  private flashMovedBlocksRed(blockIds: string[]): void {
+    this.movedBlocksGroup.clear();
+    this.movedBlockMeshes = [];
+
+    // Map block names to backup scene coordinates
+    const blockPositions: Record<string, { pos: [number, number, number]; size: [number, number, number] }> = {
+      b7: { pos: [0, 0.97, 0.25], size: [0.08, 0.48, 0.4] },
+      b8: { pos: [1.25, -0.32, 0.25], size: [0.08, 0.62, 0.4] },
+      b10: { pos: [0.97, -0.5, 0.18], size: [0.38, 0.22, 0.08] },
+      b11: { pos: [1.25, 0.45, 0.08], size: [0.12, 0.16, 0.1] }
+    };
+
+    for (const id of blockIds) {
+      const def = blockPositions[id] || { pos: [0, 1.0, 0.2], size: [0.2, 0.4, 0.3] };
+      const geom = new THREE.BoxGeometry(def.size[0], def.size[1], def.size[2]);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0xef4444,
+        emissive: 0xdc2626,
+        emissiveIntensity: 0.9,
+        transparent: true,
+        opacity: 0.85
+      });
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.position.set(def.pos[0], def.pos[1], def.pos[2]);
+      this.movedBlocksGroup.add(mesh);
+      this.movedBlockMeshes.push(mesh);
+
+      const label = this.createLabelSprite(`Moved block: ${id}`, '#ef4444');
+      label.position.set(def.pos[0], def.pos[1], def.pos[2] + def.size[2] / 2 + 0.16);
+      this.movedBlocksGroup.add(label);
+    }
+  }
+
+  private updateFadingRoutes(now: number): void {
+    for (let i = this.fadingRoutes.length - 1; i >= 0; i--) {
+      const item = this.fadingRoutes[i];
+      const elapsed = now - item.startTime;
+
+      if (elapsed < item.fadeDuration) {
+        // Linear fade from startOpacity (1.0) to targetOpacity (0.2) over 1s
+        const t = elapsed / item.fadeDuration;
+        const opacity = item.startOpacity - (item.startOpacity - item.targetOpacity) * t;
+        for (const mat of item.materials) {
+          mat.opacity = opacity;
+        }
+      } else if (elapsed < item.totalLifetime) {
+        // Maintain at 20% opacity for up to 8s
+        for (const mat of item.materials) {
+          mat.opacity = item.targetOpacity;
+        }
+      } else {
+        // Remove after 8s
+        this.previousRoutesGroup.remove(item.group);
+        item.group.traverse(obj => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+            else obj.material.dispose();
+          }
+        });
+        this.fadingRoutes.splice(i, 1);
+      }
+    }
+  }
+
+  private updateMovedBlocksAnimation(time: number): void {
+    if (this.movedBlockMeshes.length === 0) return;
+    const pulse = 0.5 + 0.5 * Math.sin(time * 0.008);
+    for (const mesh of this.movedBlockMeshes) {
+      if (mesh.material instanceof THREE.MeshStandardMaterial) {
+        mesh.material.emissiveIntensity = 0.4 + 0.6 * pulse;
+      }
+    }
+  }
+
+  /**
+   * Helper to simulate aftershock and visible re-plan on demand
+   */
+  public simulateAftershockAndReplan(): void {
+    const res = this.cellResolution;
+
+    // 1. Fire aftershock
+    this.onWorldChange({
+      kind: 'aftershock',
+      t: performance.now() / 1000,
+      moved_blocks: ['b7']
+    });
+
+    // 2. Mark route verification failure for old route
+    this.onRouteVerified({
+      id: 'r3',
+      ok: false,
+      unstable_cells: [[Math.round(0 / res), Math.round(1.0 / res), 0]],
+      detail: 'block b7 falls across doorway'
+    });
+
+    // 3. Propose new route after 1.5 seconds avoiding b7
+    window.setTimeout(() => {
+      this.updateRouteProposed({
+        id: 'r4',
+        robot: 'responder',
+        cells: [
+          [Math.round(-0.8 / res), Math.round(-1.2 / res), 0],
+          [Math.round(-0.65 / res), Math.round(-0.85 / res), 0],
+          [Math.round(-0.2 / res), Math.round(-0.4 / res), 0],
+          [Math.round(0.4 / res), Math.round(-0.2 / res), 0],
+          [Math.round(1.0 / res), Math.round(0.1 / res), 0],
+          [Math.round(1.95 / res), Math.round(0.98 / res), 0]
+        ],
+        goal: 'deliver water to c1',
+        reason: 'avoiding collapsed block b7 toward casualty c1',
+        model: 'local-astar'
+      });
+
+      // Move Responder to route
+      this.responderGroup.position.set(-0.2, -0.4, 0);
+    }, 1500);
   }
 
   /**
    * Populates the map with the standard AFTERSHOCK collapsed building backup scene
    * (walls b1-b9, doorway, leaning slab b10 at risk, rubble b11-b15).
-   * Ensures ?fake=1 immediately displays a coloured map with casualty and hazards.
+   * Ensures ?fake=1 immediately displays a coloured map with casualty, hazards and route.
    */
   public loadBackupSceneDemo(): void {
     const res = DEFAULT_RES;
     const cells: GridCell[] = [];
 
-    // Helper to generate a solid wall block of cells
     const addBox = (minX: number, maxX: number, minY: number, maxY: number, minZ: number, maxZ: number, state: 'seen' | 'inferred' = 'seen') => {
       const i0 = Math.round(minX / res);
       const i1 = Math.round(maxX / res);
@@ -605,36 +948,29 @@ export class MapViewer {
       }
     };
 
-    // Perimeter walls (b1 north, b2 west, b3/b4 south breach, b5 north)
-    addBox(-1.5, 2.5, 1.45, 1.55, 0, 0.4); // North wall b1/b5
-    addBox(-1.55, -1.45, -1.0, 1.5, 0, 0.4); // West wall b2
-    addBox(-1.45, -1.0, -1.05, -0.95, 0, 0.4); // South wall west of breach b3
-    addBox(-0.4, 2.45, -1.05, -0.95, 0, 0.4); // South wall east of breach b4 (breach is -1.0 to -0.4)
-    addBox(2.45, 2.55, -1.0, 1.5, 0, 0.4); // East wall
+    // Perimeter walls
+    addBox(-1.5, 2.5, 1.45, 1.55, 0, 0.4);
+    addBox(-1.55, -1.45, -1.0, 1.5, 0, 0.4);
+    addBox(-1.45, -1.0, -1.05, -0.95, 0, 0.4);
+    addBox(-0.4, 2.45, -1.05, -0.95, 0, 0.4);
+    addBox(2.45, 2.55, -1.0, 1.5, 0, 0.4);
 
-    // Interior dividing wall 1 (between room 1 and 2, door y: 0.0 to 0.5)
-    addBox(-0.05, 0.05, -0.95, 0.0, 0, 0.4); // b6 wall south of doorway
+    // Interior dividing wall 1 (door y: 0.0 to 0.5)
+    addBox(-0.05, 0.05, -0.95, 0.0, 0, 0.4);
     addBox(-0.05, 0.05, 0.5, 1.45, 0, 0.4); // b7 wall north of doorway
 
-    // Interior dividing wall 2 (between room 2 and 3, gap y: 0.3 to 0.9)
-    addBox(1.2, 1.3, -0.95, 0.3, 0, 0.4); // b8 wall
-    addBox(1.2, 1.3, 0.9, 1.45, 0, 0.4); // b9 wall
+    // Interior dividing wall 2
+    addBox(1.2, 1.3, -0.95, 0.3, 0, 0.4);
+    addBox(1.2, 1.3, 0.9, 1.45, 0, 0.4);
 
-    // Rubble & leaning slab b10 (at risk) in room 2 (x: 0.8 to 1.2, y: -0.6 to -0.4)
-    addBox(0.8, 1.15, -0.6, -0.4, 0, 0.25, 'seen'); // b10 slab (at risk)
-
-    // Rubble in breach room 1 (b12, b13)
+    // Rubble & leaning slab b10 (at risk)
+    addBox(0.8, 1.15, -0.6, -0.4, 0, 0.25, 'seen');
     addBox(-0.8, -0.6, -0.7, -0.5, 0, 0.15, 'seen');
-
-    // Rubble in doorway room 2/3 (b11)
     addBox(1.15, 1.35, 0.4, 0.55, 0, 0.1, 'inferred');
-
-    // Fallen section in room 3 (b14)
     addBox(1.6, 2.2, -0.5, -0.3, 0, 0.08, 'inferred');
 
     this.updateCells({ t: 0, res, cells });
 
-    // Mark hazards
     const hazards: HazardRecord[] = [];
     const b10_i0 = Math.round(0.8 / res);
     const b10_i1 = Math.round(1.15 / res);
@@ -642,32 +978,18 @@ export class MapViewer {
     const b10_j1 = Math.round(-0.4 / res);
     for (let i = b10_i0; i <= b10_i1; i++) {
       for (let j = b10_j0; j <= b10_j1; j++) {
-        hazards.push({
-          cell: [i, j, 0],
-          status: 'at_risk',
-          why: 'unsupported leaning slab b10',
-          estimate: true
-        });
-        hazards.push({
-          cell: [i, j, 1],
-          status: 'at_risk',
-          why: 'unsupported leaning slab b10',
-          estimate: true
-        });
+        hazards.push({ cell: [i, j, 0], status: 'at_risk', why: 'unsupported leaning slab b10', estimate: true });
+        hazards.push({ cell: [i, j, 1], status: 'at_risk', why: 'unsupported leaning slab b10', estimate: true });
       }
     }
-
-    // Add a collapsed rubble hazard in breach
     hazards.push({
       cell: [Math.round(-0.7 / res), Math.round(-0.6 / res), 0],
       status: 'collapsed',
       why: 'breach collapse pile b12',
       estimate: true
     });
-
     this.updateHazards(hazards);
 
-    // Add casualty c1 in room 3
     this.updateCasualties([
       {
         id: 'c1',
@@ -678,39 +1000,33 @@ export class MapViewer {
       }
     ]);
 
-    // Position scout at south breach entry
     this.updateScoutPose({
       t: 0,
       pose: { pos: [-0.65, -0.85, 0.0], yaw: Math.PI / 4 }
     });
 
-    // Position responder outside
     this.responderGroup.position.set(-0.8, -1.2, 0);
 
-    // Initial proposed route from scout to room 2
+    // Initial proposed route r3 in solid blue
     this.updateRouteProposed({
-      id: 'r1',
+      id: 'r3',
       robot: 'responder',
       cells: [
         [Math.round(-0.8 / res), Math.round(-1.2 / res), 0],
         [Math.round(-0.65 / res), Math.round(-0.85 / res), 0],
-        [Math.round(-0.3 / res), Math.round(-0.4 / res), 0],
-        [Math.round(0.4 / res), Math.round(0.2 / res), 0]
+        [Math.round(-0.05 / res), Math.round(0.25 / res), 0],
+        [Math.round(0.0 / res), Math.round(0.8 / res), 0]
       ],
-      goal: 'explore room 2'
+      goal: 'deliver water to c1',
+      model: 'local-astar'
     });
   }
 
-  /**
-   * Benchmark mode: Generates 100,000 cells to verify 30+ FPS rendering performance.
-   */
   public generate100kBenchmark(): void {
     const res = DEFAULT_RES;
     const cells: GridCell[] = [];
     const hazards: HazardRecord[] = [];
 
-    // 100 x 100 grid with 10 vertical layers or structured clusters
-    // 100 * 100 * 10 = 100,000 cells exactly
     const sizeX = 100;
     const sizeY = 100;
     const layers = 10;
@@ -728,7 +1044,6 @@ export class MapViewer {
       }
     }
 
-    // Add hazard tags to some cells
     for (let i = -10; i < 10; i++) {
       for (let j = -10; j < 10; j++) {
         hazards.push({
@@ -743,7 +1058,6 @@ export class MapViewer {
     this.updateHazards(hazards);
     this.updateCells({ t: performance.now(), res, cells });
 
-    // Focus camera out to frame 100k cells
     this.camera.position.set(6, -8, 8);
     this.controls.target.set(0, 0, 0.5);
     this.controls.update();
@@ -752,6 +1066,9 @@ export class MapViewer {
   public destroy(): void {
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
+    }
+    if (this.bannerTimeoutId !== null) {
+      window.clearTimeout(this.bannerTimeoutId);
     }
     this.controls.dispose();
     this.renderer.dispose();
