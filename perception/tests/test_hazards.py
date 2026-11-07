@@ -119,3 +119,12 @@ def test_start_publishes_hazards_on_scene_and_change():
     before, after = asyncio.run(run())
     assert {m["status"] for m in before} == {"stable"}
     assert "collapsed" in {m["status"] for m in after}
+
+
+def test_block_added_with_pos_is_marked():
+    h = Hazards()
+    h.on_scene({"blocks": [box("b1", "wall", (2, 2, 0.5), (0.05, 0.5, 0.5))]})
+    h.on_change({"kind": "block_added", "t": 2.0, "moved_blocks": ["x1"], "pos": [0.0, 0.0, 0.08]})
+    assert h.status((0, 0)) == "collapsed" and h.status((4, 0)) == "at_risk" and h.status((6, 0)) == "stable"
+    h.on_change({"kind": "block_added", "t": 3.0, "moved_blocks": ["x2"]})          # no pos: nothing to place
+    assert {s for s, _ in h.labels.values()} == {"stable", "at_risk", "collapsed"}

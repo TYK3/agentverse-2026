@@ -13,6 +13,7 @@ Cells are the plan-view footprint of each block on the ground layer k=0, the lay
 and the planner routes on.
 """
 
+from perception.explore import NEW_BLOCK
 from perception.grid import cell_of
 
 TOL = 0.02            # metres: a bottom face this close to a top face rests on it
@@ -152,13 +153,18 @@ class Hazards:
     def on_change(self, data):
         """Moved blocks' cells become collapsed and their 0.15 m surroundings at_risk; return map/hazards."""
         by_id = {b["id"]: b for b in self.blocks}
+        for name in data.get("moved_blocks", []):
+            if name not in by_id and data.get("pos"):      # block_added: a block scene/loaded never listed
+                by_id[name] = {"id": name, "label": "rubble", "pos": list(data["pos"]), "size": list(NEW_BLOCK)}
+                self.blocks.append(by_id[name])
         moved = [by_id[b] for b in data.get("moved_blocks", []) if b in by_id]
+        event = "was dropped here" if data.get("kind") == "block_added" else f"moved in the {data.get('kind', 'change')}"
         for b in moved:
             for ij in _cells(_rect(b, NEAR)):
-                self._mark(ij, "at_risk", f"next to {b['id']}, which moved in the {data.get('kind', 'change')}")
+                self._mark(ij, "at_risk", f"next to {b['id']}, which {event.replace(' here', '')}")
         for b in moved:
             for ij in _cells(_rect(b)):
-                self.labels[ij] = ("collapsed", f"{b.get('label', 'block')} {b['id']} moved in the {data.get('kind', 'change')}")
+                self.labels[ij] = ("collapsed", f"{b.get('label', 'block')} {b['id']} {event}")
         return self.message()
 
     def message(self):
