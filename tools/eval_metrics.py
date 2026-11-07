@@ -51,7 +51,12 @@ def measure(trace):
             positions_at_t.add(position)
             if position in collapsed:
                 unsafe.add(position)
-            if position == tuple(trace["goal"]) and arrival is None:
+            if "casualty_pos" in trace:
+                reached = ("pos" in event and math.dist(event["pos"][:2], trace["casualty_pos"][:2])
+                           <= trace["reach_distance_m"])
+            else:
+                reached = position == tuple(trace["goal"])
+            if reached and arrival is None:
                 arrival = t
         elif kind == "collapsed":
             newly = {tuple(c) for c in event["cells"]}

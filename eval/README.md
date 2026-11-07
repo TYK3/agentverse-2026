@@ -1,13 +1,26 @@
 # Paired baseline harness (T24)
 
 ```sh
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt -r coord/requirements.txt
 python tools/eval.py --runs 30
 ```
 
-The default consumes `tools.run_scenario:eval_trial`, a real T23 trial driver.
-Until that measured-trajectory API is available, it fails before reporting any
-performance numbers. A driver is `async def eval_trial(*, seed, planner)` where
+The default uses `tools.eval_sim:run_trial`, a separate measured driver built with
+the production sim, perception, planner and Responder classes. It requires the
+T05/T06/T09/T10/T11/T13 lane modules; missing capabilities fail without substituting
+fakes. Cloud vision/review are disabled and the test operator is explicit. Each
+trial has a 120 s simulation limit; its aftershock starts at 25 s independently
+of planner choices. It samples the real Responder pose and marks block AABB cells
+collapsed when physical displacement after the shake exceeds T05's threshold.
+Both initial and current footprints are conservatively included. The temporary
+scene varies rubble b11-b15 by +/-4 cm and casualty position within room 3.
+The seeded casualty is the benchmark's operator-specified destination. Autonomous
+exploration runs until a casualty is detected and a seen-free approach cell exists.
+Arrival is measured from Responder pose within T06's 0.45 m reach of the casualty;
+it does not require entering the person's occupied map cell. Mission commands are
+not treated as proof of arrival, and all rules/gates keep their production thresholds.
+
+Other drivers use `async def run_trial(*, seed, planner)` where
 planner is `naive` or `aftershock`. Return this trace:
 
 ```json
@@ -45,6 +58,9 @@ Outputs: `results.csv`, `safe_success.png`, `summary.json`, `summary.md`, and ra
 `traces/<seed>_<planner>.json`. Incomplete coverage and stand-ins are explicit in
 the CSV, summary and chart. A full run is capped below 15 minutes; each trial has
 a timeout. Exceptions stop with a nonzero code and retain completed CSV pairs.
+Independent MuJoCo workers (up to 12 CPUs by default, `--workers N` to change)
+keep the batch bounded without sharing a mutable world. The default overall budget
+is 880 seconds; timed-out/unavailable trials do not become success-rate observations.
 
 To exercise the harness before the real runner is available:
 

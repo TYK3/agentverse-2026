@@ -1,6 +1,6 @@
 """Paired seeded baseline evaluation: python tools/eval.py --runs 30.
 
-The T23 trial driver returns observed traces, not a guessed interpretation of
+The trial driver returns observed traces, not a guessed interpretation of
 responder/action commands. A missing driver fails before writing headline numbers.
 """
 
@@ -10,7 +10,9 @@ import csv
 import importlib
 import inspect
 import json
+import os
 import pathlib
+import subprocess
 import sys
 import time
 
@@ -138,16 +140,88 @@ async def evaluate(args, driver):
     return 0 if summary["all_trials_completed"] else 1
 
 
+async def evaluate_parallel(args):
+    """Bounded independent processes; never share a mutable MuJoCo world."""
+    started = time.monotonic()
+    traces = pathlib.Path(args.output) / "traces"
+    traces.mkdir(parents=True, exist_ok=True)
+    jobs = [(seed, planner) for seed in range(args.runs) for planner in PLANNERS]
+    running, measured = {}, {}
+    try:
+        while jobs or running:
+            if time.monotonic() - started > args.max_seconds:
+                raise TimeoutError("evaluation exceeded its overall wall-time budget")
+            while jobs and len(running) < args.workers:
+                seed, planner = jobs.pop(0)
+                path = traces / f"{seed}_{planner}.json"
+                command = [sys.executable, str(pathlib.Path(__file__).resolve()),
+                           "--driver", args.driver, "--trial-seed", str(seed),
+                           "--trial-planner", planner, "--trace-output", str(path.resolve()),
+                           "--trial-timeout", str(args.trial_timeout)]
+                log_path = path.with_suffix(".log")
+                environment = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1",
+                                   MKL_NUM_THREADS="1", NUMEXPR_NUM_THREADS="1")
+                with log_path.open("wb") as log_stream:
+                    process = await asyncio.to_thread(subprocess.Popen, command,
+                        stdout=log_stream, stderr=subprocess.STDOUT, env=environment)
+                running[process] = (time.monotonic(), seed, planner, path, log_path)
+            for process, (began, seed, planner, path, log_path) in tuple(running.items()):
+                if time.monotonic() - began > args.trial_timeout + 5:
+                    raise TimeoutError(f"seed={seed} planner={planner}: worker exceeded its wall-time budget")
+                if process.poll() is None:
+                    continue
+                del running[process]
+                if process.returncode:
+                    detail = log_path.read_text(errors="replace")
+                    raise ValueError(f"seed={seed} planner={planner}: {detail[-2000:]}")
+                trace = json.loads(path.read_text(encoding="utf-8"))
+                if trace["seed"] != seed or trace["planner"] != planner:
+                    raise ValueError("worker returned wrong seed/planner")
+                row = measure(trace)
+                measured[(seed, planner)] = row
+                print(f"seed={seed:02} planner={planner:10} completed={row.completed} "
+                      f"safe_success={row.safe_success} unsafe={row.unsafe_cells_entered}", flush=True)
+                other = "naive" if planner == "aftershock" else "aftershock"
+                paired = measured.get((seed, other))
+                if paired and (not row.scenario_sha256 or row.scenario_sha256 != paired.scenario_sha256):
+                    raise ValueError(f"seed {seed}: planners did not receive the same scenario")
+                rows = [measured[(s, p)] for s in range(args.runs) for p in PLANNERS
+                        if (s, p) in measured]
+                with (pathlib.Path(args.output) / "results.csv").open("w", newline="", encoding="utf-8") as stream:
+                    writer = csv.DictWriter(stream, fieldnames=list(Metrics.__dataclass_fields__))
+                    writer.writeheader()
+                    writer.writerows(item.row() for item in rows)
+            await asyncio.sleep(0.1)
+        summary = save_artifacts(rows, args.output, time.monotonic() - started)
+        return 0 if summary["all_trials_completed"] else 1
+    finally:
+        # Only processes started by this evaluator are stopped; queued trials never run after failure.
+        for process in running:
+            if process.poll() is None:
+                if os.name == "nt":
+                    await asyncio.to_thread(subprocess.run,
+                        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                else:
+                    process.kill()
+        for process in running:
+            await asyncio.to_thread(process.wait)
+
+
 def parse(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", type=int, default=30)
     parser.add_argument("--output", type=pathlib.Path, default=ROOT / "eval")
-    parser.add_argument("--driver", default="tools.run_scenario:eval_trial",
+    parser.add_argument("--driver", default="tools.eval_sim:run_trial",
                         help="async measured trial driver, module:function")
-    parser.add_argument("--trial-timeout", type=float, default=14)
-    parser.add_argument("--max-seconds", type=float, default=895)
+    parser.add_argument("--trial-timeout", type=float, default=240)
+    parser.add_argument("--max-seconds", type=float, default=880)
+    parser.add_argument("--workers", type=int, default=min(12, os.cpu_count() or 1))
+    parser.add_argument("--trial-seed", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--trial-planner", choices=PLANNERS, help=argparse.SUPPRESS)
+    parser.add_argument("--trace-output", type=pathlib.Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if args.runs < 1 or args.trial_timeout <= 0 or not 0 < args.max_seconds < 900:
+    if args.runs < 1 or args.workers < 1 or args.trial_timeout <= 0 or not 0 < args.max_seconds < 900:
         parser.error("runs and timeouts must be positive; max-seconds must be less than 900")
     return args
 
@@ -156,9 +230,16 @@ def main(argv=None):
     args = parse(argv)
     try:
         driver = load_driver(args.driver)
+        if args.trial_seed is not None:
+            trace = asyncio.run(asyncio.wait_for(driver(seed=args.trial_seed, planner=args.trial_planner),
+                                                timeout=args.trial_timeout))
+            args.trace_output.write_text(json.dumps(trace, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+            return 0
+        if args.workers > 1:
+            return asyncio.run(evaluate_parallel(args))
         return asyncio.run(evaluate(args, driver))
     except (ImportError, AttributeError, ValueError, TimeoutError) as exc:
-        print(f"Evaluation did not complete: {exc}", file=sys.stderr)
+        print(f"Evaluation did not complete: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 
 

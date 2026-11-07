@@ -40,6 +40,15 @@ def test_arrival_requires_observed_goal_position():
     assert result.safe_success is False
 
 
+def test_real_trial_arrival_uses_observed_supply_reach():
+    data = trace([{"t": 0, "kind": "position", "cell": [0, 0, 0], "pos": [0, 0, 0]},
+                  {"t": 2, "kind": "position", "cell": [1, 0, 0], "pos": [1.65, 0, 0]}])
+    data.update(casualty_pos=[2, 0, 0], reach_distance_m=0.45)
+    result = measure(data)
+    assert result.safe_success is True
+    assert result.time_to_casualty_s == 2
+
+
 def test_duplicate_routes_and_answers_do_not_inflate_counts():
     events = [pos(0, 0)] + [
         {"t": 1, "kind": "route", "id": rid} for rid in ["r1", "r1", "r2"]
