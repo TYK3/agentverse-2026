@@ -149,7 +149,10 @@ class GateAnswer(Message):
 class ResponderAction(Message):
     action: Literal["move", "place_supply", "grip", "release"]
     route: Text
-    item: Literal["water", "first_aid_kit", "radio"]
+    item: Literal["water", "first_aid_kit", "radio", "bandage", "splint", "thermal_blanket"]
+    # Y2: a block id (e.g. "b11" to clear, or a found board used as a splint). When set, grip/release
+    # act on that block and item names what it is used for; when absent, they act on the kit item.
+    block: Text | None = None
 
 
 class OperatorCommand(Message):
