@@ -54,6 +54,7 @@ class SensorsScout(Message):
     lidar: list[Nonnegative]
     camera: str | CameraFrame | None = None
     motion: ScoutMotion | None = None
+    points: Annotated[list[Vec3], Field(max_length=2048)] | None = None  # depth camera, scene frame (Z1/Y9)
     thermal: list[list[Probability]]
     acoustic: Acoustic
 
