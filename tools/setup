@@ -57,7 +57,13 @@ if [ "$problems" -gt 0 ]; then
 fi
 
 if [ "${1:-}" = "--post" ]; then
-  if bash tools/board post "[$me's setup] joined the board" >/dev/null; then
+  # With a saved agent name the board adds the right [<person>'s <agent>] prefix itself.
+  agent_name="$(bash tools/board agent 2>/dev/null)"
+  case "$agent_name" in
+    "("*|"") hello="[$me's setup] joined the board" ;;
+    *)       hello="joined the board" ;;
+  esac
+  if bash tools/board post "$hello" >/dev/null; then
     good "posted a hello on the board"
   else
     fix "could not post (are you allowed to comment on this repo?)"
