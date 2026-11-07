@@ -13,3 +13,6 @@ __pycache__/
 runs/
 # Gemini answers cached by coord/gem.py (replay mode)
 .gem_cache/
+# T24 raw trajectories; aggregate CSV/chart/summary are reviewable artifacts.
+eval/traces/
+eval/stand-in/traces/
