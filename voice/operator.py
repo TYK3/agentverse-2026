@@ -145,13 +145,16 @@ async def turn(session, ptt, queue, types):
     return reply, heard.strip()
 
 
-async def live(bus, loop, queue, stream):
-    from google import genai
+def gem_client(gem):
+    """The google-genai client from coord/gem.py, so the key and .env stay behind the one door (POLICY #8)."""
+    return gem.client() if hasattr(gem, "client") else gem._c()
+
+
+async def live(bus, loop, queue, stream, gem):
+    # config types only; the client comes from coord/gem.py
     from google.genai import types
 
-    gem = _gem()
-    if gem:
-        gem.count_call(FEATURE)  # one per session, against the shared cap
+    gem.count_call(FEATURE)  # one per session, against the shared cap
     config = types.LiveConnectConfig(
         response_modalities=[types.Modality.TEXT],
         system_instruction=SYSTEM,
@@ -162,7 +165,7 @@ async def live(bus, loop, queue, stream):
     ptt = PushToTalk(loop)
     print(f"operator voice live on {model_id()}: {ptt.hint} (Ctrl+C to quit)", file=sys.stderr, flush=True)
     try:
-        async with genai.Client().aio.live.connect(model=model_id(), config=config) as session:
+        async with gem_client(gem).aio.live.connect(model=model_id(), config=config) as session:
             while True:
                 await ptt.down.wait()
                 reply, heard = await turn(session, ptt, queue, types)
@@ -176,13 +179,17 @@ async def run(bus):
     if m not in ("live", "replay"):
         stand_in(f"GEMINI_MODE={m}")
         return await typed.run(bus, sys.stdin)
+    gem = _gem()
+    if gem is None:  # every product Gemini call goes through coord/gem.py: no gem, no live session
+        stand_in("coord/gem.py is not available")
+        return await typed.run(bus, sys.stdin)
     loop, queue = asyncio.get_running_loop(), asyncio.Queue()
     try:
         stream = open_mic(loop, queue)
     except (ImportError, OSError) as e:  # no sounddevice, no PortAudio or no input device
         stand_in(f"no microphone: {e}")
         return await typed.run(bus, sys.stdin)
-    await live(bus, loop, queue, stream)
+    await live(bus, loop, queue, stream, gem)
 
 
 def main():

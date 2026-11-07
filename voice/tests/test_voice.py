@@ -103,6 +103,24 @@ def test_off_mode_is_a_labelled_stand_in_using_the_typed_twin(monkeypatch, log_p
     assert json.loads(log_path.read_text().splitlines()[0])["stand_in"] is True
 
 
+def test_live_mode_without_coord_gem_is_a_stand_in_not_a_direct_call(monkeypatch, log_path, capsys):
+    monkeypatch.setenv("GEMINI_MODE", "live")
+    monkeypatch.setattr(operator, "_gem", lambda: None)
+    monkeypatch.setattr(command, "LOG", log_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO("stop\n"))
+    bus = FakeBus()
+    asyncio.run(operator.run(bus))
+    assert "coord/gem.py is not available" in capsys.readouterr().err
+    assert bus.sent == [("operator/command", {"text": "stop", "source": "typed"})]
+
+
+def test_live_client_comes_from_coord_gem():
+    class Gem:
+        def _c(self):
+            return "client-from-gem"
+    assert operator.gem_client(Gem()) == "client-from-gem"
+
+
 def test_stdout_bus_prints_one_line():
     out = io.StringIO()
     asyncio.run(command.StdoutBus(out).publish("operator/command", {"text": "stop", "source": "typed"}))
