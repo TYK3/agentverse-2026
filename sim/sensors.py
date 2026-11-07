@@ -8,6 +8,8 @@ Conventions (scene frame, metres, radians unless named _deg):
 
 import base64
 import io
+import os
+import sys
 
 import mujoco
 import numpy as np
@@ -101,7 +103,17 @@ def acoustic(origin, yaw, casualty_pos, walls, rng, noise=0.05):
 
 
 def make_renderer(m, height=240, width=320):
-    """An offscreen renderer, or None where no GL context is available (CI, headless without EGL)."""
+    """An offscreen renderer, or None where no GL context is available (CI, headless without EGL).
+
+    On Linux with no display and MUJOCO_GL unset, MuJoCo's default GLFW backend aborts the whole
+    process instead of raising, so skip it there; set MUJOCO_GL=egl (or osmesa) to get frames.
+    """
+    if (
+        sys.platform.startswith("linux")
+        and not os.environ.get("MUJOCO_GL")
+        and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    ):
+        return None
     try:
         return mujoco.Renderer(m, height=height, width=width)
     except Exception:  # noqa: BLE001  (no GL context: run without camera frames)
