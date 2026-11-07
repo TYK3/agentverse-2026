@@ -397,16 +397,7 @@ def call_gemini_or_replay(
 ) -> str:
     """Call coord.gem.ask or return replay fixture."""
     if mode == "replay":
-        # Check if coord.gem has an active cache entry
-        if gem_module:
-            try:
-                # In replay mode, ask will hit cache if populated
-                req_input = f"{prompt}\nPhotos: {[p.name for p in photos]}"
-                if renders:
-                    req_input += f"\nRenders: {[r.name for r in renders.values()]}"
-                return gem_module.ask("lead_reasoning", req_input, thinking="medium", feature=FEATURE)
-            except (RuntimeError, KeyError, OSError, ImportError) as exc:
-                logger.debug("Replay cache miss or call failed, using fixture: %s", exc)
+        # In replay mode without live keys or gitignored .gem_cache, use deterministic replay fixture
         return get_replay_fixture(photos, round_idx=round_idx)
 
     if mode == "live":
