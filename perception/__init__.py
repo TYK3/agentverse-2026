@@ -1,10 +1,11 @@
-"""perception lane: the live map and Scout exploration. The hub (coord/hub.py) calls `start(bus)` on startup."""
+"""perception lane: the live map, hazard estimates and Scout exploration. The hub (coord/hub.py) calls `start(bus)` on startup."""
 
 import asyncio
 import time
 
 from perception.explore import Explorer
 from perception.grid import Grid
+from perception.hazards import Hazards
 
 PERIOD = 0.5          # map/cells at 2 Hz
 SNAPSHOT_EVERY = 10   # ticks, so a full snapshot every 5 s
@@ -24,7 +25,17 @@ async def start(bus):
 
     bus.subscribe("sensors/scout", grid.add_sensors)
     bus.subscribe("sensors/scout", explorer.on_sensors)
+    hazards = Hazards()
+
+    async def scene(data):
+        await bus.publish("map/hazards", hazards.on_scene(data))
+
+    async def change(data):
+        await bus.publish("map/hazards", hazards.on_change(data))
+
     bus.subscribe("scene/loaded", explorer.on_scene)
+    bus.subscribe("scene/loaded", scene)
+    bus.subscribe("world/change", change)
     bus.subscribe("map/hazards", explorer.on_hazards)
     bus.subscribe("world/change", explorer.on_change)
     bus.subscribe("scout/goto", lambda d: explorer.on_goto(d, now()))
