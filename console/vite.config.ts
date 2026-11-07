@@ -7,7 +7,7 @@ const projectDir = dirname(fileURLToPath(import.meta.url));
 function fixtures(): Plugin {
   return {
     name: 'aftershock-fixtures',
-    buildStart() {
+    configResolved() {
       const source = resolve(projectDir, '../coord/fixtures');
       const target = resolve(projectDir, 'public/fixtures');
       mkdirSync(target, { recursive: true });
