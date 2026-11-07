@@ -25,3 +25,16 @@ Owner: see the owner table in `AGENTS.md`. Only this lane's agent edits files he
 - Fake for perception: `python -m sim.record --seconds 60` writes
   `sim/recordings/scout_backup.jsonl`, one `{"topic":"sensors/scout","data":{...}}` per line, no camera.
 - Checks: `bash sim/check.sh`.
+
+## Aftershock and physics route check (T05)
+- The floor is a dynamic plate welded to the mocap body `ground` (a moved mocap body carries no
+  velocity, so on its own it never drags blocks); the outer shell b1-b5 is braced to the plate.
+- Shake: 0.015 m at 4 Hz along x for 2 s, then 1 s settle. In the backup scene it fails the leaning
+  slab b10 and the wall b8 it leans on; nothing else moves more than 1 cm.
+- `route/proposed` -> `route/verified` from a cached check: an aftershock is run on a copy at start and
+  after every change; a route cell is unstable if its (i, j) is within 0.10 m of a block that would move
+  (before or after), whatever its k. Grid as perception: cell = floor(coordinate / 0.05).
+- Live: `POST /inject {"kind":"aftershock"}` shakes the world (3 s), `POST /inject
+  {"kind":"block_added","pos":[x,y,z]}` drops the one spare block `x1`; each publishes `world/change`
+  when complete. The Responder (T06) must stop while `world.shaking` is true.
+- `python -m sim.demo_aftershock` (viewer) or `--no-viewer`: prediction, shake, moved blocks.

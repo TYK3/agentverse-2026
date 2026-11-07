@@ -8,7 +8,7 @@ WebSocket gateway at `ws://localhost:8000/ws`. The wire envelope is
 `{"topic":"map/cells","data":{...}}`; array payloads remain arrays in `data`.
 Lanes expose `async def start(bus)` and use `bus.subscribe(topic, callback)` (sync or async callback)
 and `await bus.publish(topic, data)`. Every publish is validated against `coord.messages.TOPICS`.
-Browser clients may publish only `operator/command` and `gate/answer`; invalid messages close the
+Browser clients may publish only `operator/command`, `gate/answer` and `status/link`; invalid messages close the
 connection with code 1008 before dispatch. The gateway forwards all topics except `sensors/scout`
 and replays its latest 200 forwarded envelopes to each new connection. This is bounded event
 history, not a complete map snapshot: perception also publishes full map snapshots every 5 s (T08).
@@ -33,9 +33,9 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `gate/answer` | console | planner | `{"id":"g4","approved":true,"by":"operator"}` |
 | `responder/action` | planner | sim | `{"action":"move"\|"place_supply"\|"grip"\|"release","route":"r3","item":"water"\|"first_aid_kit"\|"radio"}` |
 | `operator/command` | console (typed), voice (spoken) | planner, console | `{"text":"send water to the back room","source":"voice"\|"typed"}` (after any change of mind is resolved) |
-| `world/change` | sim | planner, perception, console | `{"kind":"aftershock","t":0,"moved_blocks":["b7"]}` |
+| `world/change` | sim | planner, perception, console | `{"kind":"aftershock"\|"block_added","t":0,"moved_blocks":["b7"]}` |
 | `log/decision` | planner | console | `{"t":0,"perception":"...","model":"...","physics":"...","outcome":"...","reason":"one line"}` |
-| `status/link` | sim or planner | planner, console | `{"online":false}` |
+| `status/link` | sim, planner or console offline toggle | planner, console | `{"online":false}` |
 | `status/budget` | planner | console | `{"device":"<open>","mem_mb":0,"model":"gemma-4-e2b","ms_per_step":0,"limit":{...}}` |
 | `say` | planner | voice, console (shown as text) | `{"to":"casualty"\|"operator","intent":"first_aid"\|"guide_exit"\|"reassure","text":"...","lang":"auto"}` |
 | `report/handover` | planner | console | Map, casualties with confidence, hazards, routes and re-plans, supplies delivered, human approvals |
@@ -56,6 +56,9 @@ run started. These are first drafts: the owning lane refines them by PR.
 - T04 may include `motion: {"state":"idle"|"moving"|"arrived"|"blocked",
   "target":[x,y]|null}`. Motion is local sensor metadata, not a browser event.
 - `scene/loaded` block `size` is MuJoCo half-extents in metres (T03); Three.js uses `2 * size`.
+- T05 publishes `world/change.kind="block_added"` after an operator-injected block lands.
+  It carries the block id in `moved_blocks`, invalidates the prior route and triggers a re-scan
+  like an aftershock. `t` remains seconds since the run began; no extra position field is needed.
 - `map/cells` may include the optional nonnegative integer `hits` in each cell (T08).
 - `route/proposed.model` is a nonempty provenance string, including `local-astar` for T12 under
   POLICY #8. The two model names in the table are examples; core routing never requires Gemini.

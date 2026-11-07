@@ -3,4 +3,4 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 uvx ruff check perception
-uv run --no-project --with pytest python -m pytest perception/tests -q
+uv run --no-project --with mujoco --with numpy --with pytest python -m pytest perception/tests -q
