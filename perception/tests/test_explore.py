@@ -85,3 +85,15 @@ def test_rescans_moved_area_within_20_s(explored):
     back = sum(explored.grid.state(c) != "unknown" for c in forgot) / len(forgot)
     assert back > 0.8, f"only {back:.0%} of the moved area re-seen in 20 s"
     assert any(r.startswith("re-scan after the aftershock moved b11") for r in explored.reasons)
+
+
+def test_waypoint_never_cuts_through_hazard_cells():
+    _, e = corridor()
+    e.on_hazards([{"cell": [i, j, K], "status": "at_risk"} for i in range(6, 9) for j in range(-7, 1)])
+    goto = e.tick(0.0)
+    assert goto is not None
+    x0, y0 = 0.1, 0.025
+    x1, y1 = goto["target"][:2]
+    for s in range(101):
+        x, y = x0 + (x1 - x0) * s / 100, y0 + (y1 - y0) * s / 100
+        assert (int(x // 0.05), int(y // 0.05)) not in e.bad

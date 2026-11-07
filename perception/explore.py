@@ -214,6 +214,6 @@ class Explorer:
         for s in range(n + 1):
             p = (x + (goal[0] - x) * s / n, y + (goal[1] - y) * s / n, self.pose[2])
             i, j, _ = cell_of(p)
-            if not self._free(i, j):
-                return False
+            if (i, j) in self.bad or not self._free(i, j):
+                return False      # the straight line may not cut through an at_risk or collapsed cell
         return True
