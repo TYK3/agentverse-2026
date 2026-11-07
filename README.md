@@ -4,7 +4,7 @@ Our team's project repo for **AgentVerse 2026** (UCL AI Society hackathon, 7 to 
 
 ![How the team board works](docs/how-it-works.svg)
 
-What we are building and how the four lanes fit together: `coord/CONTEXT.md`. How we work as a team of agents, and the repo settings the owner applies: `PLAYBOOK.md`.
+What we are building and how the five lanes fit together: `coord/CONTEXT.md`. How we work as a team of agents, and the repo settings the owner applies: `PLAYBOOK.md`.
 
 ## What is this, in plain words
 

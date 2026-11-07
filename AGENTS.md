@@ -15,6 +15,7 @@ All agents read and post on the pinned issue titled "Message Board" using `tools
   - `@PhillysTheBest` (Philbert)
   - `@login3` (Name)
   - `@login4` (Name)
+  - `@login5` (Name)
   - `@all` (everyone)
 - **Tagged, or `@all`:** act on it and reply.
 - **Not tagged:** read it. Change course only if it affects something you own. Do not reply just to acknowledge.
@@ -55,5 +56,6 @@ The lead fills in owners at kickoff, and `.github/CODEOWNERS` must match. Do not
 | Sim: MuJoCo world, scene builder, robots, sensors, aftershock, physics check | | `sim/` |
 | Perception: Scout mapping, casualty detection, hazard prediction | | `perception/` |
 | Planner: routes, confidence gate, re-planning, Responder, human gate, offline Gemma, report | | `planner/` |
-| Console: operator screen, voice, translation, first aid guidance | | `console/` |
+| Console: operator screen (3D map, routes, reasoning, budget, approve buttons, typed commands) | | `console/` |
+| Voice: operator voice and TTS, casualty translation, first aid guidance | | `voice/` |
 | Shared: rules, contract, CI, board tools | `@TYK3` | `coord/`, `.github/`, `tools/`, `.claude/`, `AGENTS.md`, `CLAUDE.md` |

@@ -22,12 +22,12 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `gate/request` | planner | console | `{"id":"g4","kind":"risky_move"\|"enter_at_risk"\|"emergency_call","summary":"...","route":"r3"}` |
 | `gate/answer` | console | planner | `{"id":"g4","approved":true,"by":"operator"}` |
 | `responder/action` | planner | sim | `{"action":"move"\|"place_supply"\|"grip"\|"release","route":"r3","item":"water"\|"first_aid_kit"\|"radio"}` |
-| `operator/command` | console | planner | `{"text":"send water to the back room","source":"voice"\|"typed"}` (after any change of mind is resolved) |
+| `operator/command` | console (typed), voice (spoken) | planner, console | `{"text":"send water to the back room","source":"voice"\|"typed"}` (after any change of mind is resolved) |
 | `world/change` | sim | planner, perception, console | `{"kind":"aftershock","t":0,"moved_blocks":["b7"]}` |
 | `log/decision` | planner | console | `{"t":0,"perception":"...","model":"...","physics":"...","outcome":"...","reason":"one line"}` |
 | `status/link` | sim or planner | planner, console | `{"online":false}` |
 | `status/budget` | planner | console | `{"device":"<open>","mem_mb":0,"model":"gemma-4-e2b","ms_per_step":0,"limit":{...}}` |
-| `say` | planner | console | `{"to":"casualty"\|"operator","intent":"first_aid"\|"guide_exit"\|"reassure","text":"...","lang":"auto"}` |
+| `say` | planner | voice, console (shown as text) | `{"to":"casualty"\|"operator","intent":"first_aid"\|"guide_exit"\|"reassure","text":"...","lang":"auto"}` |
 | `report/handover` | planner | console | Map, casualties with confidence, hazards, routes and re-plans, supplies delivered, human approvals |
 
 ## Rules the shapes encode
@@ -45,3 +45,4 @@ Each lane ships a fake of what it provides, so nobody waits:
   aftershock.
 - planner: a scripted sequence of `route/proposed`, `gate/*`, `log/decision` and `say` messages.
 - console: a typed command line that sends `operator/command` and `gate/answer`.
+- voice: a text-only stand-in that prints `say` messages and turns typed text into `operator/command`.
