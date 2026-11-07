@@ -99,10 +99,11 @@
     <!-- Responder (T06): the heavier robot, a mocap body driven cell by cell by sim/responder.py.
          Like the Scout its geoms do not collide; responder.py casts collision rays before every step
          and refuses to move into a block. It starts outside the breach, behind the Scout, facing +y.
-         Narrow enough (0.14 m) to pass the breach between the b12/b13 pile and wall b4 (route cells at x = -0.475). -->
+         Narrow enough (0.14 m) to pass the breach between the b12/b13 pile and wall b4 (route cells at x = -0.475).
+         Its geoms are in group 3 (robot geoms) so the Scout's sensors can leave them out of the map. -->
     <body name="responder" mocap="true" pos="-0.5 -2.1 0.05" quat="0.7071068 0 0 0.7071068">
-      <geom name="responder_chassis" type="box" size="0.16 0.07 0.05" contype="0" conaffinity="0" rgba="0.95 0.6 0.1 1"/>
-      <geom name="responder_gripper" type="box" size="0.02 0.06 0.015" pos="0.17 0 0.03" contype="0" conaffinity="0" rgba="0.15 0.15 0.15 1"/>
+      <geom name="responder_chassis" type="box" size="0.16 0.07 0.05" group="3" contype="0" conaffinity="0" rgba="0.95 0.6 0.1 1"/>
+      <geom name="responder_gripper" type="box" size="0.02 0.06 0.015" pos="0.17 0 0.03" group="3" contype="0" conaffinity="0" rgba="0.15 0.15 0.15 1"/>
     </body>
 
     <!-- Supplies: small free bodies carried on the Responder's deck by the carry_* welds below.
