@@ -10,16 +10,22 @@ from collections import deque
 
 from perception.grid import RES, cell_of
 
-CLEAR = 2             # a Scout path keeps this many cells (0.1 m) from anything occupied
+CLEAR = 2             # a Scout path keeps this many cells (0.1 m) from anything occupied, measured
+                      # as a radius: a square would also count its corners (0.14 m away) and close the
+                      # 0.32 m diagonal between wall b3 and rubble b12 just inside the breach
 MIN_UNKNOWN = 3       # a frontier needs this many unknown cells in its 5x5 window (skips specks)
 CARROT = 12           # scout/goto targets at most this many path cells ahead (0.6 m)
 REACHED = 0.15        # metres: a target this close counts as reached
 STALL = 5             # decisions without getting 5 cm closer before a frontier is given up
 HOLD = 20.0           # seconds a re-look or a planner scout/goto keeps priority at most
 RESCAN = 0.5          # metres around a moved block that become unknown again
+AHEAD = 0.18          # metres sim keeps clear ahead before it moves (CLEARANCE 0.15 + one 0.03 m step)
+HALF_WIDTH = 0.08     # Scout chassis half width; with AHEAD this mirrors sim/world.py's _free_ahead
 NEW_BLOCK = (0.1, 0.1, 0.08)   # half-extents assumed for a block_added block (sim's spare rubble x1)
 
 SIDES = ((1, 0), (-1, 0), (0, 1), (0, -1))
+DISK = tuple((di, dj) for di in range(-CLEAR, CLEAR + 1) for dj in range(-CLEAR, CLEAR + 1)
+             if di * di + dj * dj <= CLEAR * CLEAR)
 AROUND = tuple((di, dj) for di in (-1, 0, 1) for dj in (-1, 0, 1) if di or dj)
 _CELL = re.compile(r"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]")
 
@@ -42,11 +48,13 @@ class Explorer:
         self.given_up = set()     # frontiers reached, or not reachable, that stayed frontiers
         self.progress = (None, math.inf, 0)   # (target, closest so far, decisions since closer)
         self.sent = None          # our last scout/goto, to tell it from the planner's
+        self.blocked = False      # sim refused to drive toward our last scout/goto
 
     # ---- bus callbacks ----------------------------------------------------------
 
     def on_sensors(self, data):
         self.pose = data["pose"]["pos"]
+        self.blocked = data.get("motion", {}).get("state") == "blocked"
 
     def on_scene(self, data):
         """Remember the blocks, and explore only inside the walls (outside, misses leave it all unknown)."""
@@ -118,7 +126,7 @@ class Explorer:
                 self.progress = (self.target, gap, 0)
             else:
                 self.progress = (target, best, stuck + 1)
-            if gap < REACHED or self.progress[2] >= STALL:
+            if gap < REACHED or self.progress[2] >= STALL or self.blocked:
                 self.given_up.add(self.target)
         self.rescan = {c for c in self.rescan if self.grid.state(c) == "unknown"}
         found = self._nearest_frontier()
@@ -148,11 +156,10 @@ class Explorer:
         if (i, j) in self.bad or not self._free(i, j):
             return False
         k = self._k()
-        for di in range(-CLEAR, CLEAR + 1):
-            for dj in range(-CLEAR, CLEAR + 1):
-                cur = self.grid.cells.get((i + di, j + dj, k))
-                if cur and cur["occupied"]:
-                    return False
+        for di, dj in DISK:
+            cur = self.grid.cells.get((i + di, j + dj, k))
+            if cur and cur["occupied"]:
+                return False
         return True
 
     def _unknown_near(self, i, j):
@@ -213,7 +220,7 @@ class Explorer:
         z = self.pose[2]
         pick = path[0]
         for c in path[1:CARROT + 1]:
-            if not self._straight(centre(c, z)):
+            if not (self._straight(centre(c, z)) and self._clear_ahead(centre(c, z))):
                 break
             pick = c
         self.sent = {"target": centre(pick, z), "reason": reason}
@@ -227,4 +234,23 @@ class Explorer:
             i, j, _ = cell_of(p)
             if (i, j) in self.bad or not self._free(i, j):
                 return False      # the straight line may not cut through an at_risk or collapsed cell
+        return True
+
+    def _clear_ahead(self, goal):
+        """True if sim would drive all the way to goal: no occupied cell in the strip HALF_WIDTH either
+        side of the line from the Scout to AHEAD past goal (sim stops when its forward rays hit one)."""
+        x, y = self.pose[:2]
+        length = math.dist((x, y), goal[:2])
+        if length < 1e-6:
+            return True
+        fx, fy = (goal[0] - x) / length, (goal[1] - y) / length
+        k = self._k()
+        step = RES / 2
+        for s in range(int((length + AHEAD) / step) + 1):
+            for w in range(-2, 3):
+                off = HALF_WIDTH * w / 2
+                p = (x + fx * s * step - fy * off, y + fy * s * step + fx * off, 0)
+                cur = self.grid.cells.get((*cell_of(p)[:2], k))
+                if cur and cur["occupied"]:
+                    return False
         return True
