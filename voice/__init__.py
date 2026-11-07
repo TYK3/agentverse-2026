@@ -12,6 +12,7 @@ The hub (coord/hub.py) calls `async def start(bus)` on startup.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from voice import emergency, firstaid, speak, translate
@@ -27,8 +28,9 @@ except ImportError:
 async def start(bus: Any) -> dict[str, Any]:
     """Start the voice lane service, subscribing to relevant topics."""
     # Subscribe to 'say' topic from planner
-    def _on_say(data: dict[str, Any]) -> None:
-        speak.handle_say(data)
+    # TTS, translation and playback block for seconds, so run them off the hub's event loop.
+    async def _on_say(data: dict[str, Any]) -> None:
+        await asyncio.to_thread(speak.handle_say, data)
 
     bus.subscribe("say", _on_say)
     return {
