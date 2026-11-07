@@ -1,0 +1,274 @@
+"""T13: propose, physics-verify, gate, act, and re-plan visibly on world/change.
+
+States: IDLE -> PROPOSED -> VERIFIED -> GATED -> EXECUTING. Everything runs locally. The only
+Gemini call is the optional online review of a verified route, through coord/gem.py, with a 5 s
+timeout; it never blocks the decision (off, error or timeout: "online_review" says so in the log).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+import time
+
+from planner.route import RoutePlanner
+
+IDLE, PROPOSED, VERIFIED, GATED, EXECUTING = "IDLE", "PROPOSED", "VERIFIED", "GATED", "EXECUTING"
+ACT, RELOOK = 0.8, 0.5  # confidence >= ACT acts, >= RELOOK re-looks, below refers to a human
+MAX_REPLANS = 3  # physics rejections in a row before the gate refers to a human
+REVIEW_TIMEOUT_S = 5.0
+REPLAN_EVERY_S = 1.0  # while waiting for a re-scan, try a new route at most once a second
+MODEL = "local-astar"
+
+
+def gate_outcome(confidence: float) -> str:
+    if confidence >= ACT:
+        return "act"
+    return "relook" if confidence >= RELOOK else "refer"
+
+
+def _gem():
+    try:
+        from coord import gem
+        return gem
+    except ImportError:
+        return None
+
+
+class Loop:
+    """One Responder mission at a time. Start it with `await loop.mission(start, goal, ...)`."""
+
+    def __init__(self, bus, router: RoutePlanner, *, gem=None, clock=time.monotonic,
+                 review_timeout=REVIEW_TIMEOUT_S):
+        self.bus, self.router = bus, router
+        self.gem = gem if gem is not None else _gem()
+        self.clock, self.t0 = clock, clock()
+        self.review_timeout = review_timeout
+        self.state = IDLE
+        self.mission_args: dict | None = None
+        self.route: dict | None = None  # the current route/proposed payload
+        self.hazards: list[dict] = []  # from perception
+        self.unstable: dict[tuple, str] = {}  # cell -> why, from physics rejections
+        self.casualties: dict[str, dict] = {}
+        self.replans = 0
+        self.waiting_scan: str | None = None  # why we are waiting for the map to change
+        self.map_version = 0
+        self.scan_from_version = 0
+        self.last_try = float("-inf")
+        self.request: dict | None = None  # open gate/request
+        self.review = "not run"
+        self._n = {"d": 0, "g": 0}
+
+    # ---- wiring -------------------------------------------------------------------------------
+
+    def attach(self):
+        for topic, fn in (("route/verified", self.on_verified), ("world/change", self.on_world_change),
+                          ("map/cells", self.on_map), ("map/hazards", self.on_hazards),
+                          ("map/casualties", self.on_casualties), ("gate/answer", self.on_answer)):
+            self.bus.subscribe(topic, fn)
+        return self
+
+    def _id(self, kind):
+        self._n[kind] += 1
+        return f"{kind}{self._n[kind]}"
+
+    def _t(self):
+        return round(max(0.0, self.clock() - self.t0), 2)
+
+    async def log(self, perception, outcome, reason, physics="", model=MODEL):
+        await self.bus.publish("log/decision", {"t": self._t(), "perception": perception, "model": model,
+                                                "physics": physics, "outcome": outcome, "reason": reason})
+
+    async def decide(self, outcome, confidence, reason):
+        await self.bus.publish("gate/decision", {"id": self._id("d"), "outcome": outcome,
+                                                 "confidence": round(confidence, 3), "reason": reason})
+
+    # ---- mission and proposals ----------------------------------------------------------------
+
+    async def mission(self, start, goal, *, goal_text="deliver water to c1", item="water", casualty="c1"):
+        self.mission_args = {"start": tuple(start), "goal": tuple(goal), "goal_text": goal_text,
+                             "item": item, "casualty": casualty}
+        self.replans, self.unstable = 0, {}
+        return await self.propose(f"mission: {goal_text}")
+
+    async def propose(self, why):
+        m = self.mission_args
+        self.router.hazards = self.hazards + [
+            {"cell": list(c), "status": "at_risk", "why": w, "estimate": True} for c, w in self.unstable.items()]
+        result = await self.router.propose(m["start"], m["goal"], goal_text=m["goal_text"])
+        if result["status"] == "ok":
+            self.route, self.state, self.waiting_scan = result["proposal"], PROPOSED, None
+            await self.log(why, "proposed", f"route {self.route['id']}: {len(self.route['cells'])} seen cells "
+                           f"to {m['goal_text']}, waiting for the physics check")
+            return result
+        # No route over seen cells: re-look at the frontier and try again when the map changes.
+        self.route, self.state = None, IDLE
+        targets = result.get("cells") or [list(m["goal"])]
+        await self.decide("relook", 0.0, f"no route over seen cells ({why}); scanning cell {targets[0]}")
+        await self.goto(targets[0], f"re-look at cell {targets[0]}: no verified route yet")
+        await self.wait_for_scan(self.waiting_scan or "no route over seen cells")  # keep the first trigger
+        return result
+
+    async def goto(self, cell, reason):
+        res = (self.router.map_cells or {}).get("res", 0.05)
+        target = [round((n + 0.5) * res, 3) for n in cell]  # cell centre; cell = floor(pos / res)
+        await self.bus.publish("scout/goto", {"target": target, "reason": reason})
+
+    async def wait_for_scan(self, why):
+        self.waiting_scan, self.scan_from_version = why, self.map_version
+
+    # ---- physics result, gate and online review -----------------------------------------------
+
+    async def on_verified(self, data):
+        if not self.route or data["id"] != self.route["id"] or self.state != PROPOSED:
+            return
+        rid = data["id"]
+        if not data["ok"]:
+            for c in data["unstable_cells"]:
+                self.unstable[tuple(c)] = f"physics check on {rid}: {data['detail'] or 'unstable'}"
+            self.replans += 1
+            physics = f"{rid} rejected: {data['detail'] or 'unstable'}; unstable {data['unstable_cells']}"
+            if self.replans > MAX_REPLANS:
+                return await self.refer(0.0, f"physics rejected {self.replans} routes in a row", physics)
+            await self.log("physics check", "replanning", f"avoiding {len(data['unstable_cells'])} unstable "
+                           f"cells, re-plan {self.replans} of {MAX_REPLANS}", physics=physics)
+            return await self.propose(f"re-plan after {rid} failed the physics check")
+        self.state, self.replans = VERIFIED, 0
+        await self.gate(f"{rid} verified: {data['detail'] or 'stable'}")
+
+    def confidence(self):
+        """min(casualty confidence, fraction of route cells that are seen), plus the weakest cell."""
+        records = {tuple(r["cell"]): r for r in (self.router.map_cells or {}).get("cells", [])}
+        cells = self.route["cells"]
+        unseen = [c for c in cells if records.get(tuple(c), {}).get("state") != "seen"]
+        seen_frac = 1 - len(unseen) / len(cells)
+        cid = self.mission_args["casualty"]
+        cas = self.casualties.get(cid) if cid else None
+        cas_conf = cas["confidence"] if cas else (RELOOK if cid else 1.0)  # unconfirmed casualty: re-look
+        why = f"{len(cells) - len(unseen)}/{len(cells)} route cells seen"
+        if cid:
+            why += f", casualty {cid} " + (f"confidence {cas_conf:.2f}" if cas else "not yet detected")
+        # The weakest link: an unseen route cell if the route is the doubt, else the casualty at the goal.
+        weakest = unseen[0] if unseen and seen_frac <= cas_conf else list(self.mission_args["goal"])
+        return min(cas_conf, seen_frac), why, weakest
+
+    async def gate(self, physics):
+        self.state = GATED
+        conf, why, weakest = self.confidence()
+        outcome = gate_outcome(conf)
+        rid = self.route["id"]
+        if outcome == "act":
+            agree, review_why = await self.online_review()
+            if agree is False:
+                return await self.refer(conf, f"online review disagrees: {review_why}", physics)
+            await self.decide("act", conf, f"{rid} verified and {why}; online review {self.review}")
+            await self.log(why, "act", f"send the Responder along {rid}", physics=physics, model=self._model())
+            return await self.execute()
+        if outcome == "relook":
+            cell = weakest
+            await self.decide("relook", conf, f"{why}; re-look at cell {cell} before acting")
+            await self.log(why, "relook", f"Scout re-scans cell {cell}", physics=physics)
+            await self.goto(cell, f"re-look at cell {cell}: {why}")
+            self.state = IDLE
+            return await self.wait_for_scan(f"re-look at cell {cell}")
+        await self.refer(conf, why, physics)
+
+    async def online_review(self):
+        """Ask gemini-4-argon to double-check a verified route; (None, why) when it could not run."""
+        gem = self.gem
+        if gem is None or getattr(gem, "MODE", "off") == "off":
+            self.review = "stand-in (gemini off)"
+            if gem is not None:
+                gem.mark_stand_in("route_review")
+            return None, self.review
+        prompt = ("You double-check a rescue robot route. The route was already verified by a physics "
+                  "check. Reply with JSON only: {\"agree\": true|false, \"why\": \"one line\"}.\n"
+                  + json.dumps({"route": self.route, "hazards": self.router.hazards,
+                                "map": self.map_summary()}))
+        try:
+            text = await asyncio.wait_for(asyncio.to_thread(
+                gem.ask, "lead_reasoning", prompt, thinking="low", feature="route_review"), self.review_timeout)
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            verdict = json.loads(match.group(0)) if match else {}
+            if not isinstance(verdict.get("agree"), bool):
+                raise TypeError(f"unusable reply: {text[:80]!r}")
+        except Exception as e:  # noqa: BLE001 -- GeminiOff, timeout, network, cap or a bad reply: continue locally
+            self.review = "skipped"
+            return None, f"skipped ({type(e).__name__})"
+        self.review = "agrees" if verdict["agree"] else "disagrees"
+        return verdict["agree"], str(verdict.get("why", ""))[:200]
+
+    def _model(self):
+        return MODEL + (" + gemini-4-argon review" if self.review in ("agrees", "disagrees") else "")
+
+    def map_summary(self):
+        counts: dict[str, int] = {}
+        for r in (self.router.map_cells or {}).get("cells", []):
+            key = r["state"] + (" occupied" if r["occupied"] else "")
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
+    async def refer(self, conf, why, physics=""):
+        self.state = GATED
+        rid = self.route["id"] if self.route else "none"
+        self.request = {"id": self._id("g"), "kind": "risky_move", "route": rid,
+                        "summary": f"{self.mission_args['goal_text']} via {rid}: {why}"}
+        await self.decide("refer", conf, why)
+        await self.bus.publish("gate/request", self.request)
+        await self.log(why, "refer", f"a human decides on {rid}", physics=physics)
+
+    async def on_answer(self, data):
+        if not self.request or data["id"] != self.request["id"]:
+            return
+        req, self.request = self.request, None
+        if data["approved"] and self.route and req["route"] == self.route["id"]:
+            await self.log(f"operator approved {req['id']}", "act", f"human approved {self.route['id']}")
+            return await self.execute()
+        self.state = IDLE
+        await self.log(f"operator rejected {req['id']}", "hold", "the Responder waits; no route approved")
+
+    async def execute(self):
+        self.state = EXECUTING
+        await self.bus.publish("responder/action", {"action": "move", "route": self.route["id"],
+                                                    "item": self.mission_args["item"]})
+
+    # ---- perception updates and the visible re-plan -------------------------------------------
+
+    async def on_world_change(self, data):
+        moved = ", ".join(data["moved_blocks"]) or "no blocks"
+        was = self.state
+        old = self.route["id"] if self.route else None
+        self.state, self.route, self.request = IDLE, None, None
+        self.replans = 0  # cells physics called unstable stay avoided: an aftershock rarely fixes them
+        detail = f"Responder held, route {old} dropped" if old else "no active route"
+        await self.log(f"{data['kind']} moved {moved}", "replanning",
+                       f"{detail} (was {was}); waiting for the Scout to re-scan")
+        if self.mission_args:
+            await self.wait_for_scan(f"{data['kind']} moved {moved}")
+            self.last_try = float("-inf")
+
+    async def on_map(self, data):
+        # The router subscribed to map/cells first (planner.start or start below), so it already merged it.
+        self.map_version += 1
+        if not self.waiting_scan or self.map_version <= self.scan_from_version:
+            return
+        now = self.clock()
+        if now - self.last_try < REPLAN_EVERY_S:
+            return
+        self.last_try = now
+        await self.propose(f"map re-scanned after {self.waiting_scan}")
+
+    def on_hazards(self, data):
+        self.hazards = list(data)
+
+    def on_casualties(self, data):
+        self.casualties = {c["id"]: c for c in data}
+
+
+async def start(bus, router: RoutePlanner | None = None, **kw) -> Loop:
+    """Attach the T13 loop. Pass the T12 router from planner.start(bus) so the map is shared."""
+    if router is None:
+        router = RoutePlanner(bus)
+        bus.subscribe("map/cells", router.update_map)
+    return Loop(bus, router, **kw).attach()
