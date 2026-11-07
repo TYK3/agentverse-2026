@@ -1,0 +1,7 @@
+{
+  "device": "laptop CPU, 8 GB RAM, no GPU (WSL2, 12 threads)",
+  "model": "gemma-4-e2b",
+  "runtime": "ollama 0.40.15, gemma4:e2b (Q4_K_M, 4.6B params, 4.6 GB pull)",
+  "measured": "7 Nov 2026 on the device above: model resident 4.1 GB; goal read 1.8 to 2.8 s warm, 19 s cold (warm() at start); A* + gate steps under 50 ms",
+  "limit": {"mem_mb": 5000, "ms_per_step": 4000}
+}

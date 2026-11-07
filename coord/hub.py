@@ -15,7 +15,7 @@ from coord.messages import Envelope, validate_payload
 
 log = logging.getLogger(__name__)
 LANES = ("sim", "perception", "planner", "voice")
-BROWSER_TOPICS = {"operator/command", "gate/answer"}
+BROWSER_TOPICS = {"operator/command", "gate/answer", "status/link"}
 
 
 class Bus:
