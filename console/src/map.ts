@@ -98,6 +98,7 @@ export class MapViewer {
   private seenMesh!: THREE.InstancedMesh;
   private inferredMesh!: THREE.InstancedMesh;
   private unknownMesh!: THREE.InstancedMesh;
+  private hazardOverlay!: THREE.InstancedMesh;   // X1: predicted at_risk / collapsed floor tiles
   private dummy = new THREE.Object3D();
 
   // Data stores
@@ -249,6 +250,26 @@ export class MapViewer {
     this.unknownMesh = new THREE.InstancedMesh(boxGeometry, unknownMaterial, MAX_CELL_CAPACITY);
     this.unknownMesh.count = 0;
     this.scene.add(this.unknownMesh);
+
+    // 4. X1 predictive hazard overlay: every at_risk / collapsed cell as a flat translucent floor tile,
+    //    free floor included, so predicted failure zones show before the aftershock.
+    const tile = new THREE.PlaneGeometry(1, 1);
+    const overlayMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.45,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    this.hazardOverlay = new THREE.InstancedMesh(tile, overlayMaterial, MAX_CELL_CAPACITY);
+    this.hazardOverlay.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.hazardOverlay.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_CELL_CAPACITY * 3),
+      3
+    );
+    this.hazardOverlay.count = 0;
+    this.hazardOverlay.renderOrder = 1;
+    this.scene.add(this.hazardOverlay);
   }
 
   private setupRobotModels(): void {
@@ -386,6 +407,7 @@ export class MapViewer {
       // 1. Batch updates once per animation frame
       if (this.cellsDirty || this.hazardsDirty) {
         this.applyBatchMeshUpdates();
+        this.applyHazardOverlay();
         this.cellsDirty = false;
         this.hazardsDirty = false;
       }
@@ -520,8 +542,49 @@ export class MapViewer {
     this.cellsDirty = true;
   }
 
+  /**
+   * X1: one floor tile per (i, j) for every predicted at_risk or collapsed cell (the worse status wins
+   * when several layers name the same column). Stable cells draw nothing.
+   */
+  private applyHazardOverlay(): void {
+    const res = this.cellResolution;
+    const worst = new Map<string, { i: number; j: number; status: string }>();
+    for (const h of this.hazardsMap.values()) {
+      if (h.status !== 'at_risk' && h.status !== 'collapsed') continue;
+      const key = `${h.cell[0]},${h.cell[1]}`;
+      const prev = worst.get(key);
+      if (!prev || (prev.status === 'at_risk' && h.status === 'collapsed')) {
+        worst.set(key, { i: h.cell[0], j: h.cell[1], status: h.status });
+      }
+    }
+    const colors = this.hazardOverlay.instanceColor!;
+    let n = 0;
+    for (const { i, j, status } of worst.values()) {
+      if (n >= MAX_CELL_CAPACITY) break;
+      this.dummy.position.set((i + 0.5) * res, (j + 0.5) * res, 0.004);
+      this.dummy.scale.set(res * 0.92, res * 0.92, 1);
+      this.dummy.updateMatrix();
+      this.hazardOverlay.setMatrixAt(n, this.dummy.matrix);
+      const c = status === 'collapsed' ? COLOR_HAZARD_COLLAPSED : COLOR_HAZARD_AT_RISK;
+      colors.setXYZ(n, c.r, c.g, c.b);
+      n++;
+    }
+    this.dummy.scale.set(1, 1, 1);
+    this.hazardOverlay.count = n;
+    this.hazardOverlay.instanceMatrix.needsUpdate = true;
+    colors.needsUpdate = true;
+  }
+
+  /** Number of predicted hazard floor tiles drawn (at_risk + collapsed columns). */
+  public hazardOverlayCount(): number {
+    return this.hazardOverlay.count;
+  }
+
   public updateHazards(hazards: HazardRecord[]): void {
     if (!Array.isArray(hazards)) return;
+    // map/hazards is the full list every time (perception/hazards.py message()): replace, never merge,
+    // so a cell that is no longer predicted to fail stops being drawn.
+    this.hazardsMap.clear();
     for (const h of hazards) {
       if (!Array.isArray(h.cell) || h.cell.length < 3) continue;
       const key = `${h.cell[0]},${h.cell[1]},${h.cell[2]}`;

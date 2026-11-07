@@ -15,6 +15,7 @@ import { setupPanels } from './panels';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);
+(window as unknown as { aftershockMap: MapViewer }).aftershockMap = mapViewer;  // read by the browser tests
 
 // Connect HUD and Banner elements
 const fpsBadge = document.querySelector<HTMLElement>('#fps-badge');
