@@ -103,3 +103,13 @@ def test_waypoint_never_cuts_through_hazard_cells():
     for s in range(101):
         x, y = x0 + (x1 - x0) * s / 100, y0 + (y1 - y0) * s / 100
         assert (int(x // 0.05), int(y // 0.05)) not in e.bad
+
+
+def test_block_added_with_pos_is_rescanned():
+    g, e = corridor()
+    e.on_change({"kind": "block_added", "t": 2.0, "moved_blocks": ["x1"], "pos": [1.0, 0.0, 0.08]})
+    assert g.state((20, 0, K)) == "unknown" and g.state((5, 0, K)) == "seen"
+    assert e.tick(2.0)["reason"].startswith("re-scan where x1 was dropped: frontier at cell")
+    g2, e2 = corridor()
+    e2.on_change({"kind": "block_added", "t": 2.0, "moved_blocks": ["x1"]})       # no pos: nothing forgotten
+    assert g2.state((20, 0, K)) == "seen"
