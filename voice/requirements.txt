@@ -1,0 +1,4 @@
+# voice lane runtime (tests need none of these): pip install -r voice/requirements.txt
+google-genai>=3.0
+sounddevice
+pynput
