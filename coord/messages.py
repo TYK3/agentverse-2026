@@ -163,6 +163,37 @@ class WorldChange(Message):
     moved_blocks: list[Text]
 
 
+Vec2 = Annotated[list[Number], Field(min_length=2, max_length=2)]
+
+
+class DebrisEvent(Message):
+    id: Text
+    kind: Literal["moved", "fell", "settled"]
+    pos: Vec3
+    moved_m: Nonnegative
+    drop_m: Nonnegative
+
+
+class DebrisPile(Message):
+    ids: Annotated[list[Text], Field(min_length=1)]
+    risk: Probability
+    worst: Text
+    tilt_deg: Nonnegative
+    overhang: Probability
+    motion_m: Nonnegative
+    top_z: Number
+    min_xy: Vec2
+    max_xy: Vec2
+    unstable: bool
+
+
+class WorldDebris(Message):
+    t: Nonnegative
+    truth: Literal[True]
+    events: list[DebrisEvent]
+    stacks: list[DebrisPile]
+
+
 class LogDecision(Message):
     t: Nonnegative
     perception: str
@@ -223,6 +254,7 @@ TOPICS: dict[str, type[BaseModel]] = {
     "responder/action": ResponderAction,
     "operator/command": OperatorCommand,
     "world/change": WorldChange,
+    "world/debris": WorldDebris,
     "log/decision": LogDecision,
     "status/link": StatusLink,
     "status/budget": StatusBudget,
