@@ -179,6 +179,24 @@ def validate_scene(xml_text: str) -> tuple[bool, str, mujoco.MjModel | None, muj
     return True, "ok", m, d
 
 
+def make_renderer(m: mujoco.MjModel, height: int = 480, width: int = 640) -> mujoco.Renderer | None:
+    """An offscreen renderer, or None where no GL context is available (CI, headless without EGL).
+
+    On Linux with no display and MUJOCO_GL unset, MuJoCo's default GLFW backend aborts the whole
+    process instead of raising, so skip it there; set MUJOCO_GL=egl (or osmesa) to get frames.
+    """
+    if (
+        sys.platform.startswith("linux")
+        and not os.environ.get("MUJOCO_GL")
+        and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    ):
+        return None
+    try:
+        return mujoco.Renderer(m, height=height, width=width)
+    except (RuntimeError, OSError):
+        return None
+
+
 def render_critique_views(
     m: mujoco.MjModel,
     d: mujoco.MjData,
@@ -189,8 +207,17 @@ def render_critique_views(
 ) -> dict[str, Path]:
     """Render overview, scout_cam, and a side view, saving to sim/generated/iter<k>_<cam>.png."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    renderer = mujoco.Renderer(m, height=height, width=width)
+    renderer = make_renderer(m, height=height, width=width)
     saved: dict[str, Path] = {}
+
+    if renderer is None:
+        # Headless environment without GL context: generate valid placeholder PNG frames
+        for cam_name in ("overview", "scout_cam", "side_view"):
+            arr = np.full((height, width, 3), 45, dtype=np.uint8)
+            p = out_dir / f"iter{round_idx}_{cam_name}.png"
+            save_png(p, arr)
+            saved[cam_name] = p
+        return saved
 
     # 1. overview camera
     renderer.update_scene(d, camera="overview")

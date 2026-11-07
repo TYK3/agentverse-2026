@@ -138,6 +138,15 @@ def test_render_critique_views(cleanup_generated):
         assert p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def test_make_renderer_headless(monkeypatch):
+    m = mujoco.MjModel.from_xml_path(str(scene_builder.BACKUP_XML))
+    monkeypatch.setattr(scene_builder.sys, "platform", "linux")
+    monkeypatch.delenv("MUJOCO_GL", raising=False)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    assert scene_builder.make_renderer(m) is None
+
+
 def test_build_scene_off_mode(monkeypatch):
     monkeypatch.setenv("GEMINI_MODE", "off")
     m, d, payload = scene_builder.build_scene()

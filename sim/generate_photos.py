@@ -5,6 +5,8 @@ import pathlib
 import mujoco
 from PIL import Image
 
+from sim.scene_builder import make_renderer
+
 
 def generate():
     p1 = pathlib.Path("sim/photos/set1")
@@ -17,7 +19,9 @@ def generate():
     m = mujoco.MjModel.from_xml_path("sim/scenes/backup.xml")
     d = mujoco.MjData(m)
     mujoco.mj_forward(m, d)
-    renderer = mujoco.Renderer(m, height=480, width=640)
+    renderer = make_renderer(m, height=480, width=640)
+    if renderer is None:
+        return
 
     # Set 1: 4 photos from distinct angles
     renderer.update_scene(d, camera="overview")
@@ -53,7 +57,9 @@ def generate():
     m2 = mujoco.MjModel.from_xml_string(xml2)
     d2 = mujoco.MjData(m2)
     mujoco.mj_forward(m2, d2)
-    renderer2 = mujoco.Renderer(m2, height=480, width=640)
+    renderer2 = make_renderer(m2, height=480, width=640)
+    if renderer2 is None:
+        return
 
     cam.distance = 4.8
     cam.elevation = -35
