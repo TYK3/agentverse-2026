@@ -9,11 +9,13 @@
 #                                               block until someone else posts
 #                                               (--tagged: only when a post tags you)
 #   tools/board whoami                          print your GitHub login
+#   tools/board agent ["Sam's Claude"]          show, or save for this folder, who this agent is
 #
 # Environment:
 #   BOARD_ISSUE     issue number of the board (default 1)
 #   BOARD_REPO      owner/name (default: detected from the git remote)
-#   BOARD_AGENT     who this agent is, like "Sam's Claude". Use it when several agents share
+#   BOARD_AGENT     who this agent is, like "Sam's Claude" (or save it once per folder with
+#                   `tools/board agent`). Use it when several agents share
 #                   one GitHub login: each gets its own read position, posts are prefixed for
 #                   you, and "[for: Claude]" in a post marks it as meant for that agent.
 #   BOARD_LOGIN     use this GitHub login instead of asking gh (for tests)
@@ -22,9 +24,11 @@
 set -u
 
 ISSUE="${BOARD_ISSUE:-1}"
-AGENT="${BOARD_AGENT:-}"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 STATE="$ROOT/.board"
+# Who this agent is: BOARD_AGENT, or the name saved in this folder with `board agent "<name>"`.
+AGENT="${BOARD_AGENT:-}"
+if [ -z "$AGENT" ] && [ -s "$STATE/agent" ]; then AGENT="$(head -n 1 "$STATE/agent" | tr -d '\r')"; fi
 
 fail() { echo "board: $*" >&2; exit 1; }
 
@@ -290,11 +294,24 @@ do_wait() {
   done
 }
 
+do_agent() {
+  if [ $# -eq 0 ]; then
+    if [ -n "$AGENT" ]; then echo "$AGENT"; else echo "(no agent name set: use tools/board agent \"<person>'s <agent>\")"; fi
+    return
+  fi
+  local name="$*"
+  [[ "$name" =~ ^[^][]+\'s\ [^][]+$ ]] || fail "the name must look like Sam's Claude, got '$name'"
+  mkdir -p "$STATE"
+  printf '%s\n' "$name" > "$STATE/agent"
+  echo "saved: this folder now posts as [$name]"
+}
+
 case "${1:-help}" in
   post)   shift; do_post "$@" ;;
   read)   shift; do_read "$@" ;;
   unread) shift; do_unread ;;
   wait)   shift; do_wait "$@" ;;
+  agent)  shift; do_agent "$@" ;;
   whoami) my_login || fail "not logged in; run: gh auth login" ;;
   *)
     sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
