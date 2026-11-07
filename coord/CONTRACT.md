@@ -31,7 +31,7 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `gate/decision` | planner | console | `{"id":"d12","outcome":"act"\|"relook"\|"refer","confidence":0.6,"reason":"one line"}` |
 | `gate/request` | planner | console | `{"id":"g4","kind":"risky_move"\|"enter_at_risk"\|"emergency_call","summary":"...","route":"r3"}` |
 | `gate/answer` | console | planner | `{"id":"g4","approved":true,"by":"operator"}` |
-| `responder/action` | planner | sim | `{"action":"move"\|"place_supply"\|"grip"\|"release","route":"r3","item":"water"\|"first_aid_kit"\|"radio"}` |
+| `responder/action` | planner | sim | `{"action":"move"\|"place_supply"\|"grip"\|"release","route":"r3","item":"water"\|"first_aid_kit"\|"radio"\|"bandage"\|"splint"\|"thermal_blanket","block":"b11"}` (`block` optional, Y2: grip/release that block, e.g. debris to clear or a board used as a splint) |
 | `operator/command` | console (typed), voice (spoken) | planner, console | `{"text":"send water to the back room","source":"voice"\|"typed"}` (after any change of mind is resolved) |
 | `world/change` | sim | planner, perception, console | `{"kind":"aftershock"\|"block_added","t":0,"moved_blocks":["b7"]}` |
 | `log/decision` | planner | console | `{"t":0,"perception":"...","model":"...","physics":"...","outcome":"...","reason":"one line"}` |
