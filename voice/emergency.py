@@ -42,7 +42,7 @@ def prepare_gate_request(
     casualty: dict[str, Any],
     request_id: str | None = None,
     cell: list[int] | None = None,
-    route_id: str = "",
+    route_id: str = "none",
 ) -> dict[str, Any]:
     """Construct a CONTRACT-compliant 'gate/request' message for kind='emergency_call'."""
     cid = casualty.get("id", "c1")
@@ -62,7 +62,7 @@ async def publish_emergency_request(
     casualty: dict[str, Any],
     request_id: str | None = None,
     cell: list[int] | None = None,
-    route_id: str = "",
+    route_id: str = "none",
 ) -> dict[str, Any]:
     """Prepare and publish a gate/request message to the bus for human operator approval."""
     payload = prepare_gate_request(casualty, request_id=request_id, cell=cell, route_id=route_id)
