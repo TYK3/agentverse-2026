@@ -1,4 +1,4 @@
-// Smoke test for aftershock-console lane (T18)
+// Smoke test for aftershock-console lane (T18 & T19)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,11 +33,17 @@ const jsContent = fs.readFileSync(path.join(assetsDir, jsBundle), 'utf8');
 const expectedSymbols = [
   'InstancedMesh',
   'OrbitControls',
+  'TubeGeometry',
   'map/cells',
   'map/hazards',
   'map/casualties',
   'sensors/scout',
-  'responder/action'
+  'responder/action',
+  'route/proposed',
+  'route/verified',
+  'world/change',
+  'previous route',
+  'Aftershock detected'
 ];
 
 for (const sym of expectedSymbols) {
@@ -70,4 +76,4 @@ if (totalCount !== 100000) {
   process.exit(1);
 }
 
-console.log(`PASS: All smoke tests passed (${manifest.length} fixtures, 100k math verified, bundle contains Three.js InstancedMesh and OrbitControls)`);
+console.log(`PASS: All smoke tests passed (${manifest.length} fixtures, 100k math verified, bundle contains Three.js InstancedMesh, TubeGeometry, OrbitControls, T19 re-plan & world/change handlers)`);

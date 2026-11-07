@@ -15,6 +15,10 @@
     <main id="workspace">
       <section id="map-panel" aria-label="3D map">
         <canvas id="map-canvas"></canvas>
+        <div id="world-change-banner" class="world-change-banner hidden" role="alert">
+          <span id="banner-icon" class="banner-icon">⚠️</span>
+          <span id="banner-text" class="banner-text">Aftershock detected: b7 moved. Re-scanning</span>
+        </div>
         <div class="map-hud-top">
           <div class="map-title-badge">3D MAP · MuJoCo Frame (Z-up) · OrbitControls</div>
           <div class="map-stats-badge">
@@ -24,6 +28,7 @@
         </div>
         <div class="map-controls">
           <button id="btn-demo-scene" type="button" class="btn-sm" title="Load standard backup scene">Demo Scene</button>
+          <button id="btn-demo-replan" type="button" class="btn-sm btn-highlight" title="Simulate aftershock and visible re-plan">Simulate Re-Plan</button>
           <button id="btn-benchmark-100k" type="button" class="btn-sm" title="Stress test with 100,000 cells">Benchmark 100k</button>
         </div>
         <div class="map-legend" aria-label="Map and hazard legend">
@@ -32,6 +37,9 @@
           <div class="legend-row"><span class="legend-swatch inferred"></span><span>Inferred (35% opacity)</span></div>
           <div class="legend-row"><span class="legend-swatch hazard-risk"></span><span>Hazard: At risk (amber, estimate)</span></div>
           <div class="legend-row"><span class="legend-swatch hazard-collapsed"></span><span>Hazard: Collapsed (red, estimate)</span></div>
+          <div class="legend-row"><span class="legend-swatch route-active"></span><span>Active route (solid blue tube)</span></div>
+          <div class="legend-row"><span class="legend-swatch route-previous"></span><span>Previous route (faded 20% opacity)</span></div>
+          <div class="legend-row"><span class="legend-swatch cell-unstable"></span><span>Unstable cell (physics check failed)</span></div>
           <div class="legend-row"><span class="legend-swatch casualty"></span><span>Casualty (estimate &amp; simulated vitals)</span></div>
           <div class="legend-row"><span class="legend-swatch scout"></span><span>Scout rover (pose mesh)</span></div>
           <div class="legend-row"><span class="legend-swatch responder"></span><span>Responder robot (action mesh)</span></div>
