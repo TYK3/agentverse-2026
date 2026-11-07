@@ -7,8 +7,15 @@ own status block current; the decisions log is append only.
 - AgentVerse 2026, UCL AI Society hackathon, 7 to 8 November 2026.
 - Track: robotics, "give an agent a body". It perceives a simulated world, decides and acts.
   Decisions made on the robot score higher on autonomy; adapting to change is worth 25%.
-- Simulation only, no hardware.
+- Simulation only, no hardware. Isaac Sim is recommended (needs an RTX GPU); MuJoCo, PyBullet, Gazebo
+  and Webots also work. Get a sensor stream running in the first hour.
+- Judging: perception-driven action 25, adaptation to change 25, operational autonomy 15 (edge
+  budget, sensible when unsure), relevance and impact 20, ambition and quality 15. Full brief:
+  `docs/brief.md`.
+- Submit: a one-page technical summary PDF, a simulation video of up to one minute in one take with
+  one unscripted change, and a 5 minute live pitch.
 - Deadlines: **Open** (submission time, judging slot).
+- All ideation, including earlier ideas: `docs/ideas/`.
 
 ## The idea
 An autonomous search and rescue rover enters a collapsed or smoke-filled building, builds a 3D map
