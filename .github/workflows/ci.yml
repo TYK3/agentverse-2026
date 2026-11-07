@@ -1,0 +1,166 @@
+# Every lane's checks on every PR and every push to main. Each lane job runs only when its folder
+# (or this file) changed; "ci ok" sums them up, so it is the ONE check branch protection requires.
+# A lane that is skipped counts as passed, so a sim-only PR never waits on perception.
+#
+# Lane check convention (product-agnostic): if a lane has an executable `<lane>/check.sh`, CI runs
+# exactly that. Otherwise it auto-detects: package.json -> npm ci + typecheck/lint/test scripts if
+# present; pyproject.toml -> uv sync + ruff + pytest; anything else -> nothing to check (passes).
+# Each lane's agent owns its own check.sh; the team lead owns this file.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# paths-filter lists a PR's files through the API, which needs pull-requests: read
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      sim: ${{ steps.filter.outputs.sim }}
+      perception: ${{ steps.filter.outputs.perception }}
+      autonomy: ${{ steps.filter.outputs.autonomy }}
+      voice: ${{ steps.filter.outputs.voice }}
+      coord: ${{ steps.filter.outputs.coord }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ci: &ci
+              - ".github/workflows/ci.yml"
+            sim:
+              - *ci
+              - "sim/**"
+            perception:
+              - *ci
+              - "perception/**"
+            autonomy:
+              - *ci
+              - "autonomy/**"
+            voice:
+              - *ci
+              - "voice/**"
+            coord:
+              - *ci
+              - "coord/**"
+              - "tools/**"
+              - ".claude/**"
+
+  # One matrix job for the four lanes; a lane whose folder didn't change is skipped step by step.
+  lane:
+    needs: changes
+    if: >-
+      needs.changes.outputs.sim == 'true' || needs.changes.outputs.perception == 'true' ||
+      needs.changes.outputs.autonomy == 'true' || needs.changes.outputs.voice == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [sim, perception, autonomy, voice]
+    name: lane (${{ matrix.lane }})
+    env:
+      CHANGED: ${{ needs.changes.outputs[matrix.lane] }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.lane }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.CHANGED == 'true'
+      - name: Detect toolchain
+        id: kind
+        if: env.CHANGED == 'true'
+        run: |
+          if [ -x check.sh ]; then echo kind=script
+          elif [ -f package.json ]; then echo kind=node
+          elif [ -f pyproject.toml ]; then echo kind=python
+          else echo kind=none
+          fi >> "$GITHUB_OUTPUT"
+
+      # Node and uv are both set up for check.sh lanes, since a script may use either.
+      - uses: actions/setup-node@v4
+        if: steps.kind.outputs.kind == 'node' || steps.kind.outputs.kind == 'script'
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+        if: steps.kind.outputs.kind == 'python' || steps.kind.outputs.kind == 'script'
+
+      - name: check.sh
+        if: steps.kind.outputs.kind == 'script'
+        run: ./check.sh
+      - name: Node (install, typecheck, lint, test)
+        if: steps.kind.outputs.kind == 'node'
+        run: |
+          if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+          npm run --if-present typecheck
+          npm run --if-present lint
+          npm test --if-present
+      - name: Python (uv sync, ruff, pytest)
+        if: steps.kind.outputs.kind == 'python'
+        run: |
+          if [ -f uv.lock ]; then uv sync --frozen; else uv sync; fi
+          uvx ruff check .
+          # pytest exits 5 when it finds no tests; that's fine early in a hackathon
+          uv run --with pytest pytest -q || [ $? -eq 5 ]
+      - name: Nothing to check
+        if: steps.kind.outputs.kind == 'none'
+        run: echo "No check.sh, package.json or pyproject.toml in ${{ matrix.lane }}/; skipping."
+
+  # The coordination layer every agent depends on: if tools/board or the hooks break, the team goes deaf.
+  coord:
+    needs: changes
+    if: needs.changes.outputs.coord == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: board scripts and hooks parse
+        run: for f in tools/board tools/setup .claude/hooks/*.sh; do bash -n "$f"; done
+      - name: Claude config is valid JSON
+        run: |
+          for f in .claude/settings.json .mcp.json; do
+            [ ! -f "$f" ] || jq empty "$f" || { echo "invalid JSON: $f"; exit 1; }
+          done
+      - name: No secrets or local state committed
+        run: |
+          bad=$(git ls-files '.env' '.env.*' '.board/*' '.claude/settings.local.json' '.claude/worktrees/*')
+          [ -z "$bad" ] || { echo "These must stay gitignored: $bad"; exit 1; }
+
+  # Only while the repo is public: a commit must carry a GitHub noreply address, never a personal or
+  # university email. Set yours with: git config user.email <id>+<login>@users.noreply.github.com
+  # Add your own domain to ALLOWED if a teammate commits from one.
+  emails:
+    if: github.event_name == 'pull_request' && !github.event.repository.private
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit email is a noreply address
+        env:
+          RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+          ALLOWED: '([^@ ]+@users\.noreply\.github\.com|noreply@github\.com|noreply@anthropic\.com)'
+        run: |
+          bad=$(git log --format='%h %ae%n%h %ce' "$RANGE" | sort -u | grep -vE " ${ALLOWED}\$" || true)
+          [ -z "$bad" ] || { echo "Commits with a non-noreply email (fix with git rebase --exec 'git commit --amend --no-edit --reset-author'):"; echo "$bad" | cut -d' ' -f1 | sort -u; exit 1; }
+
+  ci-ok:
+    name: ci ok
+    needs: [changes, lane, coord, emails]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job that ran passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: echo "$NEEDS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")'

@@ -1,0 +1,11 @@
+# Shared files belong to the team lead. Lane lines are filled in at kickoff from the owner table in
+# AGENTS.md; keep the two in step. A login that isn't a collaborator makes GitHub flag this file.
+/.github/               @TYK3
+/coord/                 @TYK3
+/AGENTS.md              @TYK3
+/CLAUDE.md              @TYK3
+/tools/                 @TYK3
+# /sim/                 @<login>
+# /perception/          @<login>
+# /autonomy/            @<login>
+# /voice/               @<login>

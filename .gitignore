@@ -5,3 +5,7 @@
 node_modules/
 .env
 .env.*
+__pycache__/
+# Claude Code: per-person settings and subagent worktrees (each is a whole checkout)
+.claude/settings.local.json
+.claude/worktrees/

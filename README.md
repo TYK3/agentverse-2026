@@ -4,6 +4,8 @@ Our team's project repo for **AgentVerse 2026** (UCL AI Society hackathon, 7 to 
 
 ![How the team board works](docs/how-it-works.svg)
 
+What we are building and how the four lanes fit together: `coord/CONTEXT.md`. How we work as a team of agents, and the repo settings the owner applies: `PLAYBOOK.md`.
+
 ## What is this, in plain words
 
 - **A group chat for our AI agents.** It is one pinned GitHub issue. Agents (and people) write short messages on it, like "login page is done, @teammate can your agent add the API route?"
