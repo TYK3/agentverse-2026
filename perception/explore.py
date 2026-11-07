@@ -17,6 +17,7 @@ REACHED = 0.15        # metres: a target this close counts as reached
 STALL = 5             # decisions without getting 5 cm closer before a frontier is given up
 HOLD = 20.0           # seconds a re-look or a planner scout/goto keeps priority at most
 RESCAN = 0.5          # metres around a moved block that become unknown again
+NEW_BLOCK = (0.1, 0.1, 0.08)   # half-extents assumed for a block_added block (sim's spare rubble x1)
 
 SIDES = ((1, 0), (-1, 0), (0, 1), (0, -1))
 AROUND = tuple((di, dj) for di in (-1, 0, 1) for dj in (-1, 0, 1) if di or dj)
@@ -36,7 +37,7 @@ class Explorer:
         self.bad = set()          # (i, j) of at_risk or collapsed hazard cells
         self.hold = None          # (target, until, reason) of a re-look or a planner scout/goto
         self.rescan = set()       # cells made unknown by the last world/change
-        self.moved = []
+        self.change = ""          # what the last world/change did, for the reason string
         self.target = None        # frontier cell we are heading for
         self.given_up = set()     # frontiers reached, or not reachable, that stayed frontiers
         self.progress = (None, math.inf, 0)   # (target, closest so far, decisions since closer)
@@ -70,9 +71,15 @@ class Explorer:
             self.hold = (cell, t + HOLD, f"re-look at cell {list(cell)} (planner: {data['reason']})")
 
     def on_change(self, data):
-        """Every cell within 0.5 m of a moved block becomes unknown, so the Scout re-scans it."""
+        """Every cell within 0.5 m of a moved block becomes unknown, so the Scout re-scans it.
+
+        A block_added change names a block scene/loaded never listed; with an optional "pos" it is
+        placed there (a NEW_BLOCK box), without one it is left for the LiDAR to find.
+        """
         forget = set()
         for b in data.get("moved_blocks", []):
+            if b not in self.blocks and data.get("pos"):
+                self.blocks[b] = (data["pos"], NEW_BLOCK)
             if b not in self.blocks:
                 continue
             pos, size = self.blocks[b]
@@ -81,7 +88,11 @@ class Explorer:
             forget |= {c for c in self.grid.cells if lo[0] <= c[0] <= hi[0] and lo[1] <= c[1] <= hi[1]}
         self.grid.forget(forget)
         self.rescan |= forget
-        self.moved = data.get("moved_blocks", [])
+        moved = ", ".join(data.get("moved_blocks", []))
+        if data.get("kind") == "block_added":
+            self.change = f"re-scan where {moved} was dropped"
+        else:
+            self.change = f"re-scan after the {data.get('kind', 'change')} moved {moved}"
         self.target = None
 
     # ---- one decision a second --------------------------------------------------
@@ -119,7 +130,7 @@ class Explorer:
             return None
         self.target, unknown, path = found
         if self.rescan:
-            why = f"re-scan after the aftershock moved {', '.join(self.moved)}: frontier at cell {list(self.target)}"
+            why = f"{self.change}: frontier at cell {list(self.target)}"
         else:
             why = f"frontier at cell {list(self.target)}"
         return self._send(path, f"{why}, {unknown} unknown neighbours")

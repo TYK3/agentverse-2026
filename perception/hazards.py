@@ -4,7 +4,8 @@ Before the aftershock, from the scene/loaded block boxes (axis-aligned, no rotat
   (a) a wall taller than it is wide is at_risk when under half its base footprint rests on the floor
       or on the top of another block;
   (b) a rubble block is at_risk when its centre of mass (the box centre) lies outside the convex hull
-      of its contact patches with what is directly beneath it, or when nothing is beneath it.
+      of its contact patches with what is directly beneath it, or when nothing is beneath it;
+  (c) a wall that an at_risk rubble block touches is at_risk: it carries the leaning block's load.
 After a world/change, the cells of each moved block become collapsed and cells within 0.15 m of
 them at_risk; every other cell keeps its label.
 
@@ -12,6 +13,7 @@ Cells are the plan-view footprint of each block on the ground layer k=0, the lay
 and the planner routes on.
 """
 
+from perception.explore import NEW_BLOCK
 from perception.grid import cell_of
 
 TOL = 0.02            # metres: a bottom face this close to a top face rests on it
@@ -103,6 +105,24 @@ def risk(block, blocks):
     return None
 
 
+def _touches(a, b):
+    """True if boxes a and b overlap or touch (within TOL) in x, y and z."""
+    return all(abs(a["pos"][i] - b["pos"][i]) <= a["size"][i] + b["size"][i] + TOL for i in range(3))
+
+
+def risks(blocks):
+    """{block id: why} for every at_risk block: rules (a) and (b), then (c) a wall that an at_risk
+    rubble block leans on carries its load, so it is at_risk too (in the backup scene, b8 under b10)."""
+    out = {b["id"]: why for b in blocks if (why := risk(b, blocks))}
+    for r in blocks:
+        if r.get("label") != "rubble" or r["id"] not in out:
+            continue
+        for w in blocks:
+            if w.get("label") == "wall" and w["id"] not in out and _touches(r, w):
+                out[w["id"]] = f"wall {w['id']} carries leaning rubble {r['id']}"
+    return out
+
+
 def _cells(rect):
     lo = cell_of([rect[0][0], rect[0][1], 0])
     hi = cell_of([rect[1][0] - 1e-9, rect[1][1] - 1e-9, 0])
@@ -123,8 +143,9 @@ class Hazards:
         """Label every block's footprint from its support; return the map/hazards message."""
         self.blocks = data["blocks"]
         self.labels = {}
+        flagged = risks(self.blocks)
         for b in self.blocks:
-            why = risk(b, self.blocks)
+            why = flagged.get(b["id"])
             for ij in _cells(_rect(b)):
                 self._mark(ij, "at_risk" if why else "stable", why or f"{b.get('label', 'block')} {b['id']} supported")
         return self.message()
@@ -132,13 +153,18 @@ class Hazards:
     def on_change(self, data):
         """Moved blocks' cells become collapsed and their 0.15 m surroundings at_risk; return map/hazards."""
         by_id = {b["id"]: b for b in self.blocks}
+        for name in data.get("moved_blocks", []):
+            if name not in by_id and data.get("pos"):      # block_added: a block scene/loaded never listed
+                by_id[name] = {"id": name, "label": "rubble", "pos": list(data["pos"]), "size": list(NEW_BLOCK)}
+                self.blocks.append(by_id[name])
         moved = [by_id[b] for b in data.get("moved_blocks", []) if b in by_id]
+        event = "was dropped here" if data.get("kind") == "block_added" else f"moved in the {data.get('kind', 'change')}"
         for b in moved:
             for ij in _cells(_rect(b, NEAR)):
-                self._mark(ij, "at_risk", f"next to {b['id']}, which moved in the {data.get('kind', 'change')}")
+                self._mark(ij, "at_risk", f"next to {b['id']}, which {event.replace(' here', '')}")
         for b in moved:
             for ij in _cells(_rect(b)):
-                self.labels[ij] = ("collapsed", f"{b.get('label', 'block')} {b['id']} moved in the {data.get('kind', 'change')}")
+                self.labels[ij] = ("collapsed", f"{b.get('label', 'block')} {b['id']} {event}")
         return self.message()
 
     def message(self):
