@@ -1,0 +1,32 @@
+{
+  "as_of": "2026-11-07",
+  "state": "review snapshot; not final submission",
+  "deadline": null,
+  "deadline_timezone": null,
+  "edge_device": "T15 configured target: laptop CPU, 8 GB RAM, no GPU, WSL2, 12 threads; final demo verification pending",
+  "exact_gemma_tag": "gemma4:e2b (Q4_K_M), Ollama 0.40.15",
+  "offline_lane_reported": {
+    "source": "PR #55 planner/budget.json",
+    "model_resident_gb": 4.1,
+    "warm_goal_read_s": [1.8, 2.8],
+    "cold_load_s": 19,
+    "limit_mem_mb": 5000,
+    "limit_step_ms": 4000,
+    "independently_replicated_by_pack_author": false,
+    "demo_physics": "scripted verdict"
+  },
+  "full_system_latency_ms": null,
+  "real_evaluation_complete": false,
+  "video": null,
+  "pitch_rehearsals_completed": 0,
+  "different_machine_open_check": false,
+  "demo_final_tag": null,
+  "evidence": {
+    "hub": "PR #47: 42 hub tests, 5 sim tests, live HTTP 200 and typed WebSocket round trip; CI green",
+    "baseline": "PR #54: grid-world stand-in only, seeds 0..29, naive 25/30 and T12 router 30/30 safe; not full-system",
+    "baseline_stand_ins": ["grid-dynamics", "oracle-map", "scripted-collapse", "test-operator", "no-MuJoCo-verification"],
+    "runner": "PR #52: stand-in scenario, real-lane integration not yet established",
+    "spec": "docs/aftershock.md",
+    "brief": "docs/brief.md"
+  }
+}
