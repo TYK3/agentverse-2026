@@ -53,7 +53,8 @@ GEMINI_MODE=off python -m planner.fake_run
 Or run `bash planner/check.sh` with uv. CI uses this same executable script.
 The runner labels its development fixtures on stderr and prints a JSON bus
 envelope on stdout. It uses bundled `planner/fixtures/` while T02 is pending;
-to feed shared or perception fixtures, provide their paths and endpoints:
+to feed shared or perception fixtures, provide their paths and endpoints.
+Both raw payloads and the hub's `{topic,data}` fixture envelopes are accepted:
 
 ```sh
 python -m planner.fake_run --map coord/fixtures/map__cells.json \

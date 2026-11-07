@@ -284,3 +284,15 @@ def test_fake_run_can_load_external_fixtures_and_report_no_path(tmp_path, doorwa
     assert json.loads(process.stdout) == {
         "status": "no_verified_route", "needs": "re-look", "cells": []
     }
+
+
+def test_fake_run_accepts_hub_fixture_envelopes(tmp_path, doorway):
+    map_path, hazards_path = tmp_path / "map.json", tmp_path / "hazards.json"
+    map_path.write_text(json.dumps({"topic": "map/cells", "data": doorway}), encoding="utf-8")
+    hazards_path.write_text(json.dumps({"topic": "map/hazards", "data": []}), encoding="utf-8")
+    process = subprocess.run(
+        [sys.executable, "-m", "planner.fake_run", "--map", str(map_path),
+         "--hazards", str(hazards_path)],
+        cwd=FIXTURES.parents[1], capture_output=True, text=True, check=True,
+    )
+    assert json.loads(process.stdout)["data"]["cells"] == [[x, 2, 0] for x in range(7)]

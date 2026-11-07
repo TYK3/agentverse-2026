@@ -23,11 +23,20 @@ class FixtureBus:
             print(json.dumps({"topic": topic, "data": data}))
 
 
+def load_fixture(path, topic):
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(data, dict) and "topic" in data:
+        if data["topic"] != topic:
+            raise ValueError(f"expected {topic} fixture, got {data['topic']}")
+        return data["data"]
+    return data
+
+
 async def run(args):
     bus = FixtureBus()
     planner = await start(bus)
-    await bus.publish("map/cells", json.loads(args.map.read_text(encoding="utf-8")))
-    await bus.publish("map/hazards", json.loads(args.hazards.read_text(encoding="utf-8")))
+    await bus.publish("map/cells", load_fixture(args.map, "map/cells"))
+    await bus.publish("map/hazards", load_fixture(args.hazards, "map/hazards"))
     result = await planner.propose(args.start, args.goal, goal_text=args.goal_text)
     if result["status"] != "ok":
         print(json.dumps(result))
