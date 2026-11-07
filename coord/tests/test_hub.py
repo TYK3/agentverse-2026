@@ -72,6 +72,17 @@ def test_sensors_only_go_to_local_subscribers(clean_bus):
     assert not clean_bus.history
 
 
+def test_scout_camera_motion_and_recording_shapes():
+    example = next(item for item in EXAMPLES if item["topic"] == "sensors/scout")
+    data = dict(example["data"])
+    data["motion"] = {"state": "moving", "target": [1, 2]}
+    data["camera"] = {"format": "jpeg", "b64": "development-example"}
+    assert validate_payload("sensors/scout", data) == data
+    data.pop("camera")
+    data.pop("t")
+    assert validate_payload("sensors/scout", data) == data
+
+
 def test_broken_subscriber_and_disconnected_client(clean_bus):
     seen = []
 
@@ -169,7 +180,7 @@ def test_startup_lanes_status_and_cleanup(clean_bus, monkeypatch):
         calls.append(target)
         task = asyncio.create_task(asyncio.sleep(1000))
         tasks.append(task)
-        return task
+        return SimpleNamespace(task=task)
 
     def imports(name):
         if name == "missing":

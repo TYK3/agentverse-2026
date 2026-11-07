@@ -38,11 +38,22 @@ class Acoustic(Message):
     level: Probability
 
 
+class CameraFrame(Message):
+    format: Literal["jpeg"]
+    b64: Text
+
+
+class ScoutMotion(Message):
+    state: Literal["idle", "moving", "arrived", "blocked"]
+    target: Annotated[list[Number], Field(min_length=2, max_length=2)] | None
+
+
 class SensorsScout(Message):
     t: Nonnegative = 0
     pose: Pose
     lidar: list[Nonnegative]
-    camera: str | None = None
+    camera: str | CameraFrame | None = None
+    motion: ScoutMotion | None = None
     thermal: list[list[Probability]]
     acoustic: Acoustic
 

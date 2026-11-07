@@ -92,6 +92,8 @@ async def lifespan(application):
                 tasks.append(result)
             elif isinstance(result, (list, tuple)):
                 tasks.extend(task for task in result if isinstance(task, asyncio.Task))
+            elif isinstance(getattr(result, "task", None), asyncio.Task):
+                tasks.append(result.task)
         try:
             gem = importlib.import_module("coord.gem")
         except ModuleNotFoundError as exc:

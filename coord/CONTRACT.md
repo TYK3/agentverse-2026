@@ -46,11 +46,14 @@ run started. These are first drafts: the owning lane refines them by PR.
   its payload. These are labelled development examples, never a claimed live run.
 - `sensors/scout`: `{"t":0,"pose":{"pos":[x,y,z],"yaw":0},"lidar":[1.2,6.0],
   "camera":null,"thermal":[[0.1,0.9]],"acoustic":{"bearing":0,"level":0.5}}`.
-  `lidar` is a full horizontal sweep beginning at Scout yaw, evenly spaced counter-clockwise;
-  ranges are metres. `camera` is a base64 JPEG string or null (recordings omit images).
+  `lidar` is a full horizontal sweep beginning at world +x, evenly spaced counter-clockwise;
+  ranges are metres (T04, PR #42). `camera` is `{"format":"jpeg","b64":"..."}`,
+  a base64 JPEG string or null (recordings omit images).
   Thermal is a rectangular array of intensities in 0..1; acoustic bearing is degrees relative to yaw.
   `t` and `camera` may be omitted from a recording. Sensor frames go only to local subscribers and
   are never retained in gateway history or replayed to browsers (T04).
+- T04 may include `motion: {"state":"idle"|"moving"|"arrived"|"blocked",
+  "target":[x,y]|null}`. Motion is local sensor metadata, not a browser event.
 - `scene/loaded` block `size` is MuJoCo half-extents in metres (T03); Three.js uses `2 * size`.
 - `map/cells` may include the optional nonnegative integer `hits` in each cell (T08).
 - `route/proposed.model` is a nonempty provenance string, including `local-astar` for T12 under

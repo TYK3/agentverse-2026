@@ -12,7 +12,8 @@ curl -i http://localhost:8000/docs
 Lanes expose `async def start(bus)`, subscribe with `bus.subscribe(topic, callback)`,
 and publish with `await bus.publish(topic, data)`. Callbacks receive validated JSON
 data and may be sync or async. Startup functions wire subscriptions and launch work,
-then return; they may return a task or list of tasks for shutdown cancellation.
+then return; they may return a task, list of tasks, or object with `.task` for
+shutdown cancellation.
 Missing packages or start hooks are logged and skipped; broken installed dependencies
 raise rather than silently disabling a lane. Subscriber exceptions are logged while
 other subscribers continue.
