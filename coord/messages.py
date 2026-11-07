@@ -158,7 +158,7 @@ class OperatorCommand(Message):
 
 
 class WorldChange(Message):
-    kind: Literal["aftershock"]
+    kind: Literal["aftershock", "block_added"]
     t: Nonnegative
     moved_blocks: list[Text]
 

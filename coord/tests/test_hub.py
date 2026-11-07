@@ -123,7 +123,8 @@ def test_bounded_history_and_late_join(clean_bus):
 
 
 @pytest.mark.parametrize("raw", [
-    "not json", "[]", "{}", '{"topic":"status/link","data":{"online":false}}',
+    "not json", "[]", "{}", '{"topic":"status/link","data":{"online":"false"}}',
+    '{"topic":"world/change","data":{"kind":"block_added","t":1,"moved_blocks":["x1"]}}',
     '{"topic":"gate/answer","data":{"id":"g1","approved":"false","by":"operator"}}',
     '{"topic":"operator/command","data":{"text":"stop","source":"typed","extra":1}}',
     '{"topic":"operator/command","data":{"text":"stop","source":"typed"},"extra":1}',
@@ -146,6 +147,26 @@ def test_browser_command_reaches_subscriber(clean_bus):
         websocket.send_json(message)
         assert websocket.receive_json() == message
     assert seen == [message["data"]]
+
+
+def test_browser_offline_toggle_reaches_subscriber(clean_bus):
+    seen = []
+    with TestClient(hub.app) as client, client.websocket_connect("/ws") as websocket:
+        clean_bus.subscribe("status/link", seen.append)
+        message = {"topic": "status/link", "data": {"online": False}}
+        websocket.send_json(message)
+        assert websocket.receive_json() == message
+    assert seen == [{"online": False}]
+
+
+def test_sim_injected_block_change_reaches_subscriber_and_browser(clean_bus):
+    seen = []
+    with TestClient(hub.app) as client, client.websocket_connect("/ws") as websocket:
+        clean_bus.subscribe("world/change", seen.append)
+        data = {"kind": "block_added", "t": 1.0, "moved_blocks": ["x1"]}
+        client.portal.call(hub.publish_checked, "world/change", data)
+        assert websocket.receive_json() == {"topic": "world/change", "data": data}
+    assert seen == [data]
 
 
 @pytest.mark.parametrize("topic,data", [

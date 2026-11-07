@@ -83,3 +83,6 @@ voice (spoken commands) --> planner        planner (say) --> voice (operator, ca
   lane `async start(bus)` hooks and a FastAPI WebSocket at `/ws` using `{topic,data}`.
   The latest 200 forwarded events are replayed; raw Scout sensors remain local.
   Browser writes are restricted to `operator/command` and `gate/answer`.
+- Sat 7 Nov: sim T05 and console/offline lanes requested a `block_added` world change
+  and browser `status/link` toggle. Contract proposal PR #59 keeps `{kind,t,moved_blocks}`
+  for both world-change kinds and requires a strict boolean `online` for the toggle.
