@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AFTERSHOCK | Operator Console</title>
+</head>
+<body>
+  <div id="app">
+    <header id="top-bar">
+      <strong>AFTERSHOCK</strong>
+      <span id="connection-status" role="status">Connecting…</span>
+      <span id="edge-budget-status">Edge budget · pending</span>
+    </header>
+    <main id="workspace">
+      <section id="map-panel" aria-label="3D map">
+        <canvas id="map-canvas"></canvas>
+        <div class="map-hud-top">
+          <div class="map-title-badge">3D MAP · MuJoCo Frame (Z-up) · OrbitControls</div>
+          <div class="map-stats-badge">
+            <span id="fps-badge" class="fps-badge fps-good">60 FPS</span>
+            <span id="cell-count-badge" class="cell-count-badge">0 cells</span>
+          </div>
+        </div>
+        <div class="map-controls">
+          <button id="btn-demo-scene" type="button" class="btn-sm" title="Load standard backup scene">Demo Scene</button>
+          <button id="btn-benchmark-100k" type="button" class="btn-sm" title="Stress test with 100,000 cells">Benchmark 100k</button>
+        </div>
+        <div class="map-legend" aria-label="Map and hazard legend">
+          <div class="legend-header">ESTIMATES &amp; STATUS LEGEND</div>
+          <div class="legend-row"><span class="legend-swatch seen-solid"></span><span>Seen occupied (solid grey)</span></div>
+          <div class="legend-row"><span class="legend-swatch inferred"></span><span>Inferred (35% opacity)</span></div>
+          <div class="legend-row"><span class="legend-swatch hazard-risk"></span><span>Hazard: At risk (amber, estimate)</span></div>
+          <div class="legend-row"><span class="legend-swatch hazard-collapsed"></span><span>Hazard: Collapsed (red, estimate)</span></div>
+          <div class="legend-row"><span class="legend-swatch casualty"></span><span>Casualty (estimate &amp; simulated vitals)</span></div>
+          <div class="legend-row"><span class="legend-swatch scout"></span><span>Scout rover (pose mesh)</span></div>
+          <div class="legend-row"><span class="legend-swatch responder"></span><span>Responder robot (action mesh)</span></div>
+        </div>
+      </section>
+      <aside id="right-panel">
+        <h2>Reasoning log</h2>
+        <ol id="reasoning-log"></ol>
+        <h2>Decision confidence</h2>
+        <div id="confidence-panel">Awaiting planner</div>
+      </aside>
+    </main>
+    <footer id="bottom-bar">
+      <label for="operator-command">Operator command</label>
+      <input id="operator-command" placeholder="Enter a command" autocomplete="off"/>
+      <button id="send-command" type="button">Send</button>
+      <span id="mode-label"></span>
+    </footer>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

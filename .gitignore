@@ -11,3 +11,5 @@ __pycache__/
 .claude/worktrees/
 # tools/run_scenario.py and tools/run_demo.sh logs
 runs/
+# Gemini answers cached by coord/gem.py (replay mode)
+.gem_cache/
