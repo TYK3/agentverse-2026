@@ -62,6 +62,7 @@ class Loop:
         self.hazards: list[dict] = []  # from perception
         self.unstable: dict[tuple, str] = {}  # cell -> why, from physics rejections
         self.casualties: dict[str, dict] = {}
+        self.relooked: dict[tuple, float] = {}  # re-looked cell -> confidence before that re-look
         self.replans = 0
         self.waiting_scan: str | None = None  # why we are waiting for the map to change
         self.map_version = 0
@@ -113,7 +114,7 @@ class Loop:
         await self.cancel_request("mission replaced")
         self.mission_args = {"start": tuple(start), "goal": tuple(goal), "goal_text": goal_text,
                              "item": item, "casualty": casualty, "action": action}
-        self.replans, self.unstable = 0, {}
+        self.replans, self.unstable, self.relooked = 0, {}, {}
         return await self.propose(f"mission: {goal_text}")
 
     async def propose(self, why):
@@ -202,6 +203,13 @@ class Loop:
             return await self.execute(expected_route=rid)
         if outcome == "relook":
             cell = weakest
+            before = self.relooked.get(tuple(cell))
+            if before is not None and conf <= before:
+                # A re-look that left confidence where it was will not raise it next time either
+                # (e.g. vision is a stand-in with Gemini off): hand the call to a human.
+                return await self.refer(conf, f"{why}; re-look at cell {cell} did not raise confidence "
+                                        f"({before:.2f} -> {conf:.2f})", physics)
+            self.relooked[tuple(cell)] = conf
             await self.decide("relook", conf, f"{why}; re-look at cell {cell} before acting")
             await self.log(why, "relook", f"Scout re-scans cell {cell}", physics=physics)
             await self.goto(cell, f"re-look at cell {cell}: {why}")
@@ -371,7 +379,7 @@ class Loop:
         was = self.state
         old = self.route["id"] if self.route else None
         self.state, self.route, self.request = IDLE, None, None
-        self.replans = 0  # cells physics called unstable stay avoided: an aftershock rarely fixes them
+        self.replans, self.relooked = 0, {}  # cells physics called unstable stay avoided: an aftershock rarely fixes them
         detail = f"Responder held, route {old} dropped" if old else "no active route"
         await self.log(f"{data['kind']} moved {moved}", "replanning",
                        f"{detail} (was {was}); waiting for the Scout to re-scan")
