@@ -66,7 +66,8 @@ scene has a single doorway at `[3,2,0]`; marking that cell collapsed blocks it.
 
 ## Human approval and tasks (T14)
 
-Use `await planner.loop.start(bus, router)` to attach the verification loop.
+`router = await planner.start(bus)` attaches the verification loop as
+`router.loop`, plus the budget publisher as `router.task`. Use that existing loop.
 `await loop.mission(start, goal, item="water", action="deliver")` dispatches
 `move`, `place_supply`, `release` after physics verification and the confidence
 gate. `action="grip"` adds `grip` after `move` and always requests human approval.

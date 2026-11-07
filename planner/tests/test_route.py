@@ -186,7 +186,9 @@ class RecordingBus:
     async def publish(self, topic, data):
         self.history.append({"topic": topic, "data": data})
         for callback in self.subscribers.get(topic, []):
-            callback(data)
+            result = callback(data)
+            if asyncio.iscoroutine(result):
+                await result
 
 
 def test_bus_uses_latest_snapshots_and_only_publishes_success(doorway):

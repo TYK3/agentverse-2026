@@ -18,7 +18,7 @@ from planner.tests.test_loop import (
 
 async def mission(*, confidence=0.9, action="deliver", timeout=60, clock=None):
     bus = Bus()
-    lp = await L.start(bus, gem=OffGem(), gate_timeout=timeout, **({"clock": clock} if clock else {}))
+    lp = await L.start(bus, gem=OffGem(), budget=False, gate_timeout=timeout, **({"clock": clock} if clock else {}))
     await bus.publish("map/cells", two_gap_map())
     await bus.publish("map/casualties", [{**CASUALTY, "confidence": confidence}])
     await lp.mission(START, GOAL, action=action)
@@ -187,7 +187,7 @@ def test_human_approval_cannot_override_failed_physics():
 def test_emergency_message_is_displayed_but_never_executes_robot_actions(approved):
     async def scenario():
         bus = Bus()
-        lp = await L.start(bus, gem=OffGem())
+        lp = await L.start(bus, gem=OffGem(), budget=False)
         request = await lp.prepare_emergency_call("Casualty c1 at the back room, rescue needed")
         assert request["kind"] == "emergency_call" and request["route"] == "none"
         assert "back room" in bus.of("gate/request")[-1]["summary"]
@@ -224,7 +224,7 @@ def test_synchronous_physics_response_is_not_lost():
                                                  "unstable_cells": [], "detail": "fixture"})
 
         bus.subscribe("route/proposed", physics)
-        lp = await L.start(bus, gem=OffGem())
+        lp = await L.start(bus, gem=OffGem(), budget=False)
         await bus.publish("map/cells", two_gap_map())
         await bus.publish("map/casualties", [CASUALTY])
         await lp.mission(START, GOAL, action="grip")
@@ -264,7 +264,7 @@ def test_hub_bus_accepts_the_gate_and_ordered_action_payloads():
                                                  "unstable_cells": [], "detail": "fixture"})
 
         bus.subscribe("route/proposed", physics)
-        lp = await L.start(bus, gem=OffGem())
+        lp = await L.start(bus, gem=OffGem(), budget=False)
         await bus.publish("map/cells", two_gap_map())
         await bus.publish("map/casualties", [CASUALTY])
         await lp.mission(START, GOAL, action="grip")
@@ -272,4 +272,17 @@ def test_hub_bus_accepts_the_gate_and_ordered_action_payloads():
         await bus.publish("gate/answer", {"id": lp.request["id"], "approved": True, "by": "operator"})
         assert [m["data"]["action"] for m in bus.history if m["topic"] == "responder/action"] == [
             "move", "grip", "place_supply", "release"]
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("command", ["stop", "hold"])
+def test_stop_cancels_pending_approval_without_requiring_place_configuration(command):
+    async def scenario():
+        bus, lp = await mission(action="grip")
+        await verify(bus, lp)
+        request = dict(lp.request)
+        await lp.on_command({"text": command, "source": "typed"})
+        assert lp.request is None and lp._gate_timer is None and lp.state == L.IDLE
+        await answer(bus, request)
+        assert not bus.of("responder/action")
     asyncio.run(scenario())

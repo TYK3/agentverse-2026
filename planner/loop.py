@@ -336,7 +336,7 @@ class Loop:
         if any(tuple(h["cell"]) in cells and h["status"] == "collapsed" for h in self.hazards):
             return "hold", "route includes a collapsed cell"
         if any(tuple(h["cell"]) in cells and h["status"] == "at_risk" for h in self.hazards):
-            return "enter_at_risk", "route enters an at-risk cell; includes any requested obstacle grip"
+            return "enter_at_risk", "route enters an at-risk cell; includes any requested supply grip"
         if self.mission_args["action"] == "grip":
             return "risky_move", "grip the requested supply, then place it; obstacle targeting is not on this wire interface"
         return None, "seen, free and physics verified"
@@ -421,13 +421,15 @@ class Loop:
 
     async def on_command(self, data):
         """operator/command -> a mission. The local model (or keywords) only reads the goal."""
-        if not self.places or self.interpret is None:
-            return
         text = data["text"]
         low = text.lower().strip()
         if low in ("stop", "hold"):
+            await self.cancel_request("operator stopped the mission")
+            self.verified_route = None
             self.state, self.route = IDLE, None
-            return await self.log(f"operator: {text}", "hold", "operator stopped the Responder")
+            return await self.log(f"operator: {text}", "hold", "operator stopped the mission; further dispatch held")
+        if not self.places or self.interpret is None:
+            return
         with self._step():  # the goal read counts toward ms_per_step: it is on the operator's path
             got = await asyncio.to_thread(self.interpret, text, list(self.places))
         place, model = got.get("place"), got.get("model", "keyword-stand-in")
