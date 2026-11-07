@@ -133,3 +133,20 @@ def test_start_publishes_budget_every_second():
         return bus
     bus = asyncio.run(go())
     assert bus.of("status/budget") and json.dumps(bus.of("status/budget")[0])
+
+
+def test_hub_entry_point_wires_loop_and_budget():
+    import planner
+    from planner.tests.test_loop import Bus
+
+    async def go():
+        bus = Bus()
+        router = await planner.start(bus)
+        await bus.publish("map/cells", two_gap_map())
+        await bus.publish("map/hazards", [])
+        await router.loop.mission(START, (8, 3, 0), casualty=None)
+        await asyncio.sleep(0.05)
+        router.task.cancel()
+        return bus
+    bus = asyncio.run(go())
+    assert bus.of("route/proposed") and bus.of("status/budget")
