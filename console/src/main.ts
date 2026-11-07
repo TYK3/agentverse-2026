@@ -9,7 +9,8 @@ import {
   type ResponderActionPayload,
   type RouteProposedPayload,
   type RouteVerifiedPayload,
-  type WorldChangePayload
+  type WorldChangePayload,
+  type SceneLoadedPayload
 } from './map';
 import { setupPanels } from './panels';
 
@@ -63,6 +64,10 @@ on('sensors/scout', data => {
 
 on('responder/action', data => {
   mapViewer.updateResponderAction(data as ResponderActionPayload);
+});
+
+on('scene/loaded', data => {
+  mapViewer.updateSceneLoaded(data as SceneLoadedPayload);
 });
 
 // Task T19: Route Proposed, Route Verified, and World Change

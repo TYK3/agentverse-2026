@@ -69,6 +69,16 @@ export interface WorldChangePayload {
   moved_blocks: string[];
 }
 
+export interface SceneLoadedPayload {
+  scene: string;
+  blocks?: Array<{
+    id: string;
+    label?: string;
+    pos: [number, number, number];
+    size: [number, number, number];
+  }>;
+}
+
 interface FadingRoute {
   group: THREE.Group;
   materials: THREE.MeshStandardMaterial[];
@@ -107,6 +117,7 @@ export class MapViewer {
   private hazardsMap = new Map<string, HazardRecord>();
   private casualtiesMap = new Map<string, CasualtyRecord>();
   private routesMap = new Map<string, RouteProposedPayload>();
+  private sceneBlocks = new Map<string, { pos: [number, number, number]; size: [number, number, number] }>();
 
   // Object groups
   private casualtyGroup = new THREE.Group();
@@ -118,8 +129,10 @@ export class MapViewer {
   private movedBlocksGroup = new THREE.Group();
 
   // Route animation and fading
+  private activeRouteCells: [number, number, number][] = [];
   private fadingRoutes: FadingRoute[] = [];
   private movedBlockMeshes: THREE.Mesh[] = [];
+  private replanCount = 0;
 
   // Batching & state
   private cellsDirty = false;
@@ -663,6 +676,15 @@ export class MapViewer {
     }
   }
 
+  public updateSceneLoaded(payload: SceneLoadedPayload): void {
+    if (!payload?.blocks || !Array.isArray(payload.blocks)) return;
+    for (const b of payload.blocks) {
+      if (b.id && Array.isArray(b.pos) && Array.isArray(b.size)) {
+        this.sceneBlocks.set(b.id, { pos: b.pos, size: b.size });
+      }
+    }
+  }
+
   // --- Task T19: Route Drawing, Visible Re-Plan and Fading ---
 
   /**
@@ -700,10 +722,9 @@ export class MapViewer {
         }
       });
 
-      // Find midpoint of old route for "previous route" label
-      const oldRoute = Array.from(this.routesMap.values())[this.routesMap.size - 2];
-      if (oldRoute?.cells && oldRoute.cells.length > 0) {
-        const midCell = oldRoute.cells[Math.floor(oldRoute.cells.length / 2)];
+      // Use the exact active route cells for the previous route midpoint label
+      if (this.activeRouteCells.length > 0) {
+        const midCell = this.activeRouteCells[Math.floor(this.activeRouteCells.length / 2)];
         midpoint.set((midCell[0] + 0.5) * res, (midCell[1] + 0.5) * res, (midCell[2] + 0.5) * res + 0.18);
         pointCount = 1;
       }
@@ -726,6 +747,9 @@ export class MapViewer {
         targetOpacity: 0.2 // 20% opacity
       });
     }
+
+    // Record new active route cells
+    this.activeRouteCells = route.cells.map(c => [c[0], c[1], c[2]]);
 
     // 2. Build new route TubeGeometry in solid blue
     const points: THREE.Vector3[] = [];
@@ -844,6 +868,11 @@ export class MapViewer {
   }
 
   private showReplanReasonBanner(routeId: string, reason: string): void {
+    if (this.bannerTimeoutId !== null) {
+      window.clearTimeout(this.bannerTimeoutId);
+      this.bannerTimeoutId = null;
+    }
+
     if (this.bannerElement && this.bannerTextElement && this.bannerIconElement) {
       this.bannerElement.className = 'world-change-banner replan-banner visible';
       this.bannerIconElement.textContent = '🔄';
@@ -866,8 +895,8 @@ export class MapViewer {
     this.movedBlocksGroup.clear();
     this.movedBlockMeshes = [];
 
-    // Map block names to backup scene coordinates
-    const blockPositions: Record<string, { pos: [number, number, number]; size: [number, number, number] }> = {
+    // Map block names to scene coordinates (using scene/loaded blocks or standard defaults)
+    const fallbackPositions: Record<string, { pos: [number, number, number]; size: [number, number, number] }> = {
       b7: { pos: [0, 0.97, 0.25], size: [0.08, 0.48, 0.4] },
       b8: { pos: [1.25, -0.32, 0.25], size: [0.08, 0.62, 0.4] },
       b10: { pos: [0.97, -0.5, 0.18], size: [0.38, 0.22, 0.08] },
@@ -875,7 +904,7 @@ export class MapViewer {
     };
 
     for (const id of blockIds) {
-      const def = blockPositions[id] || { pos: [0, 1.0, 0.2], size: [0.2, 0.4, 0.3] };
+      const def = this.sceneBlocks.get(id) || fallbackPositions[id] || { pos: [0, 1.0, 0.2], size: [0.2, 0.4, 0.3] };
       const geom = new THREE.BoxGeometry(def.size[0], def.size[1], def.size[2]);
       const mat = new THREE.MeshStandardMaterial({
         color: 0xef4444,
@@ -942,6 +971,8 @@ export class MapViewer {
    */
   public simulateAftershockAndReplan(): void {
     const res = this.cellResolution;
+    this.replanCount++;
+    const nextRouteId = `r${3 + this.replanCount}`;
 
     // 1. Fire aftershock
     this.onWorldChange({
@@ -952,32 +983,44 @@ export class MapViewer {
 
     // 2. Mark route verification failure for old route
     this.onRouteVerified({
-      id: 'r3',
+      id: `r${2 + this.replanCount}`,
       ok: false,
       unstable_cells: [[Math.round(0 / res), Math.round(1.0 / res), 0]],
       detail: 'block b7 falls across doorway'
     });
 
-    // 3. Propose new route after 1.5 seconds avoiding b7
+    // 3. Propose new route after 1.5 seconds avoiding b7 with distinct path
     window.setTimeout(() => {
+      // Alternate re-plan path on subsequent clicks so each click shows a visually distinct route
+      const isAlt = this.replanCount % 2 === 0;
+      const cells: [number, number, number][] = isAlt
+        ? [
+            [Math.round(-0.8 / res), Math.round(-1.2 / res), 0],
+            [Math.round(-0.65 / res), Math.round(-0.85 / res), 0],
+            [Math.round(-0.4 / res), Math.round(-0.3 / res), 0],
+            [Math.round(0.2 / res), Math.round(-0.3 / res), 0],
+            [Math.round(0.9 / res), Math.round(0.3 / res), 0],
+            [Math.round(1.95 / res), Math.round(0.98 / res), 0]
+          ]
+        : [
+            [Math.round(-0.8 / res), Math.round(-1.2 / res), 0],
+            [Math.round(-0.65 / res), Math.round(-0.85 / res), 0],
+            [Math.round(-0.2 / res), Math.round(-0.4 / res), 0],
+            [Math.round(0.4 / res), Math.round(-0.2 / res), 0],
+            [Math.round(1.0 / res), Math.round(0.1 / res), 0],
+            [Math.round(1.95 / res), Math.round(0.98 / res), 0]
+          ];
+
       this.updateRouteProposed({
-        id: 'r4',
+        id: nextRouteId,
         robot: 'responder',
-        cells: [
-          [Math.round(-0.8 / res), Math.round(-1.2 / res), 0],
-          [Math.round(-0.65 / res), Math.round(-0.85 / res), 0],
-          [Math.round(-0.2 / res), Math.round(-0.4 / res), 0],
-          [Math.round(0.4 / res), Math.round(-0.2 / res), 0],
-          [Math.round(1.0 / res), Math.round(0.1 / res), 0],
-          [Math.round(1.95 / res), Math.round(0.98 / res), 0]
-        ],
+        cells,
         goal: 'deliver water to c1',
         reason: 'avoiding collapsed block b7 toward casualty c1',
         model: 'local-astar'
       });
 
-      // Move Responder to route
-      this.responderGroup.position.set(-0.2, -0.4, 0);
+      this.responderGroup.position.set(cells[2][0] * res, cells[2][1] * res, 0);
     }, 1500);
   }
 
