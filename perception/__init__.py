@@ -1,13 +1,14 @@
-"""perception lane: the live map, hazard estimates and Scout exploration. The hub (coord/hub.py) calls `start(bus)` on startup."""
+"""perception lane: the live map, casualties, hazard estimates and Scout exploration. The hub (coord/hub.py) calls `start(bus)` on startup."""
 
 import asyncio
 import time
 
+from perception.casualties import PROMPT, Casualties
 from perception.explore import Explorer
 from perception.grid import Grid
 from perception.hazards import Hazards
 
-PERIOD = 0.5          # map/cells at 2 Hz
+PERIOD = 0.5          # map/cells and map/casualties (when changed) at 2 Hz
 SNAPSHOT_EVERY = 10   # ticks, so a full snapshot every 5 s
 EXPLORE_EVERY = 2     # ticks, so a frontier decision every 1 s
 
@@ -25,6 +26,19 @@ async def start(bus):
 
     bus.subscribe("sensors/scout", grid.add_sensors)
     bus.subscribe("sensors/scout", explorer.on_sensors)
+    casualties = Casualties()
+
+    async def vision(b64):
+        answer = await asyncio.to_thread(casualties.ask, PROMPT, b64)   # off the event loop
+        casualties.dirty |= casualties.on_vision(answer)
+
+    def sensors(data):
+        casualties.dirty |= casualties.on_sensors(data)
+        b64 = casualties.vision_due(data)
+        if b64 is not None:
+            _spawn(vision(b64))      # the frame lives only until this call returns
+
+    bus.subscribe("sensors/scout", sensors)
     hazards = Hazards()
 
     async def scene(data):
@@ -40,13 +54,18 @@ async def start(bus):
     bus.subscribe("world/change", explorer.on_change)
     bus.subscribe("scout/goto", lambda d: explorer.on_goto(d, now()))
     bus.subscribe("gate/decision", lambda d: explorer.on_decision(d, now()))
-    task = asyncio.create_task(_publish(bus, grid, explorer, now))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    _spawn(_publish(bus, grid, explorer, casualties, now))
     return grid
 
 
-async def _publish(bus, grid, explorer, now):
+def _spawn(coro):
+    task = asyncio.create_task(coro)
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    return task
+
+
+async def _publish(bus, grid, explorer, casualties, now):
     tick = 0
     while True:
         await asyncio.sleep(PERIOD)
@@ -56,6 +75,9 @@ async def _publish(bus, grid, explorer, now):
             await bus.publish("map/cells", grid.snapshot(t))
         elif grid.changed:
             await bus.publish("map/cells", grid.delta(t))
+        if casualties.dirty:
+            casualties.dirty = False
+            await bus.publish("map/casualties", casualties.message())
         if tick % EXPLORE_EVERY == 0:
             goto = explorer.tick(t)
             if goto:
