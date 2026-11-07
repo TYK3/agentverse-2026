@@ -41,7 +41,7 @@ async def start(bus, loop=True):
         await bus.publish("route/verified", world.verify(route))
 
     bus.subscribe("route/proposed", on_route)
-    inject.install(world)
+    inject.install(world, bus)
     world.responder = responder.attach(world, bus, loop=loop)
     if loop:
         world.task = asyncio.create_task(run(world, bus))
