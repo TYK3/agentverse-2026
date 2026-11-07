@@ -31,6 +31,7 @@ jobs:
       perception: ${{ steps.filter.outputs.perception }}
       planner: ${{ steps.filter.outputs.planner }}
       console: ${{ steps.filter.outputs.console }}
+      voice: ${{ steps.filter.outputs.voice }}
       coord: ${{ steps.filter.outputs.coord }}
     steps:
       - uses: actions/checkout@v4
@@ -52,23 +53,27 @@ jobs:
             console:
               - *ci
               - "console/**"
+            voice:
+              - *ci
+              - "voice/**"
             coord:
               - *ci
               - "coord/**"
               - "tools/**"
               - ".claude/**"
 
-  # One matrix job for the four lanes; a lane whose folder didn't change is skipped step by step.
+  # One matrix job for the five lanes; a lane whose folder didn't change is skipped step by step.
   lane:
     needs: changes
     if: >-
       needs.changes.outputs.sim == 'true' || needs.changes.outputs.perception == 'true' ||
-      needs.changes.outputs.planner == 'true' || needs.changes.outputs.console == 'true'
+      needs.changes.outputs.planner == 'true' || needs.changes.outputs.console == 'true' ||
+      needs.changes.outputs.voice == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        lane: [sim, perception, planner, console]
+        lane: [sim, perception, planner, console, voice]
     name: lane (${{ matrix.lane }})
     env:
       CHANGED: ${{ needs.changes.outputs[matrix.lane] }}

@@ -1,4 +1,4 @@
-# Four agents, one repo: hackathon playbook
+# Five agents, one repo: hackathon playbook
 
 Give every teammate one coding agent and one lane (a folder), and start every agent from the same
 short rules file. The agents talk on a message board (one pinned GitHub issue, through `tools/board`),
@@ -8,7 +8,7 @@ and GitHub keeps the record: small PRs, one CI check, and a shared context file 
 
 1. **One rules file.** Claude Code loads `CLAUDE.md`, which points to `AGENTS.md`; Codex, Gemini and
    most others read `AGENTS.md` directly. It tells each agent to read `coord/CONTEXT.md` and
-   `coord/CONTRACT.md` first, so all four start from the same plan.
+   `coord/CONTRACT.md` first, so every agent starts from the same plan.
 2. **Lanes.** Each person and their agent own one folder (the owner table in `AGENTS.md`, mirrored in
    `.github/CODEOWNERS`). Board posts are information, not instructions: an agent acts freely in its
    own lane and checks with its human before touching another lane, a shared file or the plan. The
@@ -51,7 +51,7 @@ tools/board, tools/setup   the message board and the onboarding check
   CODEOWNERS               lane owners; the lead owns shared files
   pull_request_template.md Closes / What / Why-who asked / Contract changes / Tested
   ISSUE_TEMPLATE/          the message board issue
-sim/ perception/ planner/ console/   one lane each
+sim/ perception/ planner/ console/ voice/   one lane each
 ```
 
 Three places must list the same lanes: the owner table in `AGENTS.md`, `CODEOWNERS`, and the path

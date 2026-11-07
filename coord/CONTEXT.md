@@ -32,21 +32,23 @@ Demo moment: the scripted aftershock. The old route fades, the trigger is named,
 and a new verified route is drawn with a one-line reason.
 
 ## Architecture
-Four lanes, one folder each. The interfaces between them live in `coord/CONTRACT.md`.
+Five lanes, one folder each, one per teammate. The interfaces between them live in `coord/CONTRACT.md`.
 
 | Lane | Folder | Spec functions | Owns |
 |---|---|---|---|
 | Sim | `sim/` | 1, 2 (sensors), 3 (aftershock) | MuJoCo world, photo-to-scene builder and backup scene, Scout and Responder models, sensors, aftershock, physics check |
 | Perception | `perception/` | 2, 3 | Seen/inferred/unknown map, Scout exploration, casualty detection, hazard prediction |
 | Planner | `planner/` | 4, 5, 7 | Routes, verify, confidence gate, re-plan, Responder tasks, human gate, reasoning log, offline Gemma, edge budget, handover report |
-| Console | `console/` | 6, screen | Browser screen, operator voice and TTS, translation, first aid guidance, typed commands |
+| Console | `console/` | screen | Browser screen: 3D map, routes, reasoning log, budget meter, online indicator, approve and reject, typed commands, report button |
+| Voice | `voice/` | 6 | Operator voice and TTS, casualty translation, cited first aid guidance, emergency call preparation |
 
 ```
 sim (sensors) --> perception (map, casualties, hazards) --> planner (route) --> sim (physics check)
                                                                |   ^                     |
                          console (commands, approvals) --------+   +---- verified / rejected
                          console (screen) <-- map, routes, reasoning log, budget, link status
-planner --> sim (Responder actions)        planner --> console (report, first aid prompts)
+planner --> sim (Responder actions)        planner --> console (report)
+voice (spoken commands) --> planner        planner (say) --> voice (operator, casualty, first aid)
 ```
 
 ## Lane status (each lane keeps its own block current)
@@ -57,6 +59,8 @@ planner --> sim (Responder actions)        planner --> console (report, first ai
 ### Planner
 - Done: / In progress: / Needs from other lanes:
 ### Console
+- Done: / In progress: / Needs from other lanes:
+### Voice
 - Done: / In progress: / Needs from other lanes:
 
 ## Open decisions
@@ -74,3 +78,4 @@ planner --> sim (Responder actions)        planner --> console (report, first ai
   building and planning, `gemini-3.8-live` and `gemini-3.8-flash-tts` for voice,
   `gemini-3.5-live-translate-preview` for translation, `gemini-3.8-flash` for the report, and a local
   Gemma 4 offline. Earlier ideas were dropped.
+- Sat 7 Nov: five of us, so voice (Function 6) is its own lane, split from the console.
