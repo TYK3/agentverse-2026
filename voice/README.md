@@ -54,3 +54,13 @@ pytest voice/tests -v
 # Run ruff linter:
 ruff check voice
 ```
+
+## Guide voice (Y5, `voice/guide.py`)
+
+A calm voice inside the building for each casualty, started by `voice.start(bus)` (`VOICE_GUIDE=0` turns it off).
+
+- **Reassures:** a new id in `map/casualties` gets a greeting ("You are not alone... help is coming"), then a calm line every 30 s while they wait.
+- **Asks injury questions** one at a time: hear, hurt (where), breathing, bleeding, move, walk. Each is repeated twice after 12 s of silence, then recorded as `none`. Answers come in through `voice.GUIDE.hear(cid, english_text, now)`; `voice.GUIDE.summary(cid)` gives the self-reported answers for triage (Y3) and the paramedic report (Y6). Guidance only, never a diagnosis.
+- **Guides walkers out:** only if they say they can walk and report no head, neck or back injury, no trouble breathing and can move their limbs. The way out is the Responder's own route to them (`route/proposed` that passed `route/verified ok`), walked backwards, read as short steps ("Walk slowly towards the robot's light, about 1.5 metres." "Turn right, then walk about 2 metres."). With no verified route it says "stay where you are" and guides once one is verified. Everyone else is told to keep still.
+- **Aftershock:** `world/change` stops anyone walking ("Stop. Stay where you are. Cover your head.") and drops every route until a new one is verified.
+- All casualty lines go through translation and TTS with a slow, calm delivery style (`speak.CALM_STYLE`).
