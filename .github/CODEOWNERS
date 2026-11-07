@@ -7,5 +7,5 @@
 /tools/                 @TYK3
 # /sim/                 @<login>
 # /perception/          @<login>
-# /autonomy/            @<login>
-# /voice/               @<login>
+# /planner/            @<login>
+# /console/               @<login>

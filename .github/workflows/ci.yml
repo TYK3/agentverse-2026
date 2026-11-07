@@ -29,8 +29,8 @@ jobs:
     outputs:
       sim: ${{ steps.filter.outputs.sim }}
       perception: ${{ steps.filter.outputs.perception }}
-      autonomy: ${{ steps.filter.outputs.autonomy }}
-      voice: ${{ steps.filter.outputs.voice }}
+      planner: ${{ steps.filter.outputs.planner }}
+      console: ${{ steps.filter.outputs.console }}
       coord: ${{ steps.filter.outputs.coord }}
     steps:
       - uses: actions/checkout@v4
@@ -46,12 +46,12 @@ jobs:
             perception:
               - *ci
               - "perception/**"
-            autonomy:
+            planner:
               - *ci
-              - "autonomy/**"
-            voice:
+              - "planner/**"
+            console:
               - *ci
-              - "voice/**"
+              - "console/**"
             coord:
               - *ci
               - "coord/**"
@@ -63,12 +63,12 @@ jobs:
     needs: changes
     if: >-
       needs.changes.outputs.sim == 'true' || needs.changes.outputs.perception == 'true' ||
-      needs.changes.outputs.autonomy == 'true' || needs.changes.outputs.voice == 'true'
+      needs.changes.outputs.planner == 'true' || needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        lane: [sim, perception, autonomy, voice]
+        lane: [sim, perception, planner, console]
     name: lane (${{ matrix.lane }})
     env:
       CHANGED: ${{ needs.changes.outputs[matrix.lane] }}

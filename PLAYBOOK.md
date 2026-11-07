@@ -51,7 +51,7 @@ tools/board, tools/setup   the message board and the onboarding check
   CODEOWNERS               lane owners; the lead owns shared files
   pull_request_template.md Closes / What / Why-who asked / Contract changes / Tested
   ISSUE_TEMPLATE/          the message board issue
-sim/ perception/ autonomy/ voice/   one lane each
+sim/ perception/ planner/ console/   one lane each
 ```
 
 Three places must list the same lanes: the owner table in `AGENTS.md`, `CODEOWNERS`, and the path

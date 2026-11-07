@@ -1,6 +1,6 @@
 # Rules for every agent on this team
 
-Before any work, read `coord/CONTEXT.md` (the idea, lanes, open decisions, decisions log) and
+Before any work, read `docs/aftershock.md` (the spec), `coord/CONTEXT.md` (the idea, lanes, open decisions, decisions log) and
 `coord/CONTRACT.md` (the interfaces between lanes). Before building on someone else's work:
 `git fetch origin && git log --oneline -20 origin/main`.
 
@@ -52,8 +52,8 @@ The lead fills in owners at kickoff, and `.github/CODEOWNERS` must match. Do not
 
 | Area | Owner (GitHub login) | Folders |
 |---|---|---|
-| Sim and demo: world, sensors, judge controls, demo screen | | `sim/` |
-| Perception: SLAM, map, person detection | | `perception/` |
-| Autonomy: mission manager, decisions, re-planning, handover | | `autonomy/` |
-| Voice: speech, triage dialogue | | `voice/` |
+| Sim: MuJoCo world, scene builder, robots, sensors, aftershock, physics check | | `sim/` |
+| Perception: Scout mapping, casualty detection, hazard prediction | | `perception/` |
+| Planner: routes, confidence gate, re-planning, Responder, human gate, offline Gemma, report | | `planner/` |
+| Console: operator screen, voice, translation, first aid guidance | | `console/` |
 | Shared: rules, contract, CI, board tools | `@TYK3` | `coord/`, `.github/`, `tools/`, `.claude/`, `AGENTS.md`, `CLAUDE.md` |

@@ -1,10 +1,13 @@
-# sim lane: the world, the sensors, the demo screen
+# sim lane: the world and the robots
 
-Owns: the simulated building, the rover model, sensor streams (real and emulated: thermal, gas, CO2),
-noise, the judge controls (collapse a corridor, add a voice, start a gas leak, drop the radio link),
-and the demo screen (sim view, live 3D map, detections, decision log).
+Spec: Function 1, the sensor half of Function 2, and the aftershock in Function 3 of `docs/aftershock.md`.
 
-Ships first: a recorded or scripted sensor stream that the other lanes can build against
-(see "Fakes" in `coord/CONTRACT.md`).
+Owns: the MuJoCo scene of the tabletop collapsed building (the photo-to-scene builder with
+`gemini-4-argon` and its self-critique loop, plus the hand-built backup scene), the Scout and Responder
+robot models and the gripper, the simulated sensors (ray-cast LiDAR, camera, thermal, acoustic), the
+scripted aftershock, and the physics check that runs a proposed route and reports unstable cells.
+
+Ships first: the hand-built backup scene with both robots and a recorded sensor stream, so the other
+lanes can build against it before the scene builder works.
 
 Owner: see the owner table in `AGENTS.md`. Only this lane's agent edits files here; others ask on the board.
