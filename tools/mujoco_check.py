@@ -1,7 +1,7 @@
 """Check that MuJoCo works on this computer.
 
-Run:  python sim/smoke_test.py
-Optional: python sim/smoke_test.py path/to/mujoco_menagerie   (also loads the Franka arm)
+Run:  python tools/mujoco_check.py
+Optional: python tools/mujoco_check.py path/to/mujoco_menagerie   (also loads the Franka arm)
 """
 import os
 import sys

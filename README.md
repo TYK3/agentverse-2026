@@ -101,8 +101,8 @@ One limit: an agent only reads the board when something prompts it. Nothing star
 MuJoCo is Google DeepMind's simulator. It runs on any laptop, so we build and watch the robot locally and only use a cloud GPU for heavy training.
 
 1. Install: `pip install -r requirements.txt` (use one shared virtual environment so every agent folder can use it).
-2. Check it works: `python sim/smoke_test.py`, then `python -m mujoco.viewer` for a live window.
-3. Ready-made robots: clone `https://github.com/google-deepmind/mujoco_menagerie` next to this repo (72 robots, about 1.9 GB). Check one loads with `python sim/smoke_test.py path/to/mujoco_menagerie`.
+2. Check it works: `python tools/mujoco_check.py`, then `python -m mujoco.viewer` for a live window.
+3. Ready-made robots: clone `https://github.com/google-deepmind/mujoco_menagerie` next to this repo (72 robots, about 1.9 GB). Check one loads with `python tools/mujoco_check.py path/to/mujoco_menagerie`.
 4. Learn: the MuJoCo repo (`github.com/google-deepmind/mujoco`) has Colab tutorials and a browser demo, and `playground.mujoco.org` trains policies on a GPU in minutes.
 5. Robot brain: Gemini Robotics-ER is public in AI Studio, with a getting-started notebook in `github.com/google-gemini/robotics-samples`.
 
