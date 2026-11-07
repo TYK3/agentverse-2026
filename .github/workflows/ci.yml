@@ -146,6 +146,8 @@ jobs:
           for f in .claude/settings.json .mcp.json; do
             [ ! -f "$f" ] || jq empty "$f" || { echo "invalid JSON: $f"; exit 1; }
           done
+      - name: Scenario runner, every lane faked (tools/run_scenario.py)
+        run: python3 tools/run_scenario.py --seed 7 --auto-approve
       - name: No secrets or local state committed
         run: |
           bad=$(git ls-files '.env' '.env.*' '.board/*' '.claude/settings.local.json' '.claude/worktrees/*')
