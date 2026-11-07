@@ -109,7 +109,7 @@ def test_start_publishes_changes_then_snapshot(monkeypatch):
             self.subs, self.sent = {}, []
 
         def subscribe(self, topic, fn):
-            self.subs[topic] = fn
+            self.subs.setdefault(topic, []).append(fn)
 
         async def publish(self, topic, data):
             self.sent.append((topic, data))
@@ -118,13 +118,17 @@ def test_start_publishes_changes_then_snapshot(monkeypatch):
         monkeypatch.setattr(perception, "PERIOD", 0.01)
         bus = FakeBus()
         grid = await perception.start(bus)
-        bus.subs["sensors/scout"]({"pose": {"pos": [0.0, 0.0, Z], "yaw": 0.0}, "lidar": sweep((0.0, 0.0))})
-        await asyncio.sleep(0.15)
+        for fn in bus.subs["sensors/scout"]:
+            fn({"pose": {"pos": [0.0, 0.0, Z], "yaw": 0.0}, "lidar": sweep((0.0, 0.0))})
+        for _ in range(200):                                      # until tick 10's snapshot, at most 2 s
+            await asyncio.sleep(0.01)
+            if sum(t == "map/cells" for t, _ in bus.sent) >= 2:
+                break
         return bus, grid
 
     bus, grid = asyncio.run(run())
-    assert {t for t, _ in bus.sent} == {"map/cells"}
-    sizes = [len(d["cells"]) for _, d in bus.sent]
+    assert {t for t, _ in bus.sent} <= {"map/cells", "scout/goto"}
+    sizes = [len(d["cells"]) for t, d in bus.sent if t == "map/cells"]
     assert sizes[0] == len(grid.cells)                            # the first tick sends every change
     assert len(grid.cells) in sizes[1:]                           # tick 10 is a full snapshot
 
