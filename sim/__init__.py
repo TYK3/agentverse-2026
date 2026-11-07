@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 
-from sim import inject, responder, scene
+from sim import debris, inject, responder, scene
 from sim.world import World
 
 RATE_HZ = 10
@@ -45,5 +45,6 @@ async def start(bus, loop=True):
     inject.install(world, bus)
     world.responder = responder.attach(world, bus)
     if loop:
+        debris.attach(world, bus)  # Y8: world/debris (sim truth, for scoring and the console)
         world.task = asyncio.create_task(run(world, bus))
     return world
