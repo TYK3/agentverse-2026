@@ -72,9 +72,22 @@ class Run:
         self.gemini = None
         publish = bus.publish
 
+        try:
+            from coord.messages import validate_payload
+        except ImportError:
+            def validate_payload(topic, data):
+                return data
+
         async def logged(topic, data):
-            self.log.write(json.dumps({"t": round(time.monotonic() - self.t0, 3), "topic": topic,
-                                       "data": data}) + "\n")
+            entry = {"t": round(time.monotonic() - self.t0, 3), "topic": topic, "data": data}
+            try:
+                validate_payload(topic, data)
+            except ValueError as e:  # the hub drops it: log why, and do not count it as seen
+                entry["rejected"] = str(e).splitlines()[0]
+                self.log.write(json.dumps(entry) + "\n")
+                print(f"  !!  hub rejected {topic}: {json.dumps(data)[:120]}")
+                raise
+            self.log.write(json.dumps(entry) + "\n")
             self.seen.append((topic, data))
             if topic == "status/gemini":
                 self.gemini = data
@@ -212,6 +225,9 @@ async def main(args):
             print(f"  ..  injecting a block at {cell} (unscripted change)")
             if "sim" in real:
                 await call(hook(mods["sim"], "inject"), cell)
+                await run.expect("block landed (real sim)", "world/change", since=mark)
+                if "perception" not in real:
+                    await world.inject(cell)  # the fake perception's stand-in for seeing it
             else:
                 await world.inject(cell)
             r3 = await run.expect("re-planned after injection", "route/proposed",
@@ -247,11 +263,13 @@ def hook(started, name):
 
 
 def pick_inject_cell(route, given):
+    """[i, j, k]: the grid cell sim.World.inject() (#51) and the fake world both take."""
     if given:
-        return [int(v) for v in given.split(",")][:2]
+        v = [int(x) for x in given.split(",")]
+        return (v + [0])[:3]
     cells = route["cells"]
     at_wall = [c for c in cells if c[0] == fakes.WALL_X]
-    return (at_wall or cells[len(cells) // 2 : len(cells) // 2 + 1])[0][:2]
+    return list((at_wall or cells[len(cells) // 2 : len(cells) // 2 + 1])[0][:3])
 
 
 def parse(argv=None):
@@ -264,7 +282,7 @@ def parse(argv=None):
     p.add_argument("--real", default="", help="comma list of lanes to run for real, e.g. sim,planner")
     p.add_argument("--no-inject", dest="inject", action="store_false",
                    help="skip the injected block (the unscripted change)")
-    p.add_argument("--inject-cell", help="x,y grid cell for the injected block (default: on route)")
+    p.add_argument("--inject-cell", help="i,j[,k] grid cell for the injected block (default: on route)")
     p.add_argument("--step", type=float, default=0.3, help="fake Responder drive time, seconds")
     p.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for each milestone")
     return p.parse_args(argv)

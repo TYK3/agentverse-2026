@@ -59,17 +59,21 @@ class FakeWorld:
         for fn in self.listeners:
             await fn(cells)
 
+    def fall(self):
+        """Apply the scripted collapse; return the cells that changed (none if already applied)."""
+        cells = [c for cs in AFTERSHOCK_FALLS.values() for c in cs if c not in self.collapsed]
+        self.collapsed |= set(cells)
+        return cells
+
     async def aftershock(self, bus):
-        moved = []
-        for block, cells in AFTERSHOCK_FALLS.items():
-            self.collapsed |= set(cells)
-            moved.append(block)
-        await bus.publish("world/change", {"kind": "aftershock", "t": self.t(), "moved_blocks": moved})
-        await self._changed([c for cs in AFTERSHOCK_FALLS.values() for c in cs])
+        cells = self.fall()
+        await bus.publish("world/change", {"kind": "aftershock", "t": self.t(),
+                                           "moved_blocks": list(AFTERSHOCK_FALLS)})
+        await self._changed(cells)
 
     async def inject(self, cell):
         """A block dropped by a person while the system runs. No message announces it."""
-        cell = tuple(cell)
+        cell = tuple(cell[:2])
         self.occupied.add(cell)
         self.injected.append(cell)
         await self._changed([cell])
@@ -115,10 +119,19 @@ async def fake_perception(bus, world):
         await bus.publish("map/cells", {
             "t": world.t(), "res": RES, "cells": [_cell(c, world.blocked(c)) for c in cells]})
 
-    async def on_world_change(_):
+    async def on_world_change(msg):
+        # With a real sim the fake world learns of the collapse only from this message.
+        cells = world.fall() if msg["kind"] == "aftershock" else []
         await bus.publish("map/hazards", hazards())
+        if cells:
+            await on_change(cells)
 
-    bus.subscribe("scene/loaded", full_map)
+    # Answer on the next loop tick, not inside sim's publish: sim may still be wiring subscriptions.
+    # (Return None: the hub's Bus awaits a callback's awaitable result.)
+    def later(msg):
+        asyncio.ensure_future(full_map(msg))
+
+    bus.subscribe("scene/loaded", later)
     bus.subscribe("world/change", on_world_change)
     world.listeners.append(on_change)
     await bus.publish("scout/goto", {"target": pos((4, 4)), "reason": "explore toward unknown cells"})
