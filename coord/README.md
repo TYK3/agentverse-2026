@@ -19,7 +19,7 @@ raise rather than silently disabling a lane. Subscriber exceptions are logged wh
 other subscribers continue.
 
 The browser connects to `ws://localhost:8000/ws` using `{ "topic": "...", "data": ... }`.
-Only `operator/command` and `gate/answer` may be sent from the browser. Invalid
+Only `operator/command`, `gate/answer` and the offline toggle `status/link` may be sent from the browser. Invalid
 messages close with code 1008 before dispatch. Arrays stay arrays. The latest 200
 forwarded events are replayed in order. This event history is not a map snapshot;
 perception supplies periodic full snapshots. `sensors/scout` goes only to local
