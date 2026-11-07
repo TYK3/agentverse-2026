@@ -63,3 +63,33 @@ python -m planner.fake_run --map coord/fixtures/map__cells.json \
 
 Unreachable routes print the failure result and exit 1. The default development
 scene has a single doorway at `[3,2,0]`; marking that cell collapsed blocks it.
+
+## Human approval and tasks (T14)
+
+`router = await planner.start(bus)` attaches the verification loop as
+`router.loop`, plus the budget publisher as `router.task`. Use that existing loop.
+`await loop.mission(start, goal, item="water", action="deliver")` dispatches
+`move`, `place_supply`, `release` after physics verification and the confidence
+gate. `action="grip"` adds `grip` after `move` and always requests human approval.
+The current wire `item` names supplies only. Gripping a debris block requires
+an agreed block-target field; this API does not claim to clear an obstacle.
+A route crossing a newly reported `at_risk` cell requests `enter_at_risk` approval.
+Each request is published as `gate/request {id,kind,summary,route}` and expires
+after 60 seconds. It does not block other bus messages while waiting.
+
+Only a matching, literal `approved: true` in `gate/answer` unlocks that request;
+denials and timeouts leave the Responder idle and record the reason in
+`log/decision`. Duplicate and stale answers cannot replay an action. A new
+mission, replacement route or aftershock cancels the outstanding approval.
+An approval cannot override a failed physics check, occupied or unobserved
+cells, or a collapsed cell. The loop checks these again before every command.
+
+`await loop.prepare_emergency_call(summary)` displays the prepared message in
+`gate/request` with kind `emergency_call`. Approval records the prepared message
+for the operator; it emits no robot action and places no call.
+
+Action messages are submitted in order for the sim to execute. The current
+contract has no action-completion acknowledgements; publishing an action does
+not prove that the robot arrived or delivered supplies. Sim must hold and drop
+queued work on an aftershock, while this loop cancels any remaining dispatch.
+`gate_timeout` can be shortened in tests; the production default is 60 seconds.

@@ -184,7 +184,7 @@ class RoutePlanner:
         self.hazards = data
 
     async def propose(
-        self, start: Cell, goal: Cell, *, goal_text: str = "deliver water to c1"
+        self, start: Cell, goal: Cell, *, goal_text: str = "deliver water to c1", publish: bool = True
     ) -> dict:
         if self.map_cells is None:
             return {"status": "no_verified_route", "needs": "re-look", "cells": []}
@@ -198,6 +198,7 @@ class RoutePlanner:
                 "goal": goal_text,
                 "model": "local-astar",
             }
-            await self.bus.publish("route/proposed", proposal)
+            if publish:
+                await self.bus.publish("route/proposed", proposal)
             return {**result, "proposal": proposal}
         return result
