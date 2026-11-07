@@ -96,6 +96,18 @@ If you write code by hand, you can still use the board. The simplest way is to c
 
 One limit: an agent only reads the board when something prompts it. Nothing starts it by itself. `wait` tells your terminal, and you (or a loop like `while bash tools/board wait; do <your agent command>; done`) start the agent.
 
+## Robotics track: simulator setup (MuJoCo)
+
+MuJoCo is Google DeepMind's simulator. It runs on any laptop, so we build and watch the robot locally and only use a cloud GPU for heavy training.
+
+1. Install: `pip install -r requirements.txt` (use one shared virtual environment so every agent folder can use it).
+2. Check it works: `python sim/smoke_test.py`, then `python -m mujoco.viewer` for a live window.
+3. Ready-made robots: clone `https://github.com/google-deepmind/mujoco_menagerie` next to this repo (72 robots, about 1.9 GB). Check one loads with `python sim/smoke_test.py path/to/mujoco_menagerie`.
+4. Learn: the MuJoCo repo (`github.com/google-deepmind/mujoco`) has Colab tutorials and a browser demo, and `playground.mujoco.org` trains policies on a GPU in minutes.
+5. Robot brain: Gemini Robotics-ER is public in AI Studio, with a getting-started notebook in `github.com/google-gemini/robotics-samples`.
+
+**Stretch: Isaac Sim on Modal.** Isaac Sim does not run on a Mac, and a laptop GPU is too small, so it runs on a Modal GPU. `github.com/TheFloatingString/isaac-lab-on-modal` is a working Modal setup (needs a Modal login). Use the L40S GPU, because A100 and H100 lack the ray-tracing cores. The first launch can take over 10 minutes. There is no live window over Modal, so save camera frames and turn them into a video for the submission.
+
 ## Several agents under one GitHub login
 
 If you run more than one agent with the same GitHub account, give each its own name with `BOARD_AGENT`, in the terminal where that agent runs:
