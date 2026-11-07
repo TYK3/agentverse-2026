@@ -37,9 +37,13 @@
   <worldbody>
     <light name="sun" pos="0.5 0 6" dir="0 0 -1" directional="true" diffuse="0.8 0.8 0.8"/>
 
-    <!-- Ground plate: a mocap body, so the aftershock can shake it by moving data.mocap_pos. -->
-    <body name="ground" mocap="true" pos="0 0 0">
-      <geom name="floor" type="box" size="3 3 0.05" pos="0 0 -0.05" rgba="0.5 0.5 0.5 1"/>
+    <!-- Ground: a mocap body the aftershock moves with data.mocap_pos (T05). Moving a mocap body gives it
+         no velocity, so friction would never drag the blocks; the floor is therefore a dynamic plate welded
+         to the mocap (see <equality>), which does carry velocity. gravcomp keeps the weld from sagging. -->
+    <body name="ground" mocap="true" pos="0 0 0"/>
+    <body name="plate" pos="0 0 0" gravcomp="1">
+      <freejoint/>
+      <geom name="floor" type="box" size="3 3 0.05" pos="0 0 -0.05" density="100" rgba="0.5 0.5 0.5 1"/>
     </body>
 
     <!-- Outer walls. label: wall -->
@@ -75,6 +79,14 @@
       <geom name="c1_g" type="capsule" size="0.12 0.3" contype="0" conaffinity="0" rgba="1 0.3 0.3 1"/>
     </body>
 
+    <!-- Spare rubble for the unscripted change (sim/inject.py, T05): parked under the floor with no
+         collisions and gravity compensated, then dropped into place on POST /inject block_added.
+         Not named b<number>, so scene/loaded leaves it out until it is used. -->
+    <body name="x1" pos="0 0 -1" gravcomp="1">
+      <freejoint/>
+      <geom name="x1_rubble" type="box" size="0.1 0.1 0.08" density="600" contype="0" conaffinity="0" rgba="0.65 0.4 0.3 1"/>
+    </body>
+
     <!-- Scout rover (T04): a mocap body driven kinematically by sim/world.py. Its origin is the sensor
          origin (LiDAR height 0.075 m); it faces +x in its own frame and starts outside the breach facing +y.
          Its geoms do not collide, so it never shoves rubble; world.py refuses moves into occupied space. -->
@@ -86,4 +98,16 @@
 
     <camera name="overview" pos="0.5 -4 3.5" xyaxes="1 0 0 0 0.6 0.8"/>
   </worldbody>
+
+  <!-- Aftershock (T05): the plate follows the mocap ground; the outer shell b1-b5 is braced to the plate,
+       so a shake of 0.015 m at 4 Hz fails the leaning slab b10 and the wall b8 it leans on, and nothing
+       else moves more than 1 cm (sweep 0.012-0.018 m gives the same pair). Interior walls and rubble are free. -->
+  <equality>
+    <weld name="plate_to_ground" body1="plate" body2="ground" solref="0.004 1"/>
+    <weld name="brace_b1" body1="b1" body2="plate"/>
+    <weld name="brace_b2" body1="b2" body2="plate"/>
+    <weld name="brace_b3" body1="b3" body2="plate"/>
+    <weld name="brace_b4" body1="b4" body2="plate"/>
+    <weld name="brace_b5" body1="b5" body2="plate"/>
+  </equality>
 </mujoco>

@@ -1,7 +1,9 @@
-"""The running sim world (T04): MuJoCo physics plus the kinematic Scout and its sensors.
+"""The running sim world (T04, T05): MuJoCo physics, the kinematic Scout and its sensors, the live
+aftershock and the injected block.
 
-Other sim tasks (aftershock T05, physics check T06) work on the same `World`: `world.m`,
-`world.d`, `world.t` and `world.tick(dt)`.
+Other sim tasks (Responder T06) work on the same `World`: `world.m`, `world.d`, `world.t`,
+`world.tick(dt)`, and `world.shaking` (the Responder freezes while it is true and drops its move).
+`tick` returns the events to publish, as (topic, data) pairs.
 """
 
 import math
@@ -9,12 +11,13 @@ import math
 import mujoco
 import numpy as np
 
-from sim import scene, sensors
+from sim import aftershock, scene, sensors
 
 SPEED = 0.3            # m/s
 CLEARANCE = 0.15       # metres of free space the Scout needs ahead before it moves
 HALF_WIDTH = 0.08      # Scout chassis half width; side rays check the corners
 ARRIVE = 0.02          # metres
+LAND = 1.0             # seconds an injected block gets to fall and settle before world/change
 
 
 class World:
@@ -29,6 +32,65 @@ class World:
         self.reason = ""
         self.state = "idle"         # idle | moving | arrived | blocked
         self.renderer = sensors.make_renderer(self.m) if render else None
+        self.ground = aftershock.ground_mocap(self.m)
+        self.ground_base = self.d.mocap_pos[self.ground].copy()
+        self.shake_t0 = None        # world time the live aftershock began, or None
+        self.shake_start = None     # block positions when it began
+        self.events = []            # (topic, data) produced since the last tick
+        self.landing = None         # (world time, name) when an injected block will have landed
+        self.refresh_unstable()
+
+    # ---- physics route check ----------------------------------------------------
+    def refresh_unstable(self):
+        """Recompute (on a copy) which cells a further aftershock would make unsafe."""
+        self.unstable, self.would_move = aftershock.unstable_xy(self.m, self.d)
+
+    def verify(self, route):
+        """route/verified payload for a route/proposed message (a cached lookup, well under 1 s)."""
+        return aftershock.verify(route, self.unstable, self.would_move)
+
+    # ---- the live aftershock and the unscripted change --------------------------
+    @property
+    def shaking(self):
+        return self.shake_t0 is not None
+
+    def trigger_aftershock(self):
+        """Start shaking the live world. world/change goes out when it has settled (3 s of world time)."""
+        if self.shaking:
+            return False
+        self.shake_t0 = self.t
+        ids = aftershock.candidate_blocks(self.m)
+        self.shake_start = (ids, self.d.xpos[ids].copy())
+        return True
+
+    def _finish_aftershock(self):
+        ids, start = self.shake_start
+        moved = [aftershock.body_name(self.m, i) for i, p in zip(ids, start, strict=True)
+                 if np.linalg.norm(self.d.xpos[i] - p) > aftershock.MOVED]
+        self.shake_t0 = self.shake_start = None
+        self.d.mocap_pos[self.ground] = self.ground_base
+        self.refresh_unstable()
+        self.events.append(("world/change", {"kind": "aftershock", "t": round(self.t, 2), "moved_blocks": moved}))
+
+    def add_block(self, pos):
+        """Drop the spare rubble block at pos [x, y, z] (z is its centre height). Returns its name or None."""
+        spare = [b for b in aftershock.spare_ids(self.m) if self.m.body_gravcomp[b] == 1]
+        if not spare:
+            return None
+        b = spare[0]
+        g = self.m.body_geomadr[b]
+        self.m.body_gravcomp[b] = 0
+        self.m.geom_contype[g] = self.m.geom_conaffinity[g] = 1
+        self.m.body_contype[b] = self.m.body_conaffinity[b] = 1      # the broad phase filters on these too
+        adr = self.m.jnt_qposadr[self.m.body_jntadr[b]]
+        vadr = self.m.jnt_dofadr[self.m.body_jntadr[b]]
+        z = max(float(pos[2]), float(self.m.geom_size[g][2]) + 0.005)
+        self.d.qpos[adr:adr + 7] = [pos[0], pos[1], z, 1, 0, 0, 0]
+        self.d.qvel[vadr:vadr + 6] = 0
+        mujoco.mj_forward(self.m, self.d)
+        name = aftershock.body_name(self.m, b)
+        self.landing = (self.t + LAND, name)    # world/change once it has landed (see tick)
+        return name
 
     # ---- Scout pose --------------------------------------------------------------
     @property
@@ -80,11 +142,23 @@ class World:
 
     # ---- time --------------------------------------------------------------------
     def tick(self, dt=0.1):
-        """Advance physics and the Scout by dt seconds."""
+        """Advance physics and the Scout by dt seconds. Returns the events to publish."""
         self._drive(dt)
-        for _ in range(max(1, round(dt / self.m.opt.timestep))):
+        h = self.m.opt.timestep
+        for n in range(max(1, round(dt / h))):
+            if self.shaking:
+                offset = aftershock.shake_offset(self.t + n * h - self.shake_t0)
+                self.d.mocap_pos[self.ground] = self.ground_base + offset
             mujoco.mj_step(self.m, self.d)
         self.t = round(self.t + dt, 6)
+        if self.shaking and self.t - self.shake_t0 >= aftershock.DURATION - 1e-9:
+            self._finish_aftershock()
+        if self.landing and self.t >= self.landing[0] - 1e-9:
+            name, self.landing = self.landing[1], None
+            self.refresh_unstable()
+            self.events.append(("world/change", {"kind": "block_added", "t": round(self.t, 2), "moved_blocks": [name]}))
+        events, self.events = self.events, []
+        return events
 
     # ---- sensors -----------------------------------------------------------------
     def sensors_message(self, camera=True):
