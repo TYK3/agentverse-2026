@@ -1,36 +1,74 @@
 import './style.css';
-import * as THREE from 'three';
 import { connect, on, send } from './bus';
+import {
+  MapViewer,
+  type MapCellsPayload,
+  type HazardRecord,
+  type CasualtyRecord,
+  type ScoutSensorsPayload,
+  type ResponderActionPayload,
+  type RouteProposedPayload
+} from './map';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x101a29);
-const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 100);
-camera.position.set(3, 3, 5);
-camera.lookAt(0, 0, 0);
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-scene.add(new THREE.GridHelper(6, 12, 0x46627e, 0x29384c));
-scene.add(new THREE.AxesHelper(0.8));
-function resize(): void {
-  const width = canvas.clientWidth || 1, height = canvas.clientHeight || 1;
-  renderer.setSize(width, height, false);
-  camera.aspect = width / height;
-  camera.updateProjectionMatrix();
-}
-new ResizeObserver(resize).observe(canvas);
-function frame(): void { renderer.render(scene, camera); requestAnimationFrame(frame); }
-resize(); frame();
+const mapViewer = new MapViewer(canvas);
+
+const fpsBadge = document.querySelector<HTMLElement>('#fps-badge');
+const cellCountBadge = document.querySelector<HTMLElement>('#cell-count-badge');
+mapViewer.setHudElements(fpsBadge, cellCountBadge);
+
+// UI Button actions
+document.querySelector<HTMLButtonElement>('#btn-demo-scene')?.addEventListener('click', () => {
+  mapViewer.loadBackupSceneDemo();
+});
+
+document.querySelector<HTMLButtonElement>('#btn-benchmark-100k')?.addEventListener('click', () => {
+  mapViewer.generate100kBenchmark();
+});
 
 const connection = document.querySelector<HTMLElement>('#connection-status')!;
 const log = document.querySelector<HTMLOListElement>('#reasoning-log')!;
-const mode = new URLSearchParams(location.search).get('fake') === '1';
-document.querySelector<HTMLElement>('#mode-label')!.textContent = mode ? 'FAKE MODE · fixture replay' : 'LIVE HUB';
-connection.textContent = mode ? 'Fixture replay' : 'Connecting…';
+
+const searchParams = new URLSearchParams(window.location.search);
+const isFakeMode = searchParams.get('fake') === '1';
+const isBenchmarkMode = searchParams.has('benchmark');
+
+document.querySelector<HTMLElement>('#mode-label')!.textContent = isFakeMode
+  ? 'FAKE MODE · fixture replay'
+  : 'LIVE HUB';
+connection.textContent = isFakeMode ? 'Fixture replay' : 'Connecting…';
+
+// 3D Map Event Subscriptions
+on('map/cells', data => {
+  mapViewer.updateCells(data as MapCellsPayload);
+});
+
+on('map/hazards', data => {
+  mapViewer.updateHazards(data as HazardRecord[]);
+});
+
+on('map/casualties', data => {
+  mapViewer.updateCasualties(data as CasualtyRecord[]);
+});
+
+on('sensors/scout', data => {
+  mapViewer.updateScoutPose(data as ScoutSensorsPayload);
+});
+
+on('responder/action', data => {
+  mapViewer.updateResponderAction(data as ResponderActionPayload);
+});
+
+on('route/proposed', data => {
+  mapViewer.updateRouteProposed(data as RouteProposedPayload);
+});
+
+// System Status and Reasoning Log
 on('console/connection', data => {
   const online = Boolean((data as { online?: boolean })?.online);
   connection.textContent = online ? 'Online' : 'Offline · reconnecting';
 });
+
 on('*', data => {
   const event = data as { topic: string; data: unknown };
   if (event.topic === 'console/connection') return;
@@ -39,14 +77,32 @@ on('*', data => {
   log.prepend(item);
   while (log.children.length > 30) log.lastElementChild?.remove();
 });
+
 on('gate/decision', data => {
   document.querySelector<HTMLElement>('#confidence-panel')!.textContent = JSON.stringify(data);
 });
+
+// Operator Command Submission
 const input = document.querySelector<HTMLInputElement>('#operator-command')!;
 function submit(): void {
   const text = input.value.trim();
-  if (text && send('operator/command', { text, source: 'typed' })) input.value = '';
+  if (text && send('operator/command', { text, source: 'typed' })) {
+    input.value = '';
+  }
 }
 document.querySelector<HTMLButtonElement>('#send-command')!.addEventListener('click', submit);
-input.addEventListener('keydown', event => { if (event.key === 'Enter') submit(); });
+input.addEventListener('keydown', event => {
+  if (event.key === 'Enter') submit();
+});
+
+// Initial boot
+if (isFakeMode) {
+  // Populate the backup building demo scene immediately so the coloured map, casualty and hazards are visible
+  mapViewer.loadBackupSceneDemo();
+}
+
+if (isBenchmarkMode) {
+  mapViewer.generate100kBenchmark();
+}
+
 connect();
