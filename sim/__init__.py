@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 
-from sim import inject, scene
+from sim import inject, responder, scene
 from sim.world import World
 
 RATE_HZ = 10
@@ -29,7 +29,9 @@ async def start(bus, loop=True):
 
     Publishes scene/loaded; follows scout/goto; answers route/proposed with route/verified from a
     cached physics check; streams sensors/scout at 10 Hz and world/change after an aftershock or an
-    injected block. On the hub it also serves POST /inject (sim/inject.py).
+    injected block. On the hub it also serves POST /inject (sim/inject.py). The Responder (T06,
+    sim/responder.py, `world.responder`) follows route/proposed, gate/* and responder/action, freezes
+    on world/change and reports every outcome as log/decision.
     """
     world = World()
     await bus.publish("scene/loaded", scene.scene_loaded(world.m, world.d))
@@ -40,6 +42,7 @@ async def start(bus, loop=True):
 
     bus.subscribe("route/proposed", on_route)
     inject.install(world)
+    world.responder = responder.attach(world, bus, loop=loop)
     if loop:
         world.task = asyncio.create_task(run(world, bus))
     return world
