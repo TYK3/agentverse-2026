@@ -13,6 +13,8 @@ function fixtures(): Plugin {
       mkdirSync(target, { recursive: true });
       const names = existsSync(source) ? readdirSync(source).filter(name => /^[\w.-]+\.json$/.test(name)) : [];
       for (const name of names) copyFileSync(join(source, name), join(target, name));
+      const demo = resolve(projectDir, 'fixtures/panels.json');
+      if (existsSync(demo)) { copyFileSync(demo, join(target, 'panels.json')); names.push('panels.json'); }
       writeFileSync(join(target, 'manifest.json'), JSON.stringify(names, null, 2));
     }
   };
