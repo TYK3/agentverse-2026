@@ -1,0 +1,8 @@
+{
+  "topic": "responder/action",
+  "data": {
+    "action": "place_supply",
+    "route": "r3",
+    "item": "water"
+  }
+}
