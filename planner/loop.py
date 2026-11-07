@@ -8,6 +8,7 @@ timeout; it never blocks the decision (off, error or timeout: "online_review" sa
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import time
@@ -40,8 +41,14 @@ class Loop:
     """One Responder mission at a time. Start it with `await loop.mission(start, goal, ...)`."""
 
     def __init__(self, bus, router: RoutePlanner, *, gem=None, clock=time.monotonic,
-                 review_timeout=REVIEW_TIMEOUT_S):
+                 review_timeout=REVIEW_TIMEOUT_S, budget=None, places=None, start_cell=None, interpret=None):
         self.bus, self.router = bus, router
+        self.budget = budget  # planner.budget.Budget: times each local step for status/budget
+        self.places = places or {}  # operator place name -> goal cell, for operator/command
+        self.start_cell = start_cell  # () -> the Responder's current cell
+        self.interpret = interpret  # (text, place names) -> {place, item, why, model}; planner.local_llm
+        self.online = True  # from status/link
+        self.offline_acts: list[dict] = []  # routes acted on while offline, re-checked when the link returns
         self.gem = gem if gem is not None else _gem()
         self.clock, self.t0 = clock, clock()
         self.review_timeout = review_timeout
@@ -65,13 +72,17 @@ class Loop:
     def attach(self):
         for topic, fn in (("route/verified", self.on_verified), ("world/change", self.on_world_change),
                           ("map/cells", self.on_map), ("map/hazards", self.on_hazards),
-                          ("map/casualties", self.on_casualties), ("gate/answer", self.on_answer)):
+                          ("map/casualties", self.on_casualties), ("gate/answer", self.on_answer),
+                          ("status/link", self.on_link), ("operator/command", self.on_command)):
             self.bus.subscribe(topic, fn)
         return self
 
     def _id(self, kind):
         self._n[kind] += 1
         return f"{kind}{self._n[kind]}"
+
+    def _step(self):
+        return self.budget.step() if self.budget else contextlib.nullcontext()
 
     def _t(self):
         return round(max(0.0, self.clock() - self.t0), 2)
@@ -96,7 +107,8 @@ class Loop:
         m = self.mission_args
         self.router.hazards = self.hazards + [
             {"cell": list(c), "status": "at_risk", "why": w, "estimate": True} for c, w in self.unstable.items()]
-        result = await self.router.propose(m["start"], m["goal"], goal_text=m["goal_text"])
+        with self._step():
+            result = await self.router.propose(m["start"], m["goal"], goal_text=m["goal_text"])
         if result["status"] == "ok":
             self.route, self.state, self.waiting_scan = result["proposal"], PROPOSED, None
             await self.log(why, "proposed", f"route {self.route['id']}: {len(self.route['cells'])} seen cells "
@@ -155,13 +167,16 @@ class Loop:
 
     async def gate(self, physics):
         self.state = GATED
-        conf, why, weakest = self.confidence()
-        outcome = gate_outcome(conf)
+        with self._step():
+            conf, why, weakest = self.confidence()
+            outcome = gate_outcome(conf)
         rid = self.route["id"]
         if outcome == "act":
             agree, review_why = await self.online_review()
             if agree is False:
                 return await self.refer(conf, f"online review disagrees: {review_why}", physics)
+            if not self.online:
+                self.offline_acts.append({"route": self.route, "hazards": list(self.router.hazards)})
             await self.decide("act", conf, f"{rid} verified and {why}; online review {self.review}")
             await self.log(why, "act", f"send the Responder along {rid}", physics=physics, model=self._model())
             return await self.execute()
@@ -174,9 +189,12 @@ class Loop:
             return await self.wait_for_scan(f"re-look at cell {cell}")
         await self.refer(conf, why, physics)
 
-    async def online_review(self):
+    async def online_review(self, route=None, hazards=None):
         """Ask gemini-4-argon to double-check a verified route; (None, why) when it could not run."""
         gem = self.gem
+        if not self.online:
+            self.review = "skipped (offline, re-checked when the link returns)"
+            return None, self.review
         if gem is None or getattr(gem, "MODE", "off") == "off":
             self.review = "stand-in (gemini off)"
             if gem is not None:
@@ -184,7 +202,8 @@ class Loop:
             return None, self.review
         prompt = ("You double-check a rescue robot route. The route was already verified by a physics "
                   "check. Reply with JSON only: {\"agree\": true|false, \"why\": \"one line\"}.\n"
-                  + json.dumps({"route": self.route, "hazards": self.router.hazards,
+                  + json.dumps({"route": route or self.route,
+                                "hazards": self.router.hazards if hazards is None else hazards,
                                 "map": self.map_summary()}))
         try:
             text = await asyncio.wait_for(asyncio.to_thread(
@@ -265,10 +284,73 @@ class Loop:
     def on_casualties(self, data):
         self.casualties = {c["id"]: c for c in data}
 
+    # ---- offline mode (T15) -------------------------------------------------------------------
 
-async def start(bus, router: RoutePlanner | None = None, **kw) -> Loop:
-    """Attach the T13 loop. Pass the T12 router from planner.start(bus) so the map is shared."""
+    async def on_link(self, data):
+        was, self.online = self.online, data["online"]
+        if was == self.online:
+            return
+        if not self.online:
+            await self.log("status/link online:false", "offline",
+                           "planning continues on this device: local A*, rule-based gate, local model for "
+                           "goals; online review paused")
+            return
+        checks, self.offline_acts = self.offline_acts, []
+        await self.log("status/link online:true", "online", f"link restored; re-checking {len(checks)} "
+                       "route(s) chosen offline with gemini-4-argon")
+        for c in checks:
+            rid = c["route"]["id"]
+            agree, why = await self.online_review(c["route"], c["hazards"])
+            verdict = {True: "agrees", False: "disagrees", None: "skipped"}[agree]
+            await self.log(f"offline route {rid} re-checked", f"recheck {verdict}", why or verdict,
+                           model="gemini-4-argon" if agree is not None else MODEL)
+            if agree is False and self.route and self.route["id"] == rid and self.state == EXECUTING:
+                await self.refer(0.0, f"online re-check disagrees with offline route {rid}: {why}")
+
+    async def on_command(self, data):
+        """operator/command -> a mission. The local model (or keywords) only reads the goal."""
+        if not self.places or self.interpret is None:
+            return
+        text = data["text"]
+        low = text.lower().strip()
+        if low in ("stop", "hold"):
+            self.state, self.route = IDLE, None
+            return await self.log(f"operator: {text}", "hold", "operator stopped the Responder")
+        with self._step():  # the goal read counts toward ms_per_step: it is on the operator's path
+            got = await asyncio.to_thread(self.interpret, text, list(self.places))
+        place, model = got.get("place"), got.get("model", "keyword-stand-in")
+        if place is None:
+            return await self.log(f"operator: {text}", "ignored", "no known place in the command", model=model)
+        goal = tuple(self.places[place])
+        if low.startswith(("scan", "look", "check")):
+            await self.log(f"operator: {text}", "relook", f"Scout scans {place}", model=model)
+            return await self.goto(list(goal), f"operator asked to scan {place}")
+        start = self.start_cell() if callable(self.start_cell) else self.start_cell
+        if start is None:
+            return await self.log(f"operator: {text}", "ignored", "Responder position unknown", model=model)
+        item = got.get("item") or "water"
+        why = got.get("why") or "goal read"
+        await self.log(f"operator: {text}", "goal", f"{item} to {place}: {why}", model=model)
+        return await self.mission(start, goal, goal_text=f"deliver {item.replace('_', ' ')} to {place}",
+                                  item=item, casualty=None)
+
+
+async def start(bus, router: RoutePlanner | None = None, *, budget=True, **kw) -> Loop:
+    """Attach the T13 loop. Pass the T12 router from planner.start(bus) so the map is shared.
+
+    With budget=True it also publishes status/budget every second; the task is `loop.task`, which the
+    hub's lifespan cancels on shutdown. Pass places={name: cell} and start_cell to act on
+    operator/command (goals read by the local model, planner.local_llm.interpret).
+    """
     if router is None:
         router = RoutePlanner(bus)
         bus.subscribe("map/cells", router.update_map)
-    return Loop(bus, router, **kw).attach()
+    if budget is True:
+        from planner.budget import Budget
+        budget = Budget(bus)
+    if kw.get("places") and "interpret" not in kw:
+        from planner import local_llm
+        kw["interpret"] = local_llm.interpret
+    lp = Loop(bus, router, budget=budget or None, **kw).attach()
+    lp.task = asyncio.create_task(budget.run()) if budget else None
+    return lp
