@@ -63,3 +63,38 @@ python -m planner.fake_run --map coord/fixtures/map__cells.json \
 
 Unreachable routes print the failure result and exit 1. The default development
 scene has a single doorway at `[3,2,0]`; marking that cell collapsed blocks it.
+
+## Handover report (T16)
+
+`planner.start(bus)` also attaches a `ReportCollector` as `router.reporter`.
+Call `await router.reporter.generate()` or send `operator/command` with text
+`report`, `handover report` or `generate report`. The result publishes
+`report/handover {json, markdown}` and writes an ignored
+`reports/handover_<UTC timestamp>.md` file. The returned result also contains
+the local `path`; that filesystem path is not sent to the console.
+
+The collector retains allowlisted map counts, casualty positions/confidence/
+clues, simulated vitals, estimated hazards before/after, routes and physics
+verdicts, re-plan reasons, action commands and every approval answer with its
+operator and time. It never subscribes to sensor images. Action commands are
+labelled as commanded; the contract has no delivery-completion event, so the
+report does not infer delivery from a command. An exact `log/decision` from the
+sim (`model=sim`, `physics=mujoco`, `outcome=done`, `placed <item> at [x, y]`)
+records a confirmed simulated placement, matching the T06 Responder's log.
+
+The plain template works with `GEMINI_MODE=off`. When the shared wrapper is
+available and enabled, one `coord.gem.ask("fast_subagent", ..., feature="handover_report")`
+attempt per collector asks `gemini-3.8-flash` for structured JSON. The draft may
+rewrite the summary; recorded sections must match exactly or it falls back to
+the template. Errors, invalid JSON, changed facts and timeouts use the same
+template. Repeated requests refresh the facts and never spend another model
+call; an old draft is discarded after new events. Stand-ins are labelled.
+
+Replay the development handover fixtures with:
+
+```sh
+GEMINI_MODE=off python -m planner.report_run
+```
+
+`bash planner/check.sh` includes this demo and the report tests. The check uses
+pytest and Pydantic to validate the published report against the shared schema.

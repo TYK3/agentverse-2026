@@ -18,7 +18,9 @@ class FixtureBus:
 
     async def publish(self, topic, data):
         for callback in self.subscribers.get(topic, []):
-            callback(data)
+            result = callback(data)
+            if asyncio.iscoroutine(result):
+                await result
         if topic == "route/proposed":
             print(json.dumps({"topic": topic, "data": data}))
 

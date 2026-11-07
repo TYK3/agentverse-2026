@@ -313,6 +313,8 @@ class Loop:
             return
         text = data["text"]
         low = text.lower().strip()
+        if low in ("report", "handover report", "generate report"):
+            return  # ReportCollector handles this command; it must not become a navigation goal.
         if low in ("stop", "hold"):
             self.state, self.route = IDLE, None
             return await self.log(f"operator: {text}", "hold", "operator stopped the Responder")
