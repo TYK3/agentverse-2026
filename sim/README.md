@@ -38,3 +38,13 @@ Owner: see the owner table in `AGENTS.md`. Only this lane's agent edits files he
   {"kind":"block_added","pos":[x,y,z]}` drops the one spare block `x1`; each publishes `world/change`
   when complete. The Responder (T06) must stop while `world.shaking` is true.
 - `python -m sim.demo_aftershock` (viewer) or `--no-viewer`: prediction, shake, moved blocks.
+
+## Photo-to-scene builder with self-critique loop (T07)
+- `python -m sim.scene_builder sim/photos/set1/*.jpg`
+  Takes 3 to 5 tabletop model photos, sends them to `gemini-4-argon` via `coord/gem.py` (`lead_reasoning`), validates the returned MJCF, runs a 3-second settle physics test (max block drift < 0.05 m), and renders visual critique images (`overview`, `scout_cam`, `side_view`) using local `mujoco.Renderer`.
+- Iteration critique images are saved to `sim/generated/iter<k>_<cam>.png`. Visual feedback ("List mismatches between the photos and these renders, then output the corrected MJCF") is fed back to the model for up to 4 rounds.
+- The winning MJCF is written to `sim/generated/photo_scene.xml` and published/loaded as `scene/loaded {"scene": "photo", "blocks": [...]}`.
+- In `GEMINI_MODE=off`, immediately loads the backup scene (`sim/scenes/backup.xml`), labels the stand-in (`gem.mark_stand_in("scene")`), and prints `[STAND-IN]` to stderr without calling the model.
+- In `GEMINI_MODE=replay`, uses cached responses / replay fixtures so repeated test runs cost zero tokens.
+- If validation fails after 4 rounds, cleanly falls back to the backup scene with `scene: "backup"`.
+- Checks: `python -m pytest sim/tests/test_scene_builder.py -v`.
