@@ -200,3 +200,44 @@ progress { accent-color: var(--accent); }
   font-size: 1rem !important;
 }
 #asset-credits a { color: var(--accent-soft) !important; }
+
+/* ---------- Minimal pass ----------
+   Same retro fonts and colour rules, less chrome: one hard shadow (primary
+   actions only), 1px lines, flat sections, more space. */
+#top-bar, #bottom-bar { background: var(--bg); border-width: 1px; padding: 1rem 1.75rem; }
+#right-panel { background: var(--bg); border-left: 1px solid var(--border); padding: 1.75rem 1.5rem; }
+h2 { margin: 0 0 1rem; color: var(--muted); }
+
+/* Secondary buttons are flat; only primary actions keep the pixel shadow */
+.btn-sm, .btn-topbar, .story-follow, .story-card button, #mic-command, #close-report, .btn-close {
+  box-shadow: none;
+  background: transparent;
+  border-width: 1px;
+}
+.btn-sm:active, .btn-topbar:active { transform: none; }
+.btn-highlight { background: transparent; color: var(--accent-soft); border-color: var(--accent); }
+
+/* Right panel: flat sections divided by lines instead of boxes */
+.permit-panel, #confidence-panel {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0 0 1.5rem;
+  margin-bottom: 1.75rem;
+}
+.evidence-item { background: transparent; padding: 0.3rem 0.6rem; }
+#reasoning-log { margin-bottom: 1.75rem; }
+
+/* Map HUD: labels, not boxes */
+.map-title-badge, .cell-count-badge { background: transparent; border: 0; padding-left: 0; }
+.map-legend { background: rgba(10, 10, 10, 0.75); border: 1px solid var(--border); }
+.story-head { background: rgba(10, 10, 10, 0.75); border-width: 1px; }
+.story-phase { border-width: 1px; }
+.story-phase[data-state="done"] { background: transparent; }
+.story-caption { background: transparent; border: 0; padding-left: 0; }
+
+/* Dialogs keep one shadow so they lift off the map */
+dialog, .story-card, .hardware-dialog { border-width: 1px; }
+input { border-width: 1px; background: transparent; }
+#asset-credits { border-width: 1px !important; background: var(--bg) !important; }
