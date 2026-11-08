@@ -200,6 +200,20 @@ class WorldDebris(Message):
     stacks: list[DebrisPile]
 
 
+class PermitEvidence(Message):
+    kind: Literal["verified", "clear", "shift", "hazard", "fresh_scan"]
+    detail: Text
+    t: Nonnegative
+
+
+class PermitRoute(Message):
+    route: Text
+    granted: bool
+    t: Nonnegative
+    reason: Text
+    evidence: list[PermitEvidence]
+
+
 class LogDecision(Message):
     t: Nonnegative
     perception: str
@@ -262,6 +276,7 @@ TOPICS: dict[str, type[BaseModel]] = {
     "world/change": WorldChange,
     "world/debris": WorldDebris,
     "log/decision": LogDecision,
+    "permit/route": PermitRoute,
     "status/link": StatusLink,
     "status/budget": StatusBudget,
     "status/gemini": StatusGemini,
