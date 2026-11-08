@@ -24,6 +24,7 @@ LATEST_TOPICS = {"map/points"}
 # POST /inject. HUB_CORS_ORIGINS="http://a:5173,http://b:5173" adds origins (a LAN address).
 CONSOLE_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 INJECT_KINDS = ("aftershock", "block_added")
+SEND_TIMEOUT_S = 1.0  # drop a browser that stops reading before it blocks all publishers
 
 
 class Bus:
@@ -51,7 +52,7 @@ class Bus:
                     self.history.append(msg)
                 for client in tuple(self.clients):
                     try:
-                        await client.send_text(json.dumps(msg, allow_nan=False))
+                        await asyncio.wait_for(client.send_text(json.dumps(msg, allow_nan=False)), SEND_TIMEOUT_S)
                     except Exception:
                         log.debug("Dropping disconnected browser client", exc_info=True)
                         self.clients.discard(client)
