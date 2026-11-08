@@ -24,7 +24,7 @@ from planner.route import RoutePlanner
 from planner.tests.test_loop import Bus, Clock, OffGem
 from sim import inject
 
-RES, PAD = 0.05, 0.08
+RES, PAD = 0.05, 0.0  # physical occupancy; planner applies the chassis clearance
 START, GOAL = (-0.5, -1.77), (1.77, 0.62)
 C1 = {"id": "c1", "pos": [2.0, 1.0, 0.0], "confidence": 0.4, "clues": ["thermal"],
       "vitals": {"breathing_rate": 14, "simulated": True}}

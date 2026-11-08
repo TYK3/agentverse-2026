@@ -203,14 +203,13 @@ def test_triager_bus_events_human_review_and_approval():
         # Now simulate operator approval
         ans_action = await triager.on_answer({"id": "g_triage_c1", "approved": True, "by": "operator"})
         assert ans_action is not None
-        assert ans_action["action"] == "place_supply"
-        assert ans_action["item"] in ALLOWED_ITEMS
+        assert ans_action["recommended_action"] in ALLOWED_ITEMS
 
-        # Verify responder/action was published on bus
+        # Approval publishes a planner recommendation, never a physical placement.
         topics_after = [t for t, _ in bus.published]
-        assert "responder/action" in topics_after
-        action_msg = next(d for t, d in reversed(bus.published) if t == "responder/action")
-        assert action_msg["item"] in ALLOWED_ITEMS
+        assert "responder/action" not in topics_after
+        action_msg = next(d for t, d in reversed(bus.published) if t == "casualty/triage")
+        assert action_msg["recommended_action"] in ALLOWED_ITEMS
 
     asyncio.run(scenario())
 
@@ -246,10 +245,11 @@ def test_triager_autonomous_action_on_high_confidence():
         cas = sample_casualty("c2", confidence=0.85)
         await triager.on_casualties([cas])
 
-        # Expect gate/decision (outcome=act) and responder/action directly
+        # High confidence accepts the choice; the planner still owns navigation and placement.
         dec = next(d for t, d in bus.published if t == "gate/decision")
         assert dec["outcome"] == "act"
-        act = next(d for t, d in bus.published if t == "responder/action")
-        assert act["item"] == "bandage"
+        act = next(d for t, d in bus.published if t == "casualty/triage")
+        assert act["recommended_action"] == "bandage"
+        assert not any(t == "responder/action" for t, _ in bus.published)
 
     asyncio.run(scenario())

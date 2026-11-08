@@ -23,7 +23,7 @@ from planner.route import RoutePlanner
 from planner.tests.test_loop import Bus, Clock, OffGem
 
 RES = 0.05
-PAD = 0.08                         # metres added round every block for the Responder's chassis
+PAD = 0.0                          # physical occupancy; planner applies the chassis clearance
 START = (-0.5, -1.77)              # the Responder's start pose on the backup scene
 GOAL = (1.77, 0.62)                # beside casualty c1 in room 3 (the end of sim.demo_responder's r2)
 C1 = {"id": "c1", "pos": [2.0, 1.0, 0.0], "confidence": 0.4, "clues": ["thermal"],
@@ -35,7 +35,7 @@ def cell(x, y):
 
 
 def map_from_blocks(blocks):
-    """map/cells over the backup scene: every cell seen; occupied where a low block (+PAD) covers it."""
+    """Deterministic sim-truth fixture: seen physical occupancy, without chassis inflation."""
     cells = []
     for i in range(int(-1.5 / RES), int(2.5 / RES)):
         for j in range(int(-2.0 / RES), int(1.5 / RES)):

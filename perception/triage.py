@@ -11,11 +11,12 @@ When GEMINI_MODE=off (or no API key), runs deterministic offline triage rules.
 
 Confidence scoring:
 - If confidence >= 0.8 and recommended first-aid item is clear:
-  emits gate/decision outcome="act", and triggers responder/action for the arm.
+  emits gate/decision outcome="act" and a casualty/triage supply recommendation.
 - If unsure (confidence < 0.8 or ambiguous injuries):
   sends a needs-human triage card to console via gate/request (kind="risky_move")
   with alternative first-aid supply options, and waits for gate/answer from the operator.
-  Upon operator approval, triggers responder/action with the chosen first-aid step.
+  Upon operator approval, publishes the accepted casualty/triage recommendation.
+  The planner must route and physics-verify delivery; triage never moves the arm.
 
 Provides public triage summary for Y6 paramedic report via TRIAGE.summary(cid).
 """
@@ -366,6 +367,7 @@ class Triager:
         self.dialogue_reader = dialogue_reader or guide_summary
         self.assessments: dict[str, TriageAssessment] = {}
         self.pending_gates: dict[str, TriageAssessment] = {}  # gate_request_id -> assessment
+        self.resolved: set[str] = set()  # accepted or denied supply choices for this run
         self.bus = None
 
     def assess(
@@ -396,34 +398,28 @@ class Triager:
             return None
         return res.to_dict()
 
-    async def on_casualties(self, casualties_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    @staticmethod
+    def recommendation(assessment: TriageAssessment) -> dict[str, Any]:
+        return {"id": assessment.casualty_id, "injuries": assessment.injuries,
+                "recommended_action": assessment.recommended_item}
+
+    async def on_casualties(self, casualties_list: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
         """Process map/casualties message, publishing gate requests or decisions as required."""
         events = []
         for cas in casualties_list:
             cid = cas.get("id")
             if not cid:
                 continue
+            if cid in self.resolved or any(a.casualty_id == cid for a in self.pending_gates.values()):
+                continue  # another map observation cannot replay a choice or replace an open clinical review
             assessment = self.assess(cas)
-            triage_msg = {
-                "id": assessment.casualty_id,
-                "injuries": assessment.injuries,
-                "recommended_action": assessment.recommended_item,
-            }
-            events.append(("casualty/triage", triage_msg))
-            if self.bus and hasattr(self.bus, "publish"):
-                try:
-                    await self.bus.publish("casualty/triage", triage_msg)
-                except (KeyError, ValueError, RuntimeError, TypeError, AttributeError) as exc:
-                    # Hub may reject unregistered topics under strict validation
-                    logger.debug("casualty/triage publish skipped on bus: %s", exc)
-
             if assessment.needs_human and assessment.gate_request_id:
                 # Format options into card summary
                 opts_summary = ", ".join(f"{opt['item']}: {opt['label']}" for opt in assessment.options[:3])
                 gate_req = {
                     "id": assessment.gate_request_id,
                     "kind": "risky_move",
-                    "summary": f"Triage review for {cid}: {opts_summary}",
+                    "summary": f"Triage supply choice for {cid}: {opts_summary}. Delivery still requires a verified route.",
                     "route": assessment.route,
                 }
                 gate_dec = {
@@ -446,47 +442,40 @@ class Triager:
                     "confidence": assessment.confidence,
                     "reason": assessment.rationale,
                 }
-                resp_act = {
-                    "action": "place_supply",
-                    "route": assessment.route,
-                    "item": assessment.recommended_item,
-                }
+                triage_msg = self.recommendation(assessment)
+                self.resolved.add(cid)  # before callbacks: re-entrant publications cannot duplicate a delivery
                 events.append(("gate/decision", gate_dec))
-                events.append(("responder/action", resp_act))
+                events.append(("casualty/triage", triage_msg))
                 if self.bus and hasattr(self.bus, "publish"):
                     await self.bus.publish("gate/decision", gate_dec)
-                    await self.bus.publish("responder/action", resp_act)
+                    await self.bus.publish("casualty/triage", triage_msg)
         return events
 
     async def on_answer(self, data: dict[str, Any]) -> dict[str, Any] | None:
-        """Handle operator gate/answer. If approved, emit responder/action for chosen item."""
+        """Accept the supply choice once; the planner remains responsible for routed delivery."""
         req_id = data.get("id")
         approved = data.get("approved") is True
-        assessment = self.pending_gates.get(req_id)
+        assessment = self.pending_gates.pop(req_id, None)
         if not assessment:
             return None
 
         cid = assessment.casualty_id
+        self.resolved.add(cid)
         if approved:
             item = assessment.recommended_item
-            action = {
-                "action": "place_supply",
-                "route": assessment.route,
-                "item": item,
-            }
+            recommendation = self.recommendation(assessment)
             log_entry = {
                 "t": time.monotonic(),
-                "perception": f"triage approved for {cid}, place_supply {item}",
+                "perception": f"triage supply choice approved for {cid}",
                 "model": "triage_gate",
                 "physics": "human_approved",
-                "outcome": "act",
-                "reason": f"Operator approved triage card {req_id} for {cid}: {item}",
+                "outcome": "approved",
+                "reason": f"Operator approved triage card {req_id} for {cid}: {item}; planner must route delivery",
             }
             if self.bus and hasattr(self.bus, "publish"):
-                await self.bus.publish("responder/action", action)
                 await self.bus.publish("log/decision", log_entry)
-            del self.pending_gates[req_id]
-            return action
+                await self.bus.publish("casualty/triage", recommendation)
+            return recommendation
 
         # Denied
         log_entry = {
@@ -499,11 +488,15 @@ class Triager:
         }
         if self.bus and hasattr(self.bus, "publish"):
             await self.bus.publish("log/decision", log_entry)
-        del self.pending_gates[req_id]
         return None
 
     def attach(self, bus: Any) -> Triager:
         """Attach subscriptions to the bus."""
+        if self.bus is bus:
+            return self
+        self.assessments.clear()
+        self.pending_gates.clear()
+        self.resolved.clear()
         self.bus = bus
         if bus and hasattr(bus, "subscribe"):
             bus.subscribe("map/casualties", lambda data: self.on_casualties(data))

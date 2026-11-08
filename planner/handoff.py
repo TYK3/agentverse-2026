@@ -35,7 +35,15 @@ import re
 from collections import deque
 
 from planner import supply
-from planner.route import _cell, _neighbours, _read_map
+from planner.route import (
+    ROBOT_FRONT_M,
+    ROBOT_HALF_WIDTH_M,
+    _blocked_moves,
+    _cell,
+    _clearance_cells,
+    _neighbours,
+    _read_map,
+)
 
 SUPPLIES = ("water", "first_aid_kit", "radio")
 MAX_ATTEMPTS = 2          # Responder tries per casualty before the handoff gives up on it
@@ -51,7 +59,7 @@ _AT = re.compile(r"responder at \[(-?[\d.]+), (-?[\d.]+)\]")
 
 
 class Handoff:
-    def __init__(self, bus, loop, router, *, responder_start=RESPONDER_START, clock=None):
+    def __init__(self, bus, loop, router, *, responder_start=RESPONDER_START, clock=None, require_triage=False):
         self.bus, self.loop, self.router = bus, loop, router
         self.clock = clock or (lambda: loop._t())
         self.responder_cell = tuple(responder_start)
@@ -75,12 +83,15 @@ class Handoff:
         self.holding_block = None  # a found block gripped and not yet placed
         self.heard = {}            # casualty id -> injuries from voice's casualty/contact (G3)
         self.delivered = {}        # casualty id -> items placed for them
+        self.require_triage = require_triage  # hub waits for Y3's accepted supply choice
+        self.triage_items = {}     # casualty id -> accepted kit item (never a physical command)
 
     def attach(self):
         for topic, fn in (("map/casualties", self.on_casualties), ("map/cells", self.on_map),
                           ("map/hazards", self.on_hazards), ("sensors/scout", self.on_sensors),
                           ("log/decision", self.on_log), ("world/change", self.on_world_change),
-                          ("scene/loaded", self.finder.on_scene), ("casualty/triage", self.on_triage),
+                          ("responder/pose", self.on_pose),
+                          ("scene/loaded", self.finder.on_scene), ("casualty/triage", self.on_triage_ready),
                           ("casualty/contact", self.on_contact)):
             self.bus.subscribe(topic, fn)
         return self
@@ -102,12 +113,16 @@ class Handoff:
         return {c for c, r in records.items()
                 if c[2] == 0 and r["state"] == "seen" and not r["occupied"] and c not in blocked}, blocked
 
-    def _reachable(self, start, safe):
+    def _reachable(self, start, safe, blocked_moves=None):
         if start not in safe:
             return set()
         seen, queue = {start}, deque([start])
         while queue:
-            for other, _ in _neighbours(queue.popleft(), safe):
+            current = queue.popleft()
+            for other, _ in _neighbours(current, safe):
+                direction = (other[0] - current[0], other[1] - current[1])
+                if blocked_moves and current in blocked_moves[direction]:
+                    continue
                 if other not in seen:
                     seen.add(other)
                     queue.append(other)
@@ -122,7 +137,13 @@ class Handoff:
         start = self.start_cell(safe, res)
         if start is None:
             return None
-        reachable = self._reachable(start, safe)
+        occupied = {c for c, r in records.items() if c[2] == 0 and r["occupied"]}
+        moves = _blocked_moves(occupied, res) if res < ROBOT_HALF_WIDTH_M else None
+        reachable = self._reachable(start, safe, moves)
+        if res < ROBOT_HALF_WIDTH_M:
+            # Leave room for the final heading and the arm, including the occupied grid square.
+            # The nearest free point can lie inside the chassis footprint beside the casualty.
+            reachable -= _clearance_cells(occupied, res, ROBOT_FRONT_M + res / math.sqrt(2) + .005)
         x, y = casualty["pos"][:2]
         best = None
         for c in reachable:
@@ -146,7 +167,8 @@ class Handoff:
         return min(near)[1] if near else None
 
     def _queue(self):
-        return sorted((c for cid, c in self.casualties.items() if cid not in self.served | self.skipped),
+        return sorted((c for cid, c in self.casualties.items() if cid not in self.served | self.skipped
+                       and (not self.require_triage or cid in self.triage_items)),
                       key=lambda c: (-c["confidence"], c["id"]))
 
     def _cell_of(self, x, y, res=0.05):
@@ -172,10 +194,19 @@ class Handoff:
                                    f"no free reachable cell within {GOAL_RADIUS_M} m of {cid} yet; Scout sent to look")
                 continue
             item, block, why = self.pick(cas)
+            if item is None:
+                self.skipped.add(cid)
+                await self.log(f"triage supply for {cid}", "hold", why)
+                continue
             if block and block != self.holding_block:
                 board = next((b for b in self.finder.boards() if b["block"] == block), None)
                 near = self.goal_for({"pos": board["pos"]}, BOARD_RADIUS_M) if board else None
                 if near is None:
+                    if self.require_triage:
+                        self.skipped.add(cid)
+                        await self.log(f"triage supply for {cid}", "hold",
+                                       f"accepted {item} material is not reachable; another supply choice is needed")
+                        continue
                     item, block, why = "first_aid_kit", None, f"{why}; board not reachable on the map yet, first aid kit"
                 else:
                     self.attempts[cid] = self.attempts.get(cid, 0) + 1
@@ -227,6 +258,15 @@ class Handoff:
         next supply in turn that is still on the deck."""
         if self.holding_block and self.fetching and self.fetching["cid"] == cas["id"]:
             return self.fetching["item"], self.holding_block, "carrying the found material already"
+        if self.require_triage:
+            approved = self.triage_items.get(cas["id"])
+            if approved in self.kit:
+                return approved, None, f"accepted triage supply choice: kit {approved}"
+            if approved == "splint":
+                found = supply.choose(["fracture"], self.kit, self.finder.best(near=cas["pos"][:2]))
+                if found and found["item"] == approved:
+                    return approved, found["block"], found["why"]
+            return None, None, f"accepted triage item {approved} unavailable; another supply choice is needed"
         got = supply.choose(self.injuries_of(cas), self.kit, self.finder.best(near=cas["pos"][:2]))
         if got:
             return got["item"], got["block"], got["why"]
@@ -239,6 +279,13 @@ class Handoff:
             if entry.get("id"):
                 self.triage[entry["id"]] = list(entry.get("injuries") or []) + (
                     [entry["recommended_action"]] if entry.get("recommended_action") else [])
+                if entry.get("recommended_action") in supply.KIT:
+                    self.triage_items[entry["id"]] = entry["recommended_action"]
+
+    async def on_triage_ready(self, data):
+        """An accepted Y3 supply choice may arrive before or after map/casualties."""
+        self.on_triage(data)
+        await self.dispatch()
 
     async def on_casualties(self, data):
         for c in data:
@@ -279,7 +326,13 @@ class Handoff:
                                f"{reason} for {self.active}; next casualty")
                 self.active = None
                 await self.dispatch()
-            elif outcome in ("blocked", "frozen") and self.active:
+            elif outcome == "frozen" and self.active:
+                # A sensed safety hold is part of this mission, not a failed delivery attempt.
+                # T13 owns the re-plan and L1 owns re-observation; starting another handoff
+                # here would replace their recovery with a competing mission five seconds later.
+                await self.log(f"Responder paused for {self.active}", "waiting",
+                               f"{reason}; keeping the delivery assigned while the route is rechecked")
+            elif outcome == "blocked" and self.active:
                 await self.responder_blocked(outcome, reason)
         elif outcome == "hold" and self.active and self.loop.state == "IDLE":
             # T13 refused or a human declined: the casualty stays queued but this mission is over.
@@ -320,6 +373,15 @@ class Handoff:
             # T13 drops the route and re-plans on the next scan; keep the casualty as the active job.
             await self.log(f"{data.get('kind')} during handoff of {self.active}", "waiting",
                            "T13 re-plans after the re-scan; handoff keeps the casualty assigned")
+
+    def on_pose(self, data):
+        """E2's measured pose supplies the next re-plan's start, never the mission's old origin."""
+        res = (self.router.map_cells or {}).get("res", 0.05)
+        self.responder_cell = self._cell_of(*data["pos"][:2], res=res)
+        mission = self.loop.mission_args
+        if self.active and mission and mission["casualty"] == self.active:
+            start = self.start_cell()
+            mission["start"] = tuple(start if start is not None else self.responder_cell)
 
     # ---- Scout blocked: the Responder keeps working -------------------------------------------------
 

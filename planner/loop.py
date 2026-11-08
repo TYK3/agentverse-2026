@@ -45,10 +45,12 @@ class Loop:
 
     def __init__(self, bus, router: RoutePlanner, *, gem=None, clock=time.monotonic,
                  review_timeout=REVIEW_TIMEOUT_S, budget=None, places=None, start_cell=None, interpret=None,
-                 gate_timeout=GATE_TIMEOUT_S):
+                 gate_timeout=GATE_TIMEOUT_S, defer_approved_actions=False):
         if not 0 < gate_timeout <= GATE_TIMEOUT_S:
             raise ValueError("gate timeout must be positive and at most 60 seconds")
         self.bus, self.router = bus, router
+        self.defer_approved_actions = defer_approved_actions
+        self.revoked_permits = set()
         self.budget = budget  # planner.budget.Budget: times each local step for status/budget
         self.places = places or {}  # operator place name -> goal cell, for operator/command
         self.start_cell = start_cell  # () -> the Responder's current cell
@@ -83,6 +85,7 @@ class Loop:
 
     def attach(self):
         for topic, fn in (("route/verified", self.on_verified), ("world/change", self.on_world_change),
+                          ("permit/route", self.on_permit),
                           ("map/cells", self.on_map), ("map/hazards", self.on_hazards),
                           ("map/casualties", self.on_casualties), ("gate/answer", self.on_answer),
                           ("status/link", self.on_link), ("operator/command", self.on_command)):
@@ -332,7 +335,15 @@ class Loop:
                                   f"{req['summary']}; operator must place the call; no call placed")
         if data.get("approved") is True and self.route and req["route"] == self.route["id"]:
             await self.log(f"operator approved {req['id']}", "act", f"human approved {self.route['id']}")
-            return await self.execute(approved_kind=req["kind"], expected_route=req["route"])
+            dispatch = self.execute(approved_kind=req["kind"], expected_route=req["route"])
+            if not self.defer_approved_actions:
+                return await dispatch
+            # The hub may subscribe the sim after this loop. Let its synchronous approval
+            # handler run before issuing commands; execute still rechecks the route and risks.
+            task = asyncio.create_task(dispatch)
+            self._gate_tasks.add(task)
+            task.add_done_callback(self._gate_tasks.discard)
+            return
         self.state = IDLE
         await self.log(f"operator rejected {req['id']}", "hold", "approval refused; Responder idle")
 
@@ -357,6 +368,8 @@ class Loop:
     async def execute(self, *, approved_kind=None, expected_route=None):
         if expected_route is not None and (not self.route or self.route["id"] != expected_route):
             return await self.log("execution check", "hold", "stale dispatch discarded; route changed")
+        if self.route and self.route["id"] in self.revoked_permits:
+            return await self.log("execution check", "waiting", "move permit revoked; dispatch waits for a checked re-plan")
         kind, why = self.execution_risk()
         if kind == "hold":
             self.state = IDLE
@@ -380,6 +393,32 @@ class Loop:
             await self.bus.publish("responder/action", msg)
 
     # ---- perception updates and the visible re-plan -------------------------------------------
+
+    async def on_permit(self, data):
+        rid = data["route"]
+        if not data["granted"]:
+            self.revoked_permits.add(rid)
+            if self.route and self.route["id"] == rid and self.mission_args:
+                await self.cancel_request("move permit revoked")
+                self.state, self.verified_route = IDLE, None
+                await self.wait_for_scan("move permit revoked by sensed change")
+                self.last_try = float("-inf")
+                await self.log(f"move permit for {rid} revoked", "waiting",
+                               "Responder held; next map update checks a detour with physics and navigation gates")
+            return
+        was_revoked = rid in self.revoked_permits
+        self.revoked_permits.discard(rid)
+        if (was_revoked and self.route and self.route["id"] == rid
+                and (self.state == EXECUTING or self.state == IDLE and self.waiting_scan)):
+            async def resume():
+                # Let the sim lift its hold first. A new route starts at the measured pose
+                # and repeats physics/confidence checks rather than replaying old waypoints.
+                if (self.route and self.route["id"] == rid and rid not in self.revoked_permits
+                        and (self.state == EXECUTING or self.state == IDLE and self.waiting_scan)):
+                    await self.propose(f"move permit for {rid} re-earned by fresh observation; resume delivery")
+            task = asyncio.create_task(resume())
+            self._gate_tasks.add(task)
+            task.add_done_callback(self._gate_tasks.discard)
 
     async def on_world_change(self, data):
         await self.cancel_request("world changed")

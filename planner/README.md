@@ -133,6 +133,46 @@ not part of this demo.
 
 ## Human approval and tasks (T14)
 
+On the hub, automatic casualty handoff first waits for Y3's accepted
+`casualty/triage` supply choice. An uncertain choice needs its clinical approval;
+that approval alone does not dispatch an arm command or grant route permission.
+The handoff honours the accepted kit item, constructs a route to a mapped free
+cell beside the casualty, and enters the normal physics/confidence/movement
+checks. If that item or its found material is unavailable, it holds for another
+choice instead of silently substituting a different supply. Standalone handoff
+callers can retain the previous lane-only behaviour with `require_triage=False`;
+`planner.start(bus)` enables the integrated mode.
+
+The hub also enables `defer_approved_actions` on the loop: an accepted navigation
+answer queues dispatch on the next event-loop turn so the sim's synchronous
+approval handler can run before move commands. Dispatch still checks the route
+ID and current risks; a scene change cancels stale work. Standalone loop callers
+retain immediate awaited dispatch by default.
+
+A permit freeze keeps the same casualty delivery assigned and does not spend a
+collision retry. The handoff consumes the measured `responder/pose` to update
+the next route's start; if that position is unobserved, routing holds for a
+re-look rather than returning to the old origin. A permit re-earned by fresh
+observation re-proposes the paused delivery from that current pose and repeats
+physics/confidence checks. It does not replay the original route's waypoints.
+Any later permit revocation also cancels pending navigation approval/dispatch
+and waits for the next map update to check a detour. A later exclusion must not
+leave the delivery waiting indefinitely for the original route to reopen.
+
+On the Scout's fine grid, each candidate move checks the swept forward chassis
+footprint against measured occupied squares, including the collision guard's
+0.19 m front clearance. This prevents a route from turning too late beside a
+wall even when its centre cells are free. Handoff stopping cells also leave
+room for the chassis and final heading; the arm places the supply ahead.
+Coarse development maps retain their existing routing behaviour. These checks
+cannot establish that stale free cells behind a newly sensed surface remain
+free: fresh mapping and the live collision guard still govern movement.
+
+`planner/tests/test_route_footprint.py` drives the real MuJoCo Responder through
+two corner detours, three right-angle corridors and a casualty approach, with
+its collision guard unchanged. Run it with MuJoCo, NumPy, pytest, Pydantic and
+FastAPI installed; the optional MuJoCo cases skip if MuJoCo is unavailable.
+
 `router = await planner.start(bus)` attaches the verification loop as
 `router.loop`, plus the budget publisher as `router.task`. Use that existing loop.
 `await loop.mission(start, goal, item="water", action="deliver")` dispatches
