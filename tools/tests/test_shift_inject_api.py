@@ -70,7 +70,6 @@ def _transcript(rows, start):
     return "\n".join(lines)
 
 
-@pytest.mark.xfail(strict=True, reason="World.add_block z clamp: B2 block lifted to z=0.055, no stop or recheck after the shift (ADD-BLOCK-Z)")
 @pytest.mark.slow
 def test_b2_seed_0_posts_the_slab_shift_and_logs_shift_then_stop_then_recheck(tmp_path, monkeypatch):
     monkeypatch.setenv("GEMINI_MODE", "off")
