@@ -6,6 +6,8 @@ import inspect
 import json
 import logging
 import os
+import pathlib
+import tempfile
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
@@ -24,6 +26,10 @@ LATEST_TOPICS = {"map/points"}
 # POST /inject. HUB_CORS_ORIGINS="http://a:5173,http://b:5173" adds origins (a LAN address).
 CONSOLE_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 INJECT_KINDS = ("aftershock", "block_added")
+RUN_FLOORS = ("B1", "B2", "B3")
+RUN_IDLE = {"state": "idle", "floor": None, "t": 0.0, "log": None, "verdict": None}
+_run_status = RUN_IDLE.copy()
+_run_task = None
 
 
 class Bus:
@@ -107,6 +113,8 @@ async def publish_gemini_status(target_bus, gem, interval=2):
 
 @asynccontextmanager
 async def lifespan(application):
+    global _run_status, _run_task
+    _run_status, _run_task = RUN_IDLE.copy(), None
     tasks = []
     try:
         points = PointCloudPublisher(bus)
@@ -141,6 +149,10 @@ async def lifespan(application):
             tasks.append(asyncio.create_task(publish_gemini_status(bus, gem)))
         yield
     finally:
+        if _run_task is not None:
+            _run_task.cancel()
+            await asyncio.gather(_run_task, return_exceptions=True)
+        _run_status, _run_task = RUN_IDLE.copy(), None
         for task in tasks:
             task.cancel()
         if tasks:
@@ -161,6 +173,112 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["content-type"],
 )
+
+
+def run_status():
+    """A snapshot with the shape shared by POST /run/rescue and GET /run."""
+    return {**_run_status, "verdict": _run_status["verdict"] and dict(_run_status["verdict"])}
+
+
+async def publish_run_record(target_bus, record):
+    """Forward one canonical JSONL record through the existing validated decision-log topic."""
+    await target_bus.publish("log/decision", {
+        "t": record["t"], "perception": f"chained rescue {record.get('leg', '')}".strip(),
+        "model": "tools/run_chain.py", "physics": "MuJoCo simulation",
+        "outcome": record["kind"], "reason": json.dumps(record, separators=(",", ":"), allow_nan=False),
+    })
+
+
+async def run_rescue_worker(seed, floors, runner, target_bus, out):
+    """Run each real leg in a worker thread; publish its records before starting the next leg."""
+    global _run_task
+    from tools import run_b2
+
+    try:
+        legs, offset = [], 0.0
+        await publish_run_record(target_bus, {
+            "t": 0.0, "kind": "meta", "seed": seed, "legs": list(floors), "source": "tools/run_chain.py",
+        })
+        with tempfile.TemporaryDirectory() as temp:
+            for floor in floors:
+                _run_status["floor"] = floor
+                verdict, path = await asyncio.to_thread(
+                    run_b2.run, seed=seed, max_t=500.0, out_dir=temp, verbose=False, floor=floor,
+                )
+                records = runner.leg_records(path)
+                legs.append((floor, records, verdict))
+                end = max((record.get("t") or 0.0 for record in records), default=0.0)
+                for record in records:
+                    kind = "leg_summary" if record["kind"] == "summary" else record["kind"]
+                    await publish_run_record(target_bus, {
+                        **record, "kind": kind, "t": round(offset + (record.get("t") or 0.0), 2),
+                        "leg_t": record.get("t"), "leg": floor,
+                    })
+                offset = round(offset + end, 2)
+                _run_status["t"] = offset
+                await publish_run_record(target_bus, {
+                    "t": offset, "kind": "leg", "floor": floor, "casualty": runner.CASUALTY[floor],
+                    "reached": bool(next((r for r in records if r["kind"] == "summary"), {}).get("reached")),
+                    "passed": len(verdict["passed"]), "failed": len(verdict["failed"]),
+                })
+        canonical = runner.chain(legs, seed)
+        out.write_text("".join(json.dumps(r, separators=(",", ":"), allow_nan=False) + "\n"
+                               for r in canonical), encoding="utf-8")
+        for record in canonical:
+            if record["kind"] in {"step", "summary"}:
+                await publish_run_record(target_bus, record)
+        passed = [f"{floor}: {name}" for floor, _, verdict in legs for name in verdict["passed"]]
+        failed = [f"{floor}: {name}" for floor, _, verdict in legs for name in verdict["failed"]]
+        _run_status.update(state="failed" if failed else "done", floor=floors[-1],
+                           t=canonical[-1]["t"], verdict={"passed": passed, "failed": failed})
+    except Exception:
+        log.exception("Chained rescue run failed")
+        out.write_text(json.dumps({"t": _run_status["t"], "kind": "error", "reason": "runner error"}) + "\n",
+                       encoding="utf-8")
+        _run_status.update(state="failed", verdict={"passed": [], "failed": ["runner error"]})
+    finally:
+        _run_task = None
+
+
+@app.get("/run")
+async def get_run():
+    return run_status()
+
+
+@app.post("/run/rescue")
+async def start_rescue_run(request: Request):
+    global _run_status, _run_task
+    if _run_status["state"] == "running":
+        return JSONResponse({"error": "rescue run already running"}, status_code=409)
+    raw = await request.body()
+    try:
+        body = json.loads(raw) if raw else {}
+    except (ValueError, RecursionError):
+        body = None
+    if not isinstance(body, dict) or set(body) - {"seed", "floors"}:
+        return JSONResponse({"error": "expected seed and floors"}, status_code=400)
+    seed = body.get("seed", 0)
+    floors = body.get("floors", list(RUN_FLOORS))
+    if (type(seed) is not int or not 0 <= seed <= 1_000_000 or not isinstance(floors, list)
+            or not floors or any(floor not in RUN_FLOORS for floor in floors)
+            or tuple(floors) != tuple(floor for floor in RUN_FLOORS if floor in floors)):
+        return JSONResponse({"error": "invalid seed or floors"}, status_code=400)
+    try:
+        runner = importlib.import_module("tools.run_chain")
+    except ModuleNotFoundError as exc:
+        if exc.name != "tools.run_chain":
+            raise
+        return JSONResponse({"error": "chained rescue runner unavailable"}, status_code=503)
+    # Request-body reads yield to the event loop, so recheck after validation before claiming the run.
+    if _run_status["state"] == "running":
+        return JSONResponse({"error": "rescue run already running"}, status_code=409)
+    out = pathlib.Path("runs") / f"chain-{seed}.jsonl"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("", encoding="utf-8")
+    _run_status = {"state": "running", "floor": floors[0], "t": 0.0,
+                   "log": out.as_posix(), "verdict": None}
+    _run_task = asyncio.create_task(run_rescue_worker(seed, floors, runner, bus, out))
+    return JSONResponse(run_status(), status_code=202)
 
 
 @app.post("/inject")
