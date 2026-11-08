@@ -244,11 +244,21 @@ async def ground_rescue(rec, bus, world, args):
     rec.step("route after the recheck avoids the block", not on_block,
              f"{new['id']} ({'same route' if new['id'] == rid else 're-planned'}), "
              f"{len(new['cells'])} cells, {'passes' if on_block else 'avoids'} cell {cell[:2]}")
+    # Moving again means it actually drives a permitted route after the recheck: state moving (or
+    # arrived at that route's end) and its pose changing. Being assigned the new route while frozen
+    # is not enough.
     t_end = time.monotonic() + 30
-    while time.monotonic() < t_end and not (r.state == "moving" and r.route == new["id"]):
-        await asyncio.sleep(0.1)
-    rec.step("Responder moving again", r.state in ("moving", "arrived") or r.route == new["id"],
-             f"state {r.state} on {r.route}")
+    resumed, moved = False, 0.0
+    while time.monotonic() < t_end and not resumed:
+        if r.state in ("moving", "arrived") and r.route is not None:
+            p0 = [float(v) for v in r.pos[:2]]
+            await asyncio.sleep(0.5)
+            moved = math.dist(p0, r.pos[:2])
+            resumed = (r.state == "arrived") or (r.state == "moving" and moved > STILL)
+        else:
+            await asyncio.sleep(0.1)
+    rec.step("Responder moving again", resumed,
+             f"state {r.state} on {r.route}, moved {moved:.3f} m in 0.5 s")
     cpos = cas[0]["pos"][:2]
     await rec.expect(f"supply placed within {NEAR_CASUALTY} m of the casualty", "log/decision",
                      lambda d: placed_at(d) is not None and math.dist(placed_at(d), cpos) <= NEAR_CASUALTY,
