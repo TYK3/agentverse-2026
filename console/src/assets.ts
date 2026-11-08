@@ -2,7 +2,7 @@
 //
 // - robots.glb (small) loads at idle time in every scene. aftershock.glb (the tower) and the HDRI load only
 //   the first time the tower is shown: parsing them costs seconds in software GL, and other scenes never
-//   need them.
+//   need them. In software WebGL (no GPU, e.g. CI) the tower uses Lambert shading and skips the HDRI.
 // - parking_garage HDRI lights the model's materials (reflections only; the background stays the console's).
 // - The Scout and Responder primitives are swapped for the Go1 and Rover models, scaled to the
 //   footprint the console already draws, so poses, labels and tests are unchanged.
@@ -30,6 +30,7 @@ export interface DemoAssets {
   credits: Credit[];
   movedBlocks: string[];
   worldChanges: number;          // world/change messages seen (any scene)
+  softwareGl: boolean;           // CPU WebGL: the tower is drawn with Lambert shading and no HDRI
   showBuilding(show: boolean): void;
   markMoved(ids: string[]): void;
 }
@@ -76,6 +77,27 @@ function xray(mesh: THREE.Mesh): void {
   mesh.material = xrayed.get(mat)!;
 }
 
+/** True when WebGL runs on the CPU (SwiftShader, llvmpipe): no GPU to spend on PBR shading. */
+function softwareGl(renderer: THREE.WebGLRenderer): boolean {
+  const gl = renderer.getContext();
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+  return /swiftshader|llvmpipe|softpipe|software/i.test(name);
+}
+
+const cheap = new Map<THREE.Material, THREE.Material>();
+
+/** The same colour, texture and x-ray opacity with Lambert shading: about twice the frame rate in software GL. */
+function cheapen(mesh: THREE.Mesh): void {
+  const mat = mesh.material as THREE.MeshStandardMaterial;
+  if (!mat.isMeshStandardMaterial) return;
+  if (!cheap.has(mat)) {
+    cheap.set(mat, new THREE.MeshLambertMaterial({ color: mat.color, map: mat.map, transparent: mat.transparent,
+                                                   opacity: mat.opacity, depthWrite: mat.depthWrite }));
+  }
+  mesh.material = cheap.get(mat)!;
+}
+
 function creditsCard(credits: Credit[]): HTMLElement {
   const card = document.createElement('details');
   card.id = 'asset-credits';
@@ -111,6 +133,7 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     credits: [],
     movedBlocks: [],
     worldChanges: 0,
+    softwareGl: false,
     showBuilding: () => {},
     markMoved: () => {},
   };
@@ -159,6 +182,8 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     if (forced ?? towerScene) state.markMoved((data as { moved_blocks?: string[] })?.moved_blocks ?? []);
   });
 
+  const software = softwareGl(viewer.renderer);
+  state.softwareGl = software;
   const internals = viewer as unknown as { scoutGroup?: THREE.Group; responderGroup?: THREE.Group };
 
   // The HDRI lights only the model's own materials, not scene.environment: that would put image-based
@@ -223,7 +248,7 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
   function loadTower(): void {
     if (towerRequested) return;
     towerRequested = true;
-    loadHdr();
+    if (!software) loadHdr();
     new GLTFLoader().load(`${BASE}aftershock.glb`, gltf => {
       const root = gltf.scene;
       building = root.getObjectByName('building');
@@ -232,7 +257,11 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
         if (!part) continue;
         viewer.scene.add(part);
         part.updateMatrixWorld(true);
-        part.traverse(o => { if ((o as THREE.Mesh).isMesh) xray(o as THREE.Mesh); });
+        part.traverse(o => {
+          if (!(o as THREE.Mesh).isMesh) return;
+          xray(o as THREE.Mesh);
+          if (software) cheapen(o as THREE.Mesh);
+        });
       }
       state.blocks = building ? building.children.map(c => c.name).filter(n => /^b\d+$/.test(n)) : [];
       lit.push(...[building, annex].filter((o): o is THREE.Object3D => !!o));

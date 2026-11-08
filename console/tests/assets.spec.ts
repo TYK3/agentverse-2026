@@ -24,6 +24,7 @@ test('A1: the demo model loads with every tower block named by its scene id, plu
   await page.locator('#asset-credits').evaluate(el => { (el as HTMLDetailsElement).open = true; });  // under the fake gate modal
   await expect(page.locator('#asset-credits li')).toHaveCount(5);
   await expect(page.locator('#asset-credits')).toContainText('Quaternius');
+  await page.goto('about:blank');   // stop drawing the tower now: in software GL it starves the next test's setup
 });
 
 test('A1: the tower model shows only for the tower scene, and moved blocks turn to ghosts', async ({ page }) => {
