@@ -54,6 +54,19 @@ watches a pile. Scan changes while driving are the Z1 scan diff's job.
 Backup scene closed loop: 90 s of exploring gives no zone. b10 sliding 0.15 m over 3 s while the
 Scout watches from room 2 opens a zone over b10 (seen up to 0.47 m), and 6 s of still re-scans lift it.
 
+## Injury triage and first-aid gate (Y3, `perception/triage.py`)
+
+Assesses casualty condition and determines first-aid intervention:
+- Fuses multi-modal observations: thermal signature, acoustic clues / sound level, camera posture check, and voice dialogue responses (via `voice.GUIDE.summary(cid)` or `casualty/answer`).
+- Powered by `gemini-4-argon` through `coord/gem.py` (`lead_reasoning`) with `GEMINI_MODE=live`. In `GEMINI_MODE=off`, uses deterministic clinical triage rules.
+- Triage priority levels: `immediate` (critical life-threat), `urgent` (stabilization needed), `delayed` (minor / stable), `unknown`.
+- Matches injuries to Responder arm first-aid supply items: `water`, `first_aid_kit`, `radio`, `bandage`, `splint`, `thermal_blanket`.
+- **First-Aid Gate & Human Card**:
+  - High confidence (>= 0.8) and unambiguous condition: autonomous gate decision (`gate/decision` `outcome="act"`) triggers `responder/action`.
+  - Unsure / ambiguous condition (< 0.8, conflicting clues, or severe multi-trauma): publishes `gate/decision` (`outcome="refer"`) and a needs-human triage card via `gate/request` (`kind="risky_move"`) with recommended supply options for operator approval.
+  - Upon operator `gate/answer` (`approved=True`), triggers `responder/action` with the selected first-aid item and logs to `log/decision`.
+- Exposes `perception.triage.triage_summary(cid)` and `TRIAGE.summary(cid)` for integration with the Y6 remote paramedic report.
+
 ## Casualties (T10, `perception/casualties.py`)
 
 `map/casualties` (contract shape, `vitals.simulated: true`) is published at 2 Hz when it changes, and is

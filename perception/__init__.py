@@ -9,6 +9,7 @@ from perception.explore import Explorer
 from perception.grid import Grid
 from perception.hazards import Hazards
 from perception.listen import Listener
+from perception.triage import TRIAGE, Triager, triage_summary
 
 PERIOD = 0.5          # map/cells and map/casualties (when changed) at 2 Hz
 SNAPSHOT_EVERY = 10   # ticks, so a full snapshot every 5 s
@@ -64,6 +65,7 @@ async def start(bus):
     bus.subscribe("map/hazards", explorer.on_hazards)
     bus.subscribe("scout/goto", lambda d: explorer.on_goto(d, now()))
     bus.subscribe("gate/decision", lambda d: explorer.on_decision(d, now()))
+    TRIAGE.attach(bus)
     _spawn(_publish(bus, grid, explorer, casualties, hazards, now))
     return grid
 
@@ -99,3 +101,11 @@ async def _publish(bus, grid, explorer, casualties, hazards, now):
             goto = explorer.tick(t)
             if goto:
                 await bus.publish("scout/goto", goto)
+
+
+__all__ = [
+    "TRIAGE",
+    "Triager",
+    "start",
+    "triage_summary",
+]
