@@ -87,7 +87,7 @@ def _plan_after(rows, index):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(strict=True, reason="ADD-BLOCK-Z / missing stop_and_recheck")
+@pytest.mark.xfail(strict=True, reason="run_b2 never halts after the slab shift: no stop_and_recheck (run_b2 uses drop_slab, not add_block, so ADD-BLOCK-Z alone will not fix this)")
 def test_every_robot_halts_inside_stop_window_then_a_plan_follows(tmp_path, monkeypatch):
     pytest.importorskip("mujoco")
     monkeypatch.setenv("GEMINI_MODE", "off")
