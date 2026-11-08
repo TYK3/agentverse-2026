@@ -16,12 +16,6 @@ import json
 
 import pytest
 
-# Pose samples are one per second: next_pose += 1.0 in tools/run_b2.py run().
-# The assertion below stays at DT.
-XFAIL_REASON = (
-    "actual pose sample interval is 1.0 s, set by next_pose += 1.0 "
-    "in tools/run_b2.py run()"
-)
 TOL = 1e-6
 
 
@@ -53,7 +47,6 @@ def coverage_problems(rows, dt):
     return problems
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=XFAIL_REASON)
 def test_b1_pose_log_covers_every_tick(tmp_path, monkeypatch):
     pytest.importorskip("mujoco")
     from sim.demo_descent import DT
