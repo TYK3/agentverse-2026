@@ -153,7 +153,7 @@ def test_build_scene_off_mode(monkeypatch):
 
     assert m is not None and d is not None
     assert payload["scene"] == "backup"
-    assert len(payload["blocks"]) == 15
+    assert len(payload["blocks"]) == 16
     assert all(set(b.keys()) == {"id", "label", "pos", "size"} for b in payload["blocks"])
 
 
@@ -218,7 +218,7 @@ def test_build_scene_failure_clean_fallback(monkeypatch, cleanup_generated):
     assert m is not None and d is not None
     # Clean fallback to backup scene
     assert payload["scene"] == "backup"
-    assert len(payload["blocks"]) == 15
+    assert len(payload["blocks"]) == 16
 
 
 def test_build_scene_bus_publish(monkeypatch, cleanup_generated):

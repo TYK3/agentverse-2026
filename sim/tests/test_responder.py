@@ -102,7 +102,7 @@ def test_scripted_demo_delivers_water_and_clears_b11():
     assert water[2] < 0.1, "water should be on the floor"
     b11 = pos_of(world, "b11")
     assert not (1.15 < b11[0] < 1.35 and 0.3 < b11[1] < 0.9), "b11 should be out of the room 2/3 gap"
-    assert r.status()["carrying"] == ["first_aid_kit", "radio"]
+    assert r.status()["carrying"] == ["first_aid_kit", "radio", "bandage", "splint", "thermal_blanket"]
 
 
 def test_never_overlaps_a_block_during_the_demo():
