@@ -23,6 +23,9 @@
       "$ref": "#/$defs/shift"
     },
     {
+      "$ref": "#/$defs/relook"
+    },
+    {
       "$ref": "#/$defs/summary"
     },
     {
@@ -269,6 +272,35 @@
         "footprint",
         "core",
         "scout"
+      ],
+      "additionalProperties": false
+    },
+    "relook": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/time"
+        },
+        "kind": {
+          "const": "relook"
+        },
+        "cause": {
+          "type": "string",
+          "enum": [
+            "blocked",
+            "refused"
+          ]
+        },
+        "cells": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "cause",
+        "cells"
       ],
       "additionalProperties": false
     },
