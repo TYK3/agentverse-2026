@@ -15,17 +15,17 @@
 </p>
 
 <p align="center">
-  🎬 <b><a href="https://youtu.be/sXFX6Gd1DOk">One-minute demo</a></b> · 🎥 <b><a href="https://youtu.be/PmSziD3qm70">3-minute full demo</a></b> · 📄 <b><a href="https://app.notion.com/p/AFTERSHOCK-PDF-412284d12338800cb7ebcac8fc0f203e">One-page submission PDF</a></b>
+  🎬 <b><a href="https://youtu.be/sXFX6Gd1DOk">One-minute submission video</a></b> · 🎥 <b><a href="https://youtu.be/PmSziD3qm70">3-minute full demo</a></b> · 📄 <b><a href="https://app.notion.com/p/AFTERSHOCK-PDF-412284d12338800cb7ebcac8fc0f203e">One-page submission PDF</a></b>
   <br>📐 <a href="docs/aftershock.md">Full spec</a> · 📝 <a href="docs/technical-summary.pdf">Technical summary (in repo)</a> · 🏗️ <a href="#️-architecture">Architecture</a> · 🛠️ <a href="#️-run-it-yourself">Run it yourself</a>
 </p>
 
 ## 🎬 Demo
 
 <p align="center">
-  <a href="https://youtu.be/sXFX6Gd1DOk" title="Play the one-minute AFTERSHOCK demo on YouTube">
-    <img src="https://img.youtube.com/vi/sXFX6Gd1DOk/hqdefault.jpg" alt="One-minute AFTERSHOCK demo: one take with one unscripted change. Click to play on YouTube" width="80%">
+  <a href="https://youtu.be/sXFX6Gd1DOk" title="Play the one-minute AFTERSHOCK submission video on YouTube">
+    <img src="https://img.youtube.com/vi/sXFX6Gd1DOk/hqdefault.jpg" alt="One-minute AFTERSHOCK submission video: one take with one unscripted change. Click to play on YouTube" width="80%">
   </a>
-  <br><b>▶️ <a href="https://youtu.be/sXFX6Gd1DOk">Play the one-minute demo</a></b> (the submission video: one take, one unscripted change)
+  <br><b>▶️ <a href="https://youtu.be/sXFX6Gd1DOk">Play the one-minute submission video</a></b> (one take, one unscripted change)
   <br><br>🎥 <b>3-minute full demo:</b> <a href="https://youtu.be/PmSziD3qm70">youtu.be/PmSziD3qm70</a>
   <br>📄 <b>One-page submission PDF:</b> <a href="https://app.notion.com/p/AFTERSHOCK-PDF-412284d12338800cb7ebcac8fc0f203e">AFTERSHOCK PDF on Notion</a>
 </p>
