@@ -12,12 +12,13 @@ import re
 import mujoco
 import numpy as np
 
-from sim import aftershock, scene, sensors
+from sim import aftershock, breakage, scene, sensors
 
 SPEED = 0.3            # m/s
 CLEARANCE = 0.15       # metres of free space the Scout needs ahead before it moves
 HALF_WIDTH = 0.08      # Scout chassis half width; side rays check the corners
 ARRIVE = 0.02          # metres
+WARMUP_S = 0.5         # seconds of settling, breaking disarmed, before a breakable scene starts
 LAND = 1.0             # seconds an injected block gets to fall and settle before world/change
 
 
@@ -40,8 +41,12 @@ class World:
         self.m, self.d = scene.load(path)
         self.t = 0.0
         self.rng = np.random.default_rng(seed)
-        self.scout = self.m.body("scout").id
-        self.scout_mocap = int(self.m.body_mocapid[self.scout])
+        self._scout_model()
+        self.breaker = breakage.Breaker(self.m)    # no-op unless the scene has weld limits (building)
+        if self.breaker.active:
+            # The first steps load every weld at once; that spike is not damage. Settle before arming.
+            for _ in range(round(WARMUP_S / self.m.opt.timestep)):
+                mujoco.mj_step(self.m, self.d)
         self.casualties = casualties(self.m)   # [(name, geom id, voice)], c1 first
         self.casualty_geom = self.casualties[0][1]
         self.target = None          # [x, y] the Scout is driving to
@@ -55,6 +60,31 @@ class World:
         self.events = []            # (topic, data) produced since the last tick
         self.landing = None         # (world time, name) when an injected block will have landed
         self.refresh_unstable()
+
+    def _scout_model(self):
+        """Small backup Scout (body `scout`, origin = LiDAR) or the true-scale LIMO (`scout/scout`, sim/robots:
+        origin on the ground, LiDAR site above it, camera `depth_cam`)."""
+        m = self.m
+        prefix = "" if mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "scout") >= 0 else "scout/"
+        self.scout = m.body(prefix + "scout").id
+        self.scout_mocap = int(m.body_mocapid[self.scout])
+        site = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, prefix + "lidar")
+        if site >= 0:                                        # true scale: sizes from the robot spec
+            half_len, half_w = 0.161, 0.11
+            self.sensor_offset = m.site_pos[site].copy()
+            self.clearance, self.half_width, self.drive_z = half_len + CLEARANCE, half_w, 0.1
+            self.camera_name = prefix + "depth_cam"
+        else:
+            self.sensor_offset = np.zeros(3)
+            self.clearance, self.half_width, self.drive_z = CLEARANCE, HALF_WIDTH, 0.0
+            self.camera_name = "scout_cam"
+
+    @property
+    def sensor_origin(self):
+        """Where the LiDAR, thermal and microphones sit: the Scout origin plus the LiDAR offset, turned by yaw."""
+        c, s = math.cos(self.yaw), math.sin(self.yaw)
+        x, y, z = self.sensor_offset
+        return self.pos + np.array([c * x - s * y, s * x + c * y, z])
 
     # ---- physics route check ----------------------------------------------------
     def refresh_unstable(self):
@@ -138,9 +168,10 @@ class World:
         """True if nothing is within CLEARANCE + step ahead along the centre line or either side."""
         fwd = np.array([math.cos(heading), math.sin(heading), 0.0])
         side = np.array([-fwd[1], fwd[0], 0.0])
-        need = CLEARANCE + step
-        for offset in (0.0, HALF_WIDTH, -HALF_WIDTH):
-            dist, _ = sensors._ray(self.m, self.d, self.pos + side * offset, fwd, self.scout)
+        need = self.clearance + step
+        base = self.pos + np.array([0.0, 0.0, self.drive_z])
+        for offset in (0.0, self.half_width, -self.half_width):
+            dist, _ = sensors._ray(self.m, self.d, base + side * offset, fwd, self.scout)
             if 0 <= dist < need:
                 return False
         return True
@@ -171,6 +202,7 @@ class World:
                 offset = aftershock.shake_offset(self.t + n * h - self.shake_t0)
                 self.d.mocap_pos[self.ground] = self.ground_base + offset
             mujoco.mj_step(self.m, self.d)
+            self.breaker.step(self.m, self.d)
         self.t = round(self.t + dt, 6)
         if self.shaking and self.t - self.shake_t0 >= aftershock.DURATION - 1e-9:
             self._finish_aftershock()
@@ -184,7 +216,7 @@ class World:
     # ---- sensors -----------------------------------------------------------------
     def sensors_message(self, camera=True):
         """Payload for sensors/scout. `camera` adds a base64 JPEG frame when a renderer exists."""
-        origin, yaw = self.pos, self.yaw
+        origin, yaw = self.sensor_origin, self.yaw
         heard, thermal = [], None
         for _name, geom, voice in self.casualties:
             casualty = self.d.geom_xpos[geom].copy()
@@ -205,7 +237,7 @@ class World:
             "motion": {"state": self.state, "target": None if self.target is None else [round(float(v), 3) for v in self.target]},
         }
         if camera:
-            frame = sensors.camera_jpeg(self.d, self.renderer)
+            frame = sensors.camera_jpeg(self.d, self.renderer, name=self.camera_name)
             if frame is not None:
                 data["camera"] = {"format": "jpeg", "b64": frame}
         return data
