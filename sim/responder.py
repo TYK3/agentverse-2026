@@ -432,22 +432,32 @@ class Responder:
 
     # ---- motion -----------------------------------------------------------------
     def free_ahead(self, heading, step):
-        """True if no geom is within HALF_LEN + GAP + step ahead, on the centre line or either side."""
-        # Cast along the chassis, tilted with it on a ramp, so the ramp surface itself never reads as a block.
-        cp, sp = math.cos(self.pitch), math.sin(self.pitch)
-        fwd = np.array([math.cos(heading) * cp, math.sin(heading) * cp, -sp])
-        side = np.array([-math.sin(heading), math.cos(heading), 0.0])
-        up = np.cross(fwd, side)
+        """True if no geom is within HALF_LEN + GAP + step ahead, on the centre line or either side.
+
+        Each ray rides the ground under its own start and end point (#267's _follow), so on a ramp it is
+        tilted both ways, along the heading (pitch) and across it (roll, when crossing a slope at an
+        angle), and the ramp surface never reads as a block. A floor change steeper than MAX_RISE (a
+        wall, a drop) is not followed, so the ray stays level and a wall ahead still blocks.
+        """
+        h = np.array([math.cos(heading), math.sin(heading)])
+        side = np.array([-h[1], h[0]])
         need = HALF_LEN + GAP + step
         geomid = np.zeros(1, dtype=np.int32)
         nearest = None
-        for z in RAY_HEIGHTS:
-            for offset in (0.0, HALF_WIDTH, -HALF_WIDTH):
-                origin = np.array([*self.pos[:2], self.floor_z + RIDE_Z]) + up * (z - RIDE_Z) + side * offset
-                dist = mujoco.mj_ray(self.m, self.d, origin, fwd, None, 1, self.body, geomid)
-                if 0 <= dist < need and not self._carried_geom(int(geomid[0])):
-                    if nearest is None or dist < nearest[0]:
-                        nearest = (dist, origin + fwd * dist, int(geomid[0]))
+        for offset in (0.0, HALF_WIDTH, -HALF_WIDTH):
+            p0 = self.pos[:2] + side * offset
+            p1 = p0 + h * need
+            f0 = self._follow(p0, self.floor_z, max(abs(offset), 1e-3))
+            f1 = self._follow(p1, f0, need)
+            for z in RAY_HEIGHTS:
+                a = np.array([p0[0], p0[1], f0 + z])
+                d = np.array([p1[0], p1[1], f1 + z]) - a
+                length = float(np.linalg.norm(d))
+                u = d / length
+                dist = mujoco.mj_ray(self.m, self.d, a, u, None, 1, self.body, geomid)
+                if (0 <= dist < length and not self._carried_geom(int(geomid[0]))
+                        and (nearest is None or dist < nearest[0])):
+                    nearest = (dist, a + u * dist, int(geomid[0]))
         if nearest is None:
             self.last_hit = None
             return True
@@ -470,6 +480,9 @@ class Responder:
         if self.last_hit is None:
             return None
         (hx, hy), geom = self.last_hit
+        # Cell from the same rounded point the record prints, so a hit on a cell edge (a wall face at
+        # x = -0.05) reads back to the cell it names.
+        hx, hy = round(hx, 3), round(hy, 3)
         i, j, k = self._hit_cell((hx, hy))
         data = {
             "t": round(max(0.0, float(self.clock())), 2),
