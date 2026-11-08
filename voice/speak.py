@@ -17,6 +17,15 @@ from voice import translate
 logger = logging.getLogger("voice.speak")
 logging.basicConfig(level=logging.INFO)
 
+# Set once the API says the TTS model does not exist, so later lines skip the call (ref TTS-FALLBACK).
+_tts_model_missing: str | None = None
+
+
+def _is_not_found(exc: BaseException) -> bool:
+    """True for a google-genai 404 (model not found); those errors do not subclass the builtins."""
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    return code == 404 or "404" in str(exc)[:40]
+
 
 def get_mode() -> str:
     """Return the active GEMINI_MODE (off | replay | live)."""
@@ -49,24 +58,28 @@ def speak_text(text: str, to: str = "operator", allow_device: bool = True) -> di
         return {"spoken": False, "mode": "text-only", "reason": "gemini_off", "text": text}
 
     # Live or replay TTS attempt
+    global _tts_model_missing
     try:
-        _count_call()
         from coord import gem
 
+        model = gem.MODEL_IDS.get("tts_studio", "gemini-3.8-flash-tts")
         audio_bytes = None
-        try:
-            client = gem._c()
-            response = client.models.generate_content(
-                model=gem.MODEL_IDS.get("tts_studio", "gemini-3.8-flash-tts"),
-                contents=text,
-            )
-            if hasattr(response, "candidates") and response.candidates:
-                for part in response.candidates[0].content.parts:
-                    if hasattr(part, "inline_data") and part.inline_data:
-                        audio_bytes = part.inline_data.data
-                        break
-        except (AttributeError, RuntimeError, KeyError, TypeError, ValueError, OSError) as e:
-            logger.debug("Direct TTS synthesis call note: %s", e)
+        if _tts_model_missing != model:
+            _count_call()
+            try:
+                client = gem._c()
+                response = client.models.generate_content(model=model, contents=text)
+                if hasattr(response, "candidates") and response.candidates:
+                    for part in response.candidates[0].content.parts:
+                        if hasattr(part, "inline_data") and part.inline_data:
+                            audio_bytes = part.inline_data.data
+                            break
+            except Exception as e:  # noqa: BLE001 - any API failure means text-only, never a crashed `say`
+                if _is_not_found(e):
+                    _tts_model_missing = model
+                    logger.warning("TTS model %s not found; speaking as text from now on", model)
+                else:
+                    logger.warning("TTS call failed, text-only for this line: %s", str(e)[:200])
 
         if audio_bytes and allow_device:
             try:

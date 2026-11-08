@@ -91,7 +91,7 @@ def translate_to_casualty(
         )
         translated = gem.ask("live_translate", prompt, feature="live_translate")
         return translated.strip()
-    except (ImportError, AttributeError, RuntimeError, KeyError, TypeError, ValueError, OSError) as exc:
+    except Exception as exc:  # noqa: BLE001 - google-genai API errors are not builtins; fall back, never crash `say`
         logger.debug("Live translation unavailable, using fallback: %s", exc)
         _mark_stand_in()
         if allow_fixture and normalized in _FIXTURE_EN_TO_TR:
@@ -129,7 +129,7 @@ def translate_casualty_reply(
         )
         translated = gem.ask("live_translate", prompt, feature="live_translate")
         return translated.strip()
-    except (ImportError, AttributeError, RuntimeError, KeyError, TypeError, ValueError, OSError) as exc:
+    except Exception as exc:  # noqa: BLE001 - google-genai API errors are not builtins; fall back, never crash `say`
         logger.debug("Casualty reply translation unavailable, using fallback: %s", exc)
         _mark_stand_in()
         if allow_fixture and normalized in _FIXTURE_TR_TO_EN:
