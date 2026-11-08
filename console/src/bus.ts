@@ -21,6 +21,9 @@ function dispatch(message: Envelope): void {
   listeners.get('*')?.forEach(handler => handler(message));
 }
 
+(window as unknown as { dispatchBusMessage: (topic: string, data: unknown) => void }).dispatchBusMessage =
+  (topic: string, data: unknown) => dispatch({ topic, data });
+
 function parseMessage(raw: string): void {
   try {
     const message: unknown = JSON.parse(raw);
