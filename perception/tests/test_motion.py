@@ -4,7 +4,7 @@ import pytest
 
 from perception.grid import Grid
 from perception.hazards import Hazards
-from perception.motion import EXCLUDE, QUIET_FRAMES, MotionWatch
+from perception.motion import DEPTH_CARVE, EXCLUDE, QUIET_FRAMES, MotionWatch
 
 EYE = [0.0, 0.0, 0.3]
 WALL = [[1.0, -0.2 + 0.05 * k + 0.025, 0.3] for k in range(8)]         # a face 1 m ahead, 8 voxels wide
@@ -58,6 +58,55 @@ def test_motion_during_rescans_restarts_the_quiet_count():
     assert w.zones == [zone]                                           # one quiet frame short
     frame(w, 2.0, nearer)
     assert w.zones == []
+
+
+def floor_frame(w, t, z):
+    """One sensors/scout frame of a still floor seen by the depth camera, more points than DEPTH_CARVE (so
+    only some are walked as rays), each return at height `z`: the real sim reports floor hits at 0.000
+    or -0.001 m, either side of the voxel boundary at 0."""
+    cam = [0.0, 0.0, 0.105]
+    pts = [[0.3 + 0.02 * i, -0.3 + 0.02 * j, z] for i in range(40) for j in range(30)]
+    assert len(pts) > DEPTH_CARVE
+    w.add_sensors({"t": t, "pose": {"pos": [-0.1, 0.0, 0.075], "yaw": 0.0}, "points": pts, "points_from": cam})
+
+
+def test_floor_returns_on_the_voxel_boundary_are_not_motion():
+    """ref #144 seed 23: walked and unwalked depth points must bin a return the same way (INTO past it), or a
+    still floor at z = 0.000 vs -0.001 m flips voxels in the bottom layer and opens zones that never lift."""
+    w = MotionWatch()
+    for k in range(40):
+        floor_frame(w, k * 0.5, 0.0 if (k // 6) % 2 == 0 else -0.001)
+    assert w.zones == [] and w.lifted == []
+
+
+def cargo(x):
+    """Rays at the face of the Responder's deck cargo (0.12-0.23 m up) when it is at x, else the far wall."""
+    return [[x, -0.1 + 0.05 * k + 0.025, 0.3] for k in range(4)]
+
+
+def test_the_responder_and_its_cargo_are_not_debris():
+    """ref #144 seeds 22/23: the Scout's camera sees the supplies on the Responder's deck (they are not robot
+    geoms). Driving past, they 'land' and 'move away', which opened keep-out zones on the Responder's own
+    route and revoked it. Motion within ROBOT_R of where responder/pose put it in the last ROBOT_S is not debris."""
+    w = MotionWatch()
+    for t in range(6):
+        frame(w, t * 0.1, BACK[:4])                                    # a free view to the back wall
+    for k, t in enumerate(range(6, 20)):
+        x = 1.0 + 0.02 * k                                             # the Responder drives across the view
+        w.on_responder({"t": t * 0.1, "pos": [x, 0.0, 0.05]})
+        frame(w, t * 0.1, cargo(x) if k < 8 else BACK[:4])             # then it is gone again
+    assert w.zones == [] and w.lifted == [], "no zone may open, not even one that lifts later"
+
+
+def test_debris_away_from_the_responder_still_opens_a_zone():
+    w = MotionWatch()
+    w.on_responder({"t": 0.0, "pos": [-1.0, -1.0, 0.05]})              # parked well away from the wall
+    for t in range(6):
+        frame(w, t * 0.1, WALL)
+    for t in range(6, 9):
+        w.on_responder({"t": t * 0.1, "pos": [-1.0, -1.0, 0.05]})
+        frame(w, t * 0.1, BACK)
+    assert len(w.zones) == 1
 
 
 def test_a_new_viewpoint_is_not_motion():

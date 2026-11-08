@@ -38,6 +38,8 @@ QUIET_RAYS = 3        # voxels in the moved columns a frame must re-measure to c
 CAM_FWD, CAM_Z = 0.15, 0.18   # Scout depth camera mount (docs/hardware.md), when points_from is absent
 FORGET_S = 20.0       # seconds after which a viewpoint the Scout left is dropped (memory stays bounded)
 DEPTH_CARVE = 512     # depth rays walked for free space per frame (every point still counts as a hit)
+ROBOT_R = 0.3         # metres around the Responder (chassis, gripper, deck cargo) where motion is not debris
+ROBOT_S = 10.0        # seconds of its responder/pose trail kept: cargo it drove away from still "moves away"
 FACES = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
 
 
@@ -73,6 +75,16 @@ class MotionWatch:
         self.seen = set()      # voxels measured in the current frame
         self.obs = {}          # voxel -> True (a return) or False (only passes) in the current frame
         self.t = 0.0
+        self.robot = []        # (t, x, y) of the Responder from responder/pose, the last ROBOT_S seconds
+
+    def on_responder(self, data):
+        """responder/pose: where the Responder is, so its own motion and its cargo's are not read as debris."""
+        t = data.get("t", self.t)
+        self.robot = [p for p in self.robot if t - p[0] <= ROBOT_S] + [(t, *data["pos"][:2])]
+
+    def _robot_near(self, v, t):
+        x, y = (v[0] + 0.5) * VOX, (v[1] + 0.5) * VOX
+        return any(t - rt <= ROBOT_S and math.hypot(x - rx, y - ry) <= ROBOT_R for rt, rx, ry in self.robot)
 
     # ---- rays ------------------------------------------------------------------------------
 
@@ -112,8 +124,10 @@ class MotionWatch:
             for i, p in enumerate(points):
                 if i % step == 0:
                     self.ray(cam, p)
-                else:
-                    self.obs[(voxel(p), self.view)] = True
+                else:                                      # binned like a ray's hit, INTO past the return:
+                    length = math.dist(cam, p)             # a floor at z 0.000 vs -0.001 must land in one voxel
+                    f = 1 + INTO / length if length > 1e-6 else 1
+                    self.obs[(voxel([c + (e - c) * f for c, e in zip(cam, p)]), self.view)] = True
         for key, hit in self.obs.items():
             (self._hit if hit else self._pass)(key)
         self.seen = {v for v, _ in self.obs}
@@ -174,7 +188,7 @@ class MotionWatch:
         """Merge this frame's motion into zones, open new ones, and count quiet re-scans toward lifting."""
         recent = {}
         for v, t, kind in self.events:              # one entry per voxel (several viewpoints may see it)
-            if self.t - t <= 2.0:
+            if self.t - t <= 2.0 and not self._robot_near(v, t):
                 recent.setdefault(v, (t, kind))
         self.events = []
         moved = set()
