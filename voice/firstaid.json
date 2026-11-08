@@ -1,0 +1,48 @@
+{
+  "title": "Search and Rescue First Aid Guidance",
+  "disclaimer": "First aid guidance for bystanders and rescue operators. This guidance is for immediate support only, never a medical diagnosis. All medical decisions require qualified professional care.",
+  "steps": [
+    {
+      "id": "step_1",
+      "action": "check_breathing",
+      "title": "Check Breathing",
+      "guidance": "Check for normal breathing: gently tilt the head back and look, listen, and feel for chest movement and breath for up to 10 seconds.",
+      "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/unresponsive-and-breathing"
+    },
+    {
+      "id": "step_2",
+      "action": "control_bleeding",
+      "title": "Control Severe Bleeding",
+      "guidance": "Apply firm, direct pressure on the bleeding wound with a clean cloth or dressing. If an object is embedded, press around it without removing it.",
+      "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/bleeding-heavily"
+    },
+    {
+      "id": "step_3",
+      "action": "protect_spine",
+      "title": "Do Not Move Neck or Spine",
+      "guidance": "Do not move the neck or back unless the casualty is in immediate danger. Support the head with your hands to keep the head, neck, and spine aligned.",
+      "source": "https://www.sja.org.uk/first-aid-advice/recovery-position/"
+    },
+    {
+      "id": "step_4",
+      "action": "recovery_position",
+      "title": "Place in Recovery Position",
+      "guidance": "If the casualty is unresponsive but breathing normally and not in danger of spinal trauma, roll them onto their side to keep the airway open.",
+      "source": "https://www.nhs.uk/conditions/first-aid/recovery-position/"
+    },
+    {
+      "id": "step_5",
+      "action": "keep_warm",
+      "title": "Keep Warm and Prevent Shock",
+      "guidance": "Cover the casualty with a blanket, jacket, or dry cloth to preserve body warmth and prevent shock. Do not apply direct artificial heat.",
+      "source": "https://www.nhs.uk/conditions/hypothermia/"
+    },
+    {
+      "id": "step_6",
+      "action": "reassure_and_monitor",
+      "title": "Reassure and Monitor",
+      "guidance": "Stay with the casualty, speak calmly to reassure them, and monitor breathing continuously until emergency medical personnel arrive.",
+      "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/unresponsive-and-breathing"
+    }
+  ]
+}

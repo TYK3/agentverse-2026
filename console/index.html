@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AFTERSHOCK | Operator Console</title>
+</head>
+<body>
+  <div id="app">
+    <header id="top-bar">
+      <strong>AFTERSHOCK</strong>
+      <span id="connection-status" role="status">Connecting…</span>
+      <span id="gemini-status" title="Awaiting status">GEMINI: …</span>
+      <div id="budget-panel">Edge budget · awaiting telemetry</div>
+      <span id="link-status" role="status">Link unknown</span>
+      <button id="btn-hardware-specs" type="button" class="btn-sm btn-topbar" title="Robot hardware specifications (Y7b)">Hardware Specs</button>
+    </header>
+    <main id="workspace">
+      <section id="map-panel" aria-label="3D map">
+        <canvas id="map-canvas"></canvas>
+        <div id="world-change-banner" class="world-change-banner hidden" role="alert">
+          <span id="banner-icon" class="banner-icon">⚠️</span>
+          <span id="banner-text" class="banner-text">Aftershock detected: b7 moved. Re-scanning</span>
+        </div>
+        <div class="map-hud-top">
+          <div class="map-title-badge">3D MAP · MuJoCo Frame (Z-up) · OrbitControls</div>
+          <div class="map-stats-badge">
+            <span id="fps-badge" class="fps-badge fps-good">60 FPS</span>
+            <span id="cell-count-badge" class="cell-count-badge">0 cells</span>
+          </div>
+        </div>
+        <div class="map-controls">
+          <button id="btn-demo-scene" type="button" class="btn-sm" title="Load standard backup scene">Demo Scene</button>
+          <button id="btn-demo-replan" type="button" class="btn-sm btn-highlight" title="Simulate aftershock and visible re-plan">Simulate Re-Plan</button>
+          <button id="btn-benchmark-100k" type="button" class="btn-sm" title="Stress test with 100,000 cells">Benchmark 100k</button>
+        </div>
+        <div class="map-legend" aria-label="Map and hazard legend">
+          <div class="legend-header">ESTIMATES &amp; STATUS LEGEND</div>
+          <div class="legend-row"><span class="legend-swatch seen-solid"></span><span>Seen occupied (solid grey)</span></div>
+          <div class="legend-row"><span class="legend-swatch inferred"></span><span>Inferred (35% opacity)</span></div>
+          <div class="legend-row"><span class="legend-swatch hazard-risk"></span><span>Hazard: At risk (amber, estimate)</span></div>
+          <div class="legend-row"><span class="legend-swatch hazard-collapsed"></span><span>Hazard: Collapsed (red, estimate)</span></div>
+          <div class="legend-row"><span class="legend-swatch hazard-risk"></span><span>Floor tiles: predicted failure zone (route avoids)</span></div>
+          <div class="legend-row"><span class="legend-swatch route-active"></span><span>Active route (solid blue tube)</span></div>
+          <div class="legend-row"><span class="legend-swatch route-previous"></span><span>Previous route (faded 20% opacity)</span></div>
+          <div class="legend-row"><span class="legend-swatch cell-unstable"></span><span>Unstable cell (physics check failed)</span></div>
+          <div class="legend-row"><span class="legend-swatch casualty"></span><span>Casualty (estimate &amp; simulated vitals)</span></div>
+          <div class="legend-row"><span class="legend-swatch scout"></span><span>Scout rover (pose mesh)</span></div>
+          <div class="legend-row"><span class="legend-swatch responder"></span><span>Responder robot (action mesh)</span></div>
+        </div>
+      </section>
+      <aside id="right-panel">
+        <h2>Move permission &amp; evidence</h2>
+        <div id="permit-panel" class="permit-panel" role="region" aria-label="Route move permission and proof evidence">
+          <div class="permit-empty">Awaiting route move permit…</div>
+        </div>
+        <h2>Reasoning log</h2>
+        <ol id="reasoning-log"></ol>
+        <h2>Decision confidence</h2>
+        <div id="confidence-panel">Awaiting planner</div>
+      </aside>
+    </main>
+    <footer id="bottom-bar">
+      <label for="operator-command">Operator command</label>
+      <input id="operator-command" placeholder="Enter a command" autocomplete="off"/>
+      <button id="send-command" type="button">Send</button>
+      <button id="mic-command" type="button" disabled title="Voice lane will connect microphone input">Mic · pending</button>
+      <button id="show-report" type="button">Handover report</button>
+      <span id="mode-label"></span>
+      <span id="send-status" role="status"></span>
+    </footer>
+  </div>
+
+  <dialog id="approval-dialog" aria-labelledby="approval-title">
+    <h2 id="approval-title">Operator approval required</h2>
+    <p id="approval-summary"></p>
+    <p id="approval-meta"></p>
+    <p id="approval-error" role="alert"></p>
+    <button id="approve" type="button">Approve</button>
+    <button id="reject" type="button">Reject</button>
+  </dialog>
+
+  <dialog id="report-dialog" aria-labelledby="report-title">
+    <h2 id="report-title">Handover report</h2>
+    <div id="report-content"></div>
+    <button id="close-report" type="button">Close</button>
+  </dialog>
+
+  <!-- Y7c: Robot Hardware Specification Panel (docs/hardware.md) -->
+  <dialog id="hardware-dialog" class="hardware-dialog" aria-labelledby="hardware-title">
+    <div class="hardware-header">
+      <h2 id="hardware-title">Robot Hardware Specification (Y7b)</h2>
+      <button id="btn-close-hardware" type="button" class="btn-close" aria-label="Close specifications">×</button>
+    </div>
+    <div class="hardware-body">
+      <table id="hardware-table" class="hardware-table">
+        <thead>
+          <tr>
+            <th>Specification</th>
+            <th>Scout (per unit)</th>
+            <th>Responder</th>
+          </tr>
+        </thead>
+        <tbody id="hardware-tbody">
+        </tbody>
+      </table>
+    </div>
+  </dialog>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

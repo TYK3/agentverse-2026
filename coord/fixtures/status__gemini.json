@@ -1,0 +1,8 @@
+{
+  "topic": "status/gemini",
+  "data": {
+    "mode": "off",
+    "calls_last_hour": 0,
+    "stand_ins": []
+  }
+}

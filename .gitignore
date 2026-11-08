@@ -1,3 +1,5 @@
+/reports/
+
 # local read position and cached login for tools/board
 .board/
 
@@ -9,3 +11,9 @@ __pycache__/
 # Claude Code: per-person settings and subagent worktrees (each is a whole checkout)
 .claude/settings.local.json
 .claude/worktrees/
+# Gemini answers cached by coord/gem.py (replay mode)
+.gem_cache/
+
+# T24 raw trajectories; the compressed measured dataset is committed separately.
+eval/traces/
+eval/stand-in/traces/

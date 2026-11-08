@@ -1,0 +1,21 @@
+{
+  "topic": "route/proposed",
+  "data": {
+    "id": "r3",
+    "robot": "responder",
+    "cells": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        0,
+        0
+      ]
+    ],
+    "goal": "deliver water to c1",
+    "model": "local-astar"
+  }
+}

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+public/fixtures/
+test-results/
+playwright-report/

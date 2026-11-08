@@ -1,0 +1,14 @@
+{
+  "topic": "world/debris",
+  "data": {
+    "t": 23.8,
+    "truth": true,
+    "events": [
+      {"id": "b8", "kind": "settled", "pos": [1.841, -0.317, 0.127], "moved_m": 0.699, "drop_m": 0.373}
+    ],
+    "stacks": [
+      {"ids": ["b10", "b8"], "risk": 0.69, "worst": "b10", "tilt_deg": 30.0, "overhang": 0.83,
+       "motion_m": 0.0, "top_z": 0.723, "min_xy": [0.748, -0.945], "max_xy": [1.3, 0.3], "unstable": true}
+    ]
+  }
+}

@@ -1,0 +1,144 @@
+<!-- Responder (Y7a), true scale, from docs/hardware.md (Y7b): Clearpath Jackal base, Kinova Gen3 lite arm,
+     Livox Mid-360 on a mast, Luxonis OAK-D Lite, FLIR Lepton 3.5, Seeed ReSpeaker v2.0 (also the guide-voice
+     speaker), Jetson Orin NX, and a supply deck.
+     Frame: x forward, y left, z up, origin on the ground under the centre of the base. The root body is
+     mocap: a driver sets its pose, as sim/responder.py does for the backup scene's Responder. All geoms
+     are in group 3 (robot geoms, #67/#74). Only the two finger pads collide, so Y2 can grip with them.
+     Maker figures: 508 x 430 x 250 mm, 17 kg, 65 mm ground clearance; arm 5.4 kg, 760 mm reach, 0.5 kg
+     payload. Masses add up to about 25.7 kg (the docs/hardware.md estimate).
+     Estimates (not in the spec): wheel radius 0.098 m, wheelbase 0.262 m, track 0.376 m, the split of
+     the 17 kg base, the arm link lengths (chosen to sum to the 760 mm reach), the arm joint limits
+     (+-150 degrees), the gripper stroke, and the actuator gains. Sensor sites sit exactly where the spec
+     table puts them. The arm bodies have gravcomp="1", the stand-in for Kinova's own gravity compensation. -->
+<mujoco model="responder">
+  <worldbody>
+    <body name="responder" mocap="true">
+      <!-- Clearpath Jackal, 17 kg: body between the wheels, a full-width top plate at 250 mm. -->
+      <geom name="chassis" type="box" size="0.254 0.16 0.085" pos="0 0 0.15" mass="13.4"
+            group="3" contype="0" conaffinity="0" rgba="0.95 0.6 0.1 1"/>
+      <geom name="top_plate" type="box" size="0.254 0.215 0.0075" pos="0 0 0.2425" mass="1.2"
+            group="3" contype="0" conaffinity="0" rgba="0.2 0.2 0.2 1"/>
+      <geom name="wheel_fl" type="cylinder" size="0.098 0.02" pos="0.131 0.1878 0.098" euler="90 0 0" mass="0.6"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="wheel_fr" type="cylinder" size="0.098 0.02" pos="0.131 -0.1878 0.098" euler="90 0 0" mass="0.6"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="wheel_rl" type="cylinder" size="0.098 0.02" pos="-0.131 0.1878 0.098" euler="90 0 0" mass="0.6"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="wheel_rr" type="cylinder" size="0.098 0.02" pos="-0.131 -0.1878 0.098" euler="90 0 0" mass="0.6"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <site name="base_imu" pos="0 0 0.12" size="0.008" group="3"/>
+
+      <!-- Jetson Orin NX 16GB on a carrier, about 0.3 kg, inside the body. -->
+      <geom name="compute" type="box" size="0.05 0.045 0.015" pos="0 0 0.2" mass="0.3"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.3 0.1 1"/>
+
+      <!-- Mast and Livox Mid-360 (65 x 65 x 60 mm, 265 g); mast, brackets and cabling about 1 kg. -->
+      <geom name="mast" type="cylinder" size="0.015 0.21" pos="-0.15 0 0.46" mass="0.8"
+            group="3" contype="0" conaffinity="0" rgba="0.5 0.5 0.5 1"/>
+      <geom name="lidar" type="box" size="0.0325 0.0325 0.03" pos="-0.15 0 0.70" mass="0.27"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <site name="lidar" pos="-0.15 0 0.70" size="0.01" group="3"/>
+
+      <!-- Luxonis OAK-D Lite, 91 x 28 x 17.5 mm, front of the top plate, tilted 15 degrees down.
+           Colour camera 68 degrees horizontal at 4:3, so 53.7 degrees vertical. -->
+      <geom name="bracket_front" type="box" size="0.01 0.03 0.02" pos="0.24 0 0.27" mass="0.1"
+            group="3" contype="0" conaffinity="0" rgba="0.5 0.5 0.5 1"/>
+      <geom name="rgbd" type="box" size="0.014 0.0455 0.00875" pos="0.24 0 0.30" euler="0 15 0" mass="0.061"
+            group="3" contype="0" conaffinity="0" rgba="0.15 0.15 0.15 1"/>
+      <camera name="rgbd_cam" pos="0.24 0 0.30" xyaxes="0 -1 0 0.258819 0 0.965926" fovy="53.7"/>
+      <site name="rgbd_cam" pos="0.24 0 0.30" size="0.008" group="3"/>
+
+      <!-- FLIR Lepton 3.5 beside the OAK-D: 160 x 120, 57 degrees horizontal, 44.3 vertical. -->
+      <geom name="thermal" type="box" size="0.008 0.01 0.01" pos="0.242 0.058 0.30" mass="0.03"
+            group="3" contype="0" conaffinity="0" rgba="0.3 0.3 0.3 1"/>
+      <camera name="thermal_cam" pos="0.24 0.05 0.30" xyaxes="0 -1 0 0 0 1" fovy="44.3" resolution="160 120"/>
+      <site name="thermal" pos="0.24 0.05 0.30" size="0.008" group="3"/>
+
+      <!-- Seeed ReSpeaker v2.0 (70 g) with the guide-voice speaker, rear deck. -->
+      <geom name="mic_array" type="box" size="0.035 0.035 0.00665" pos="-0.20 0 0.27" mass="0.07"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.4 0.2 1"/>
+      <site name="mic_array" pos="-0.20 0 0.27" size="0.008" group="3"/>
+      <site name="speaker" pos="-0.20 0 0.27" size="0.008" group="3"/>
+
+      <!-- Supply deck between the arm and the mast; the supply kit itself (about 1.5 kg) is Y2's. -->
+      <geom name="supply_deck" type="box" size="0.06 0.12 0.005" pos="-0.04 0 0.255" mass="0.1"
+            group="3" contype="0" conaffinity="0" rgba="0.4 0.4 0.45 1"/>
+      <site name="supply_deck" pos="-0.10 0 0.26" size="0.01" group="3"/>
+
+      <!-- Kinova Gen3 lite, 6 DoF, 5.4 kg. Zero pose is straight up (Kinova's zero); sim.robots.stow() folds it.
+           Link lengths after the shoulder: 0.28 + 0.14 + 0.105 + 0.105 + 0.13 = 0.76 m reach. -->
+      <body name="arm_base" pos="0.10 0 0.25">
+        <site name="arm_mount" pos="0 0 0" size="0.01" group="3"/>
+        <site name="arm_imu" pos="0 0 0.02" size="0.006" group="3"/>
+        <geom name="arm_base" type="cylinder" size="0.045 0.064" pos="0 0 0.064" mass="0.9"
+              group="3" contype="0" conaffinity="0" rgba="0.85 0.85 0.85 1"/>
+        <body name="shoulder" pos="0 0 0.1283" gravcomp="1">
+          <joint name="j1" type="hinge" axis="0 0 1" range="-150 150" damping="2" armature="0.05"/>
+          <geom name="shoulder" type="cylinder" size="0.04 0.015" pos="0 0 0.015" mass="0.95"
+                group="3" contype="0" conaffinity="0" rgba="0.85 0.85 0.85 1"/>
+          <body name="upper_arm" pos="0 0 0.03" gravcomp="1">
+            <joint name="j2" type="hinge" axis="0 1 0" range="-150 150" damping="2" armature="0.05"/>
+            <geom name="upper_arm" type="capsule" fromto="0 0 0 0 0 0.28" size="0.035" mass="1.4"
+                  group="3" contype="0" conaffinity="0" rgba="0.85 0.85 0.85 1"/>
+            <body name="forearm" pos="0 0 0.28" gravcomp="1">
+              <joint name="j3" type="hinge" axis="0 1 0" range="-150 150" damping="1.5" armature="0.03"/>
+              <geom name="forearm" type="capsule" fromto="0 0 0 0 0 0.14" size="0.03" mass="0.8"
+                    group="3" contype="0" conaffinity="0" rgba="0.85 0.85 0.85 1"/>
+              <body name="wrist1" pos="0 0 0.14" gravcomp="1">
+                <joint name="j4" type="hinge" axis="0 0 1" range="-150 150" damping="1" armature="0.02"/>
+                <geom name="wrist1" type="capsule" fromto="0 0 0 0 0 0.105" size="0.027" mass="0.5"
+                      group="3" contype="0" conaffinity="0" rgba="0.85 0.85 0.85 1"/>
+                <body name="wrist2" pos="0 0 0.105" gravcomp="1">
+                  <joint name="j5" type="hinge" axis="0 1 0" range="-150 150" damping="1" armature="0.02"/>
+                  <geom name="wrist2" type="capsule" fromto="0 0 0 0 0 0.105" size="0.025" mass="0.4"
+                        group="3" contype="0" conaffinity="0" rgba="0.85 0.85 0.85 1"/>
+                  <body name="hand" pos="0 0 0.105" gravcomp="1">
+                    <joint name="j6" type="hinge" axis="0 0 1" range="-150 150" damping="0.5" armature="0.01"/>
+                    <geom name="hand" type="box" size="0.03 0.045 0.03" pos="0 0 0.03" mass="0.37"
+                          group="3" contype="0" conaffinity="0" rgba="0.2 0.2 0.2 1"/>
+                    <!-- Two-finger gripper: each finger slides 0 to 40 mm out from 5 mm off centre (estimate). -->
+                    <body name="finger_l" pos="0 0.005 0.06" gravcomp="1">
+                      <joint name="finger_l" type="slide" axis="0 1 0" range="0 0.04" damping="5"/>
+                      <geom name="pad_l" type="box" size="0.01 0.005 0.035" pos="0 0.005 0.035" mass="0.04"
+                            friction="1.5 0.02 0.001" group="3" rgba="0.1 0.1 0.1 1"/>
+                    </body>
+                    <body name="finger_r" pos="0 -0.005 0.06" gravcomp="1">
+                      <joint name="finger_r" type="slide" axis="0 -1 0" range="0 0.04" damping="5"/>
+                      <geom name="pad_r" type="box" size="0.01 0.005 0.035" pos="0 -0.005 0.035" mass="0.04"
+                            friction="1.5 0.02 0.001" group="3" rgba="0.1 0.1 0.1 1"/>
+                    </body>
+                    <site name="tool" pos="0 0 0.13" size="0.008" group="3"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="finger_l" body2="finger_r"/>
+  </contact>
+
+  <!-- Position servos (gains are estimates). ctrl is the target angle in radians, or the finger opening in m. -->
+  <actuator>
+    <position name="j1" joint="j1" kp="60" ctrlrange="-2.618 2.618"/>
+    <position name="j2" joint="j2" kp="80" ctrlrange="-2.618 2.618"/>
+    <position name="j3" joint="j3" kp="60" ctrlrange="-2.618 2.618"/>
+    <position name="j4" joint="j4" kp="30" ctrlrange="-2.618 2.618"/>
+    <position name="j5" joint="j5" kp="30" ctrlrange="-2.618 2.618"/>
+    <position name="j6" joint="j6" kp="20" ctrlrange="-2.618 2.618"/>
+    <position name="finger_l" joint="finger_l" kp="200" ctrlrange="0 0.04"/>
+    <position name="finger_r" joint="finger_r" kp="200" ctrlrange="0 0.04"/>
+  </actuator>
+
+  <sensor>
+    <accelerometer name="base_imu_accel" site="base_imu"/>
+    <gyro name="base_imu_gyro" site="base_imu"/>
+    <accelerometer name="arm_imu_accel" site="arm_imu"/>
+    <gyro name="arm_imu_gyro" site="arm_imu"/>
+    <framepos name="tool_pos" objtype="site" objname="tool"/>
+  </sensor>
+</mujoco>

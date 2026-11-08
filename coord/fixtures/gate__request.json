@@ -1,0 +1,9 @@
+{
+  "topic": "gate/request",
+  "data": {
+    "id": "g4",
+    "kind": "risky_move",
+    "summary": "clear light rubble",
+    "route": "r3"
+  }
+}

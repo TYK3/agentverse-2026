@@ -1,0 +1,8 @@
+{
+  "topic": "gate/answer",
+  "data": {
+    "id": "g4",
+    "approved": true,
+    "by": "operator"
+  }
+}

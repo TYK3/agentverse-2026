@@ -79,3 +79,10 @@ voice (spoken commands) --> planner        planner (say) --> voice (operator, ca
   `gemini-3.5-live-translate-preview` for translation, `gemini-3.8-flash` for the report, and a local
   Gemma 4 offline. Earlier ideas were dropped.
 - Sat 7 Nov: five of us, so voice (Function 6) is its own lane, split from the console.
+- Sat 7 Nov: T02 (#10) proposes one Python process with a validated async topic bus,
+  lane `async start(bus)` hooks and a FastAPI WebSocket at `/ws` using `{topic,data}`.
+  The latest 200 forwarded events are replayed; raw Scout sensors remain local.
+  Browser writes are restricted to `operator/command` and `gate/answer`.
+- Sat 7 Nov: sim T05 and console/offline lanes requested a `block_added` world change
+  and browser `status/link` toggle. Contract proposal PR #59 keeps `{kind,t,moved_blocks}`
+  for both world-change kinds and requires a strict boolean `online` for the toggle.

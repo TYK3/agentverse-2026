@@ -1,0 +1,19 @@
+{
+  "topic": "map/cells",
+  "data": {
+    "t": 0,
+    "res": 0.05,
+    "cells": [
+      {
+        "cell": [
+          0,
+          0,
+          0
+        ],
+        "state": "seen",
+        "occupied": false,
+        "hits": 1
+      }
+    ]
+  }
+}

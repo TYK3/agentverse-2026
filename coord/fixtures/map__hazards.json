@@ -1,0 +1,15 @@
+{
+  "topic": "map/hazards",
+  "data": [
+    {
+      "cell": [
+        3,
+        4,
+        0
+      ],
+      "status": "at_risk",
+      "why": "unsupported wall b7",
+      "estimate": true
+    }
+  ]
+}

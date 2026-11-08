@@ -1,0 +1,9 @@
+{
+  "topic": "gate/decision",
+  "data": {
+    "id": "d12",
+    "outcome": "relook",
+    "confidence": 0.6,
+    "reason": "rescan unknown cell"
+  }
+}
