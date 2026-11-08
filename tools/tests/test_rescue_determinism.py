@@ -3,15 +3,16 @@
 The run is tools/run_b2.py on B2: the Scout's closed-loop descent from L1, a slab landing on its route
 to c2, the stop and the recheck. (Not B1: there the route to c1 is only found within 0.72 m of it, too
 short for the runner to drop a slab, so a B1 run has no shift to compare.) That loop ticks the sim
-itself and has no wall clock, so a seed fixes everything it does. (The hub-wired real-lane runs, run_rescue.py and demo60.py,
-are not deterministic yet: lanes there still time themselves on the wall clock, see #167.)
+itself and has no wall clock, so a seed fixes everything it does. (The hub-wired real-lane runs,
+run_rescue.py and demo60.py, are not deterministic yet: lanes there still time themselves on the
+wall clock, see #167.)
 """
 
 import json
 
 import pytest
 
-from tools.run_b2 import run      # imports mujoco only inside run()
+from tools.run_b2 import run  # imports mujoco only inside run()
 
 pytest.importorskip("mujoco")
 
