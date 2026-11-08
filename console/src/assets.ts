@@ -1,5 +1,8 @@
 // A1: free 3D assets for the demo (built by sim/assets/build_glb.py, credits in public/models/CREDITS.json).
 //
+// - robots.glb (small) loads at idle time in every scene. aftershock.glb (the tower) and the HDRI load only
+//   the first time the tower is shown: parsing them costs seconds in software GL, and other scenes never
+//   need them.
 // - parking_garage HDRI lights the model's materials (reflections only; the background stays the console's).
 // - The Scout and Responder primitives are swapped for the Go1 and Rover models, scaled to the
 //   footprint the console already draws, so poses, labels and tests are unchanged.
@@ -19,7 +22,8 @@ import type { MapViewer } from './map';
 export interface Credit { asset: string; author: string; source: string; licence: string; used_for: string }
 
 export interface DemoAssets {
-  loaded: boolean;
+  loaded: boolean;               // the tower model (loaded the first time the tower is shown)
+  robotsLoaded: boolean;
   error?: string;
   buildingVisible: boolean;
   blocks: string[];
@@ -101,6 +105,7 @@ function creditsCard(credits: Credit[]): HTMLElement {
 export function setupDemoAssets(viewer: MapViewer): DemoAssets {
   const state: DemoAssets = {
     loaded: false,
+    robotsLoaded: false,
     buildingVisible: false,
     blocks: [],
     credits: [],
@@ -124,7 +129,7 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     if (building) building.visible = show;
     if (annex) annex.visible = show;
   };
-  state.showBuilding = (show: boolean) => { towerScene = show; apply(); };
+  state.showBuilding = (show: boolean) => { towerScene = show; if (forced ?? towerScene) loadTower(); apply(); };
   const clearMoved = () => {
     pendingMoved.clear();
     state.movedBlocks = [];
@@ -176,11 +181,16 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
       });
     }
   };
-  new HDRLoader().load(`${BASE}parking_garage_1k.hdr`, tex => {
-    tex.mapping = THREE.EquirectangularReflectionMapping;
-    envTex = tex;
-    light();
-  }, undefined, () => { /* lighting falls back to the console's own lights */ });
+  let hdrRequested = false;
+  const loadHdr = () => {
+    if (hdrRequested) return;
+    hdrRequested = true;
+    new HDRLoader().load(`${BASE}parking_garage_1k.hdr`, tex => {
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      envTex = tex;
+      light();
+    }, undefined, () => { /* lighting falls back to the console's own lights */ });
+  };
 
   fetch(`${BASE}CREDITS.json`)
     .then(r => (r.ok ? r.json() : []))
@@ -190,31 +200,48 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     })
     .catch(() => {});
 
-  // Load after the page has painted and the first messages are in: the model is only decoration.
+  const fail = (what: string) => (err: unknown) => {
+    state.error = String(err);
+    console.error(`[assets] ${what} failed to load; the console keeps its own primitives`, err);
+  };
+
+  // The robots load after the page has painted and the first messages are in: they are only decoration.
   const idle = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void })
     .requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 500));
-  idle(() => new GLTFLoader().load(`${BASE}aftershock.glb`, gltf => {
+  idle(() => new GLTFLoader().load(`${BASE}robots.glb`, gltf => {
     const root = gltf.scene;                 // exported in the scene frame (z up): no rotation needed
-    building = root.getObjectByName('building');
-    annex = root.getObjectByName('annex');
-    for (const part of [building, annex]) {
-      if (!part) continue;
-      viewer.scene.add(part);
-      part.updateMatrixWorld(true);
-      part.traverse(o => { if ((o as THREE.Mesh).isMesh) xray(o as THREE.Mesh); });
-    }
-    state.blocks = building ? building.children.map(c => c.name).filter(n => /^b\d+$/.test(n)) : [];
-    swapInto(internals.scoutGroup, root.getObjectByName('scout'));
-    swapInto(internals.responderGroup, root.getObjectByName('responder'));
-    lit.push(...[building, annex, root.getObjectByName('scout'), root.getObjectByName('responder')]
-      .filter((o): o is THREE.Object3D => !!o));
+    const scout = root.getObjectByName('scout');
+    const responder = root.getObjectByName('responder');
+    swapInto(internals.scoutGroup, scout);
+    swapInto(internals.responderGroup, responder);
+    lit.push(...[scout, responder].filter((o): o is THREE.Object3D => !!o));
     light();
-    state.loaded = true;
-    apply();
-    state.markMoved([]);
-  }, undefined, err => {
-    state.error = String(err);
-    console.error('[assets] demo model failed to load; the console keeps its own primitives', err);
-  }), { timeout: 2000 });
+    state.robotsLoaded = true;
+  }, undefined, fail('robot models')), { timeout: 2000 });
+
+  let towerRequested = false;
+  function loadTower(): void {
+    if (towerRequested) return;
+    towerRequested = true;
+    loadHdr();
+    new GLTFLoader().load(`${BASE}aftershock.glb`, gltf => {
+      const root = gltf.scene;
+      building = root.getObjectByName('building');
+      annex = root.getObjectByName('annex');
+      for (const part of [building, annex]) {
+        if (!part) continue;
+        viewer.scene.add(part);
+        part.updateMatrixWorld(true);
+        part.traverse(o => { if ((o as THREE.Mesh).isMesh) xray(o as THREE.Mesh); });
+      }
+      state.blocks = building ? building.children.map(c => c.name).filter(n => /^b\d+$/.test(n)) : [];
+      lit.push(...[building, annex].filter((o): o is THREE.Object3D => !!o));
+      light();
+      state.loaded = true;
+      apply();
+      state.markMoved([]);
+    }, undefined, fail('tower model'));
+  }
+  if (forced) idle(loadTower, { timeout: 2000 });
   return state;
 }

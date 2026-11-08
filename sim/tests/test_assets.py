@@ -66,15 +66,19 @@ def _glb_json(path):
 
 
 def test_console_model_has_every_block_and_part_and_fits_the_budget():
-    glb = MODELS / "aftershock.glb"
-    assert glb.stat().st_size < 20e6
-    names = {n.get("name") for n in _glb_json(glb)["nodes"]}
+    tower, robots = MODELS / "aftershock.glb", MODELS / "robots.glb"
+    assert tower.stat().st_size + robots.stat().st_size < 20e6
+    names = {n.get("name") for n in _glb_json(tower)["nodes"]}
     m, _ = scene.load(scene.TOWER)
     blocks = {mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, i) for i in scene.block_ids(m)}
     assert blocks <= names, sorted(blocks - names)
-    assert {"building", "annex", "scout", "responder", "first_aid_kit"} <= names
+    assert {"building", "annex"} <= names
     assert {"annex_body", "ground", "rebar"} <= names                 # static extras, merged
-    assert not any(n and n.startswith(("casualty", "c1", "c2", "c3", "c4")) for n in names)   # perception's job
+    robot_names = {n.get("name") for n in _glb_json(robots)["nodes"]}
+    assert {"scout", "responder", "first_aid_kit"} <= robot_names
+    assert not robot_names & blocks and not names & {"scout", "responder", "first_aid_kit"}   # split, not copied
+    for n in names | robot_names:                                     # casualties are perception's job
+        assert not (n and n.startswith(("casualty", "c1", "c2", "c3", "c4"))), n
 
 
 def test_credits_ship_with_the_model_and_need_no_attribution_gaps():

@@ -1,14 +1,14 @@
 import { test, expect } from '@playwright/test';
 
 type Assets = {
-  loaded: boolean; error?: string; buildingVisible: boolean; blocks: string[];
+  loaded: boolean; robotsLoaded: boolean; error?: string; buildingVisible: boolean; blocks: string[];
   credits: { licence: string }[]; movedBlocks: string[]; worldChanges: number;
   showBuilding(show: boolean): void; markMoved(ids: string[]): void;
 };
 const assets = (page: import('@playwright/test').Page) =>
   page.evaluate(() => {
     const a = (window as unknown as { aftershockAssets: Assets }).aftershockAssets;
-    return { loaded: a.loaded, error: a.error, visible: a.buildingVisible, blocks: a.blocks, credits: a.credits,
+    return { loaded: a.loaded, robots: a.robotsLoaded, error: a.error, visible: a.buildingVisible, blocks: a.blocks, credits: a.credits,
              moved: a.movedBlocks, changes: a.worldChanges };
   });
 
@@ -28,12 +28,13 @@ test('A1: the demo model loads with every tower block named by its scene id, plu
 
 test('A1: the tower model shows only for the tower scene, and moved blocks turn to ghosts', async ({ page }) => {
   await page.goto('/?fake=1');                                  // fixtures replay the backup scene
-  await expect.poll(async () => (await assets(page)).loaded, { timeout: 20000 }).toBe(true);
+  await expect.poll(async () => (await assets(page)).robots, { timeout: 20000 }).toBe(true);
   await expect.poll(async () => (await assets(page)).changes, { timeout: 20000 }).toBeGreaterThan(0);  // replay done
+  expect((await assets(page)).loaded).toBe(false);             // the backup scene never parses the tower
   expect((await assets(page)).visible).toBe(false);
   expect((await assets(page)).moved).toEqual([]);              // backup-scene world/change never marks tower blocks
   await page.evaluate(() => (window as unknown as { aftershockAssets: Assets }).aftershockAssets.showBuilding(true));
-  expect((await assets(page)).visible).toBe(true);
+  await expect.poll(async () => (await assets(page)).visible, { timeout: 20000 }).toBe(true);   // loads on first show
   await page.evaluate(() => (window as unknown as { aftershockAssets: Assets }).aftershockAssets.markMoved(['b26', 'b99']));
   const moved = (await assets(page)).moved;
   expect(moved).toContain('b26');
@@ -42,7 +43,7 @@ test('A1: the tower model shows only for the tower scene, and moved blocks turn 
 
 test('A1: robot models replace the primitives at the same footprint', async ({ page }) => {
   await page.goto('/?fake=1');
-  await expect.poll(async () => (await assets(page)).loaded, { timeout: 20000 }).toBe(true);
+  await expect.poll(async () => (await assets(page)).robots, { timeout: 20000 }).toBe(true);
   const r = await page.evaluate(() => {
     type G = { children: { name: string; visible: boolean; isMesh?: boolean }[] };
     const m = (window as unknown as { aftershockMap: { scoutGroup: G; responderGroup: G } }).aftershockMap;

@@ -1,13 +1,14 @@
-"""Build the console's demo model (ref A1): one GLB with the tower, its basements and core, the robots and
-the first aid kit, from the free assets fetched by sim/assets/fetch.py.
+"""Build the console's demo models (ref A1): one GLB with the tower, its basements and core, and a small one
+with the robots and the first aid kit, from the free assets fetched by sim/assets/fetch.py.
 
     python3 sim/assets/fetch.py
     uv run --no-project --python 3.11 --with bpy --with mujoco python sim/assets/build_glb.py [--preview out.png]
 
-Writes console/public/models/aftershock.glb (scene frame: metres, z up, NOT converted to glTF's y up),
-the HDRI next to it and CREDITS.json. Headless Blender (the bpy wheel) does the modelling and export.
+Writes console/public/models/aftershock.glb (tower) and robots.glb (scene frame: metres, z up, NOT
+converted to glTF's y up), the HDRI next to them and CREDITS.json. They are separate files so the console
+only parses the tower (the slow one in software GL) when the tower scene is shown. Headless Blender (the bpy wheel) does the modelling and export.
 
-Nodes, so the console can find them by name:
+Nodes, so the console can find them by name (aftershock.glb: building, annex; robots.glb: the rest):
   building/      b1..b27, one mesh per tower block, named by its block id (scene/loaded "id") and posed
                  as in tower.xml; "rebar" (rods out of the broken slab edges) and "ground" (with the
                  excavation pit) are visual extras, each merged into one mesh
@@ -48,6 +49,7 @@ CACHE = HERE / "cache"
 TOWER = ROOT / "sim" / "scenes" / "tower.xml"
 OUT_DIR = ROOT / "console" / "public" / "models"
 GLB = OUT_DIR / "aftershock.glb"
+ROBOTS_GLB = OUT_DIR / "robots.glb"
 UV_TILE_M = 0.75         # one texture repeat per 0.75 m: brick courses in proportion to 0.3 m robots
 SATURATION = 0.25        # the Poly Haven texture is red-painted; keep a trace of the paint, mostly grey
 MAX_MB = 20.0
@@ -476,18 +478,30 @@ def build(preview=None, rover_yaw=0.0, kit_yaw=0.0):
     report["first_aid_kit"] = {"scale": round(s, 4), "size_m": [round(v, 3) for v in size]}
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    bpy.ops.export_scene.gltf(filepath=str(GLB), export_format="GLB", export_yup=False, export_apply=True,
-                              export_image_format="AUTO", export_extras=True, export_cameras=False,
-                              export_lights=False)
+    export(GLB, ["building", "annex"])
+    export(ROBOTS_GLB, ["scout", "responder", "first_aid_kit"])
     shutil.copyfile(CACHE / "parking_garage_1k.hdr", OUT_DIR / "parking_garage_1k.hdr")
     (OUT_DIR / "CREDITS.json").write_text(json.dumps(fetch.CREDITS, indent=2) + "\n")
-    mb = GLB.stat().st_size / 1e6
-    report["glb_mb"] = round(mb, 2)
+    mb = (GLB.stat().st_size + ROBOTS_GLB.stat().st_size) / 1e6
+    report["glb_mb"] = {"tower": round(GLB.stat().st_size / 1e6, 2), "robots": round(ROBOTS_GLB.stat().st_size / 1e6, 2)}
     print(json.dumps(report))
     if mb > MAX_MB:
-        raise SystemExit(f"{GLB} is {mb:.1f} MB, over the {MAX_MB} MB budget")
+        raise SystemExit(f"the models are {mb:.1f} MB, over the {MAX_MB} MB budget")
     if preview:
         render(preview)
+
+
+def export(path, roots):
+    """Export the named root empties and everything under them to one GLB."""
+    bpy.ops.object.select_all(action="DESELECT")
+    for name in roots:
+        root = bpy.data.objects[name]
+        for o in [root, *root.children_recursive]:
+            o.select_set(True)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB", export_yup=False, export_apply=True,
+                              export_image_format="AUTO", export_extras=True, export_cameras=False,
+                              export_lights=False, use_selection=True)
 
 
 def render(path):
