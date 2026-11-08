@@ -15,10 +15,16 @@ Nodes, so the console can find them by name (aftershock.glb: building, annex; ro
   annex/         "annex_body": the basements and stair/lift core from sim/assets/annex.py (same boxes as
                  the MuJoCo collision scene sim/scenes/tower_annex.xml) plus visual debris on B1 and in
                  the pit, merged into one mesh (one draw call per material, not ~150)
-  scout          menagerie Unitree Go1 in its home pose, fitted to the tower scene's Scout footprint
-  responder      Quaternius Rover, fitted to the tower scene's Responder footprint (0.32 x 0.14 m)
+  scout          the AgileX LIMO Pro, built from sim/robots/scout.xml's geoms: true scale, the agreed
+                 322 x 220 mm envelope (docs/hardware.md), wheels, LiDAR, cameras and mic array where the
+                 spec puts them
+  responder      the Clearpath Jackal with its mast, sensors and Gen3 lite arm, built from
+                 sim/robots/responder.xml's geoms with the arm stowed (sim.robots.load): true scale,
+                 the agreed 508 x 430 mm envelope
   first_aid_kit  Quaternius First Aid Kit, fitted to the scene's kit box
-Robot and kit origins are on the ground under their centre, facing +x, like the sim's mocap bodies.
+Robot and kit origins are on the ground under their centre, facing +x, like the sim's mocap bodies. The
+robots are the same geoms the simulator uses, so the console never shows a different robot (no stand-in
+legged or toy model); the console scales them to the footprint it draws.
 Casualties are NOT in the model: where people are is what perception has to find.
 
 Ground-storey geometry stays inside its MuJoCo boxes: rubble and broken edges are only ever pushed
@@ -53,7 +59,7 @@ ROBOTS_GLB = OUT_DIR / "robots.glb"
 UV_TILE_M = 0.75         # one texture repeat per 0.75 m: brick courses in proportion to 0.3 m robots
 SATURATION = 0.25        # the Poly Haven texture is red-painted; keep a trace of the paint, mostly grey
 MAX_MB = 20.0
-GO1_FACES = 1500         # per Go1 part before merging
+ROUND_SEGMENTS = 20      # cylinder and capsule sides: robots are ~0.2 m on screen
 ROBOT_FACES = 4000       # per merged robot: ~0.2 m on screen, so ~30k triangles halved the frame rate
 
 
@@ -66,7 +72,8 @@ def _module(name):
 
 annex = _module("annex")
 fetch = _module("fetch")
-
+sys.path.insert(0, str(ROOT))
+from sim import robots as sim_robots  # the true-scale MJCF robots, arm stow and extent
 
 # ---------------------------------------------------------------- materials
 
@@ -336,7 +343,7 @@ def footprint(name):
 
 def merged(objs, name):
     """Apply modifiers and join `objs` into one mesh: one draw call per material instead of one per part
-    (13 Go1 parts cost the console more frame time than the whole tower in software WebGL)."""
+    (a dozen parts per robot cost the console more frame time than the whole tower in software WebGL)."""
     bpy.context.view_layer.update()
     for o in objs:
         mw = o.matrix_world.copy()
@@ -389,39 +396,59 @@ def fit(root, objs, half, *, keep_height=False):
     return s, size * s
 
 
-def scout(root):
-    """Menagerie Go1 in its home keyframe: MuJoCo's own processed mesh vertices, posed by geom_xpos/xmat."""
-    m = mujoco.MjModel.from_xml_path(str(CACHE / "go1" / "go1.xml"))
-    d = mujoco.MjData(m)
-    mujoco.mj_resetDataKeyframe(m, d, 0)
-    mujoco.mj_forward(m, d)
-    mats = {}
-    objs = []
+def _geom_mesh(t, size, bevel):
+    """A bmesh for one MuJoCo box, cylinder or capsule, in the geom's own frame."""
+    bm = bmesh.new()
+    if t == sim_robots.BOX:
+        bmesh.ops.create_cube(bm, size=1.0)
+        bmesh.ops.scale(bm, vec=Vector([2 * v for v in size]), verts=bm.verts)
+        r = min(bevel, 0.4 * min(size))
+        if r > 0.002:
+            bmesh.ops.bevel(bm, geom=bm.edges[:], offset=r, segments=1, affect="EDGES")
+    elif t == sim_robots.CYLINDER:
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=ROUND_SEGMENTS, radius1=size[0], radius2=size[0],
+                              depth=2 * size[1])
+    elif t == sim_robots.CAPSULE:
+        bmesh.ops.create_cone(bm, cap_ends=False, segments=ROUND_SEGMENTS, radius1=size[0], radius2=size[0],
+                              depth=2 * size[1])
+        for z in (-size[1], size[1]):
+            ball = bmesh.ops.create_uvsphere(bm, u_segments=ROUND_SEGMENTS, v_segments=8, radius=size[0])
+            bmesh.ops.translate(bm, vec=Vector((0, 0, z)), verts=ball["verts"])
+    else:
+        bm.free()
+        return None
+    return bm
+
+
+def mjcf_robot(root, name, bevel=0.006):
+    """The robot's own MJCF geoms (sim/robots/<name>.xml, Responder arm stowed) as one true-scale mesh under
+    `root`, origin on the ground under the base centre, facing +x. Returns (L, W, H) in metres."""
+    m, d = sim_robots.load(name)
+    mats, objs = {}, []
     for g in range(m.ngeom):
-        if m.geom_type[g] != mujoco.mjtGeom.mjGEOM_MESH or m.geom_contype[g] or m.geom_conaffinity[g]:
-            continue                                   # visual meshes only
-        mid = m.geom_dataid[g]
-        va, vn = m.mesh_vertadr[mid], m.mesh_vertnum[mid]
-        fa, fn = m.mesh_faceadr[mid], m.mesh_facenum[mid]
-        verts = [tuple(v) for v in m.mesh_vert[va:va + vn]]
-        faces = [tuple(int(i) for i in f) for f in m.mesh_face[fa:fa + fn]]
-        rgba = tuple(m.mat_rgba[m.geom_matid[g]]) if m.geom_matid[g] >= 0 else tuple(m.geom_rgba[g])
+        bm = _geom_mesh(int(m.geom_type[g]), [float(v) for v in m.geom_size[g]], bevel)
+        if bm is None:
+            continue                                       # the floor plane
+        rgba = tuple(float(c) for c in m.geom_rgba[g])
         key = tuple(round(c, 2) for c in rgba)
         if key not in mats:
-            mats[key] = flat(f"go1_{len(mats)}", rgba, metallic=0.2, roughness=0.45)
-        me = bpy.data.meshes.new(f"go1_{g}")
-        me.from_pydata(verts, [], faces)
+            metal = 0.5 if key[:3] in ((0.5, 0.5, 0.5), (0.4, 0.4, 0.45), (0.85, 0.85, 0.85)) else 0.1
+            mats[key] = flat(f"{name}_{len(mats)}", rgba, metallic=metal, roughness=0.5)
+        me = bpy.data.meshes.new(f"{name}_{g}")
+        bm.to_mesh(me)
+        bm.free()
         me.materials.append(mats[key])
-        me.shade_smooth()                       # shared vertices: a third of the flat-shaded size
-        obj = bpy.data.objects.new(f"scout_part_{g}", me)
+        obj = bpy.data.objects.new(f"{name}_part_{g}", me)
         bpy.context.collection.objects.link(obj)
         obj.matrix_world = pose_matrix(d.geom_xpos[g], d.geom_xmat[g])
-        if len(faces) > GO1_FACES:
-            dec = obj.modifiers.new("decimate", "DECIMATE")
-            dec.ratio = GO1_FACES / len(faces)
         objs.append(obj)
-    half = footprint("scout_chassis")
-    return fit(root, objs, half, keep_height=True)
+    body = merged(objs, f"{name}_body")
+    body.data.transform(body.matrix_world)                 # bake the pose: the mesh is in the robot frame
+    body.matrix_world = Matrix.Identity(4)
+    body.parent = root
+    body.matrix_parent_inverse = Matrix.Identity(4)
+    lo, hi = sim_robots.extent(m, d, f"{name}/{name}")
+    return [round(float(v), 3) for v in hi - lo]
 
 
 def imported(path):
@@ -448,7 +475,7 @@ def placed(root, path, half, yaw_deg=0.0, keep_height=True):
 
 # ---------------------------------------------------------------- main
 
-def build(preview=None, rover_yaw=0.0, kit_yaw=0.0):
+def build(preview=None, kit_yaw=0.0):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     mats = {
         "wall": concrete("wall", (0.92, 0.86, 0.76)),
@@ -469,10 +496,8 @@ def build(preview=None, rover_yaw=0.0, kit_yaw=0.0):
     merge_children(building, "ground_", "ground")
     merge_children(annex_root, "", "annex_body")
     report = {"blocks": sorted(blocks, key=lambda b: int(b[1:]))}
-    s, size = scout(empty("scout"))
-    report["scout"] = {"scale": round(s, 4), "size_m": [round(v, 3) for v in size]}
-    s, size = placed(empty("responder"), CACHE / "rover.glb", footprint("responder_chassis"), rover_yaw)
-    report["responder"] = {"scale": round(s, 4), "size_m": [round(v, 3) for v in size]}
+    report["scout"] = {"size_m": mjcf_robot(empty("scout"), "scout")}
+    report["responder"] = {"size_m": mjcf_robot(empty("responder"), "responder")}
     s, size = placed(empty("first_aid_kit"), CACHE / "first_aid_kit.glb", footprint("first_aid_kit_supply"),
                      kit_yaw, keep_height=False)
     report["first_aid_kit"] = {"scale": round(s, 4), "size_m": [round(v, 3) for v in size]}
@@ -525,7 +550,6 @@ def render(path):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--preview", help="also render a PNG preview to this path")
-    ap.add_argument("--rover-yaw", type=float, default=90.0, help="degrees, turns the rover to face +x")
     ap.add_argument("--kit-yaw", type=float, default=0.0)
     args = ap.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:])
-    build(args.preview, args.rover_yaw, args.kit_yaw)
+    build(args.preview, args.kit_yaw)

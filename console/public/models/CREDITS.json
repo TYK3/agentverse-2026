@@ -14,24 +14,10 @@
     "used_for": "console lighting and reflections"
   },
   {
-    "asset": "Rover",
-    "author": "Quaternius",
-    "source": "https://poly.pizza/m/tzOLXetacM",
-    "licence": "CC0",
-    "used_for": "Responder body (scaled to its 0.508 x 0.43 m footprint)"
-  },
-  {
     "asset": "First Aid Kit",
     "author": "Quaternius",
     "source": "https://poly.pizza/m/Hp80p6148W",
     "licence": "CC0",
     "used_for": "first_aid_kit supply"
-  },
-  {
-    "asset": "Unitree Go1 (MuJoCo Menagerie)",
-    "author": "Unitree Robotics, Google DeepMind",
-    "source": "https://github.com/google-deepmind/mujoco_menagerie/tree/main/unitree_go1",
-    "licence": "BSD-3-Clause",
-    "used_for": "Scout body (scaled to its 0.322 m length)"
   }
 ]
