@@ -31,6 +31,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import sys
 import time
 
@@ -42,6 +43,7 @@ POSE_EVERY = 0.5
 RES = 0.05
 SHIFT_AHEAD = 0.5      # metres ahead of the Responder along its route where the block is dropped
 STILL = 0.01           # metres: a stopped Responder moves less than this while it stays stopped
+NEAR_CASUALTY = 0.5    # metres: a supply placed this close to the casualty counts as delivered
 
 
 class Recorder:
@@ -79,6 +81,8 @@ class Recorder:
         return round(time.monotonic() - self.t0, 2)
 
     def _write(self, entry):
+        if self.f.closed:          # sim tasks may still publish after the run ends
+            return
         self.f.write(json.dumps(entry, allow_nan=False) + "\n")
         self.f.flush()
 
@@ -222,7 +226,8 @@ async def ground_rescue(rec, bus, world, args):
              f"moved {drift:.3f} m in 2 s (state {r.state}, route {r.route})")
 
     # The fresh recheck: a permit granted again after the revocation.
-    since2 = rec.now() if revoked else since
+    # Count any grant after the revocation itself: a re-plan can be granted while the stop is checked.
+    since2 = next((t for t, tp, d in rec.seen if tp == "permit/route" and d is revoked), since)
     granted = await rec.expect("permit granted again after a fresh check", "permit/route",
                                lambda d: d["granted"], since=since2, timeout=args.recheck_timeout,
                                show=lambda d: f"{d['route']}: {d['reason']} | evidence: "
@@ -239,14 +244,37 @@ async def ground_rescue(rec, bus, world, args):
         await asyncio.sleep(0.1)
     rec.step("Responder moving again", r.state in ("moving", "arrived") or r.route == new["id"],
              f"state {r.state} on {r.route}")
-    await rec.expect("supply placed by the casualty", "log/decision",
-                     lambda d: d["outcome"] == "done" and d["reason"].startswith("placed "),
+    cpos = cas[0]["pos"][:2]
+    await rec.expect(f"supply placed within {NEAR_CASUALTY} m of the casualty", "log/decision",
+                     lambda d: placed_at(d) is not None and math.dist(placed_at(d), cpos) <= NEAR_CASUALTY,
                      since=since2, timeout=args.deliver_timeout, show=lambda d: d["reason"])
     mark = rec.now()
     await bus.publish("operator/command", {"text": "handover report", "source": "typed"})
     rec.note("_runner/action", {"action": "operator/command", "text": "handover report"})
     await rec.expect("handover report", "report/handover", since=mark, timeout=30,
                      show=lambda d: f"{len(d.get('markdown', ''))} chars of markdown")
+
+
+def placed_at(d):
+    """(x, y) of a Responder 'placed <item> at [x, y]' log/decision, else None."""
+    if d.get("outcome") != "done" or not d.get("reason", "").startswith("placed "):
+        return None
+    m = re.search(r"at \[(-?[\d.]+), (-?[\d.]+)\]", d["reason"])
+    return (float(m[1]), float(m[2])) if m else None
+
+
+def stray_placements(rec):
+    """Supplies placed more than NEAR_CASUALTY from every casualty perception reported: a finding."""
+    casualties = [c["pos"][:2] for t, tp, d in rec.seen if tp == "map/casualties" for c in d]
+    out = []
+    for t, tp, d in rec.seen:
+        xy = placed_at(d) if tp == "log/decision" else None
+        if xy and casualties and min(math.dist(xy, c) for c in casualties) > NEAR_CASUALTY:
+            out.append({"t": t, "reason": d["reason"]})
+    if out:
+        rec.note("_runner/finding", {"placed_away_from_casualties": out})
+        print(f"  !!  supply placed away from every casualty: {[o['reason'] for o in out]}")
+    return out
 
 
 def b1_descent(rec, args):
@@ -304,6 +332,7 @@ async def main(args):
     sampler = asyncio.ensure_future(sample())
     try:
         await ground_rescue(rec, bus, world, args)
+        stray_placements(rec)
     finally:
         sampler.cancel()
         task = getattr(world, "task", None)
