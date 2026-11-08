@@ -15,11 +15,8 @@ import { setupPanels } from './panels';
 import { setupHardwarePanel } from './hardware';
 import { setupDemoAssets } from './assets';
 import { setupStory } from './story';
-import { setupThemeToggle } from './theme-toggle';
 // Last, so the theme overrides lane styles (story.css is pulled in by story.ts).
 import './theme.css';
-
-setupThemeToggle();
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);

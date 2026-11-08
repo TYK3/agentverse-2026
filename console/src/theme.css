@@ -245,21 +245,34 @@ input { border-width: 1px; background: transparent; }
 /* ---------- Minimal pass 2: show less at once ----------
    Nothing is removed; secondary detail appears on hover or focus. */
 
-/* Story strip: all ten steps named, read as one connected line */
-.story-head { background: rgba(10, 10, 10, 0.72); border: 1px solid var(--border); padding: 0.5rem 0.75rem; gap: 0.75rem; }
-.story-strip { gap: 0; row-gap: 0.35rem; flex-wrap: wrap; align-items: center; }
-.story-phase { border: 1px solid transparent; padding: 0.15rem 0.45rem; background: transparent; font-size: 1.05rem; }
-.story-phase + .story-phase { margin-left: 1.15rem; position: relative; }
+/* Story strip: all ten steps named on ONE line, joined by thin connectors.
+   Labels shrink (with an ellipsis) before the strip would wrap; the
+   current step never shrinks. */
+.story-head { background: rgba(10, 10, 10, 0.72); border: 1px solid var(--border); padding: 0.4rem 0.6rem; gap: 0.6rem; flex-wrap: nowrap; }
+.story-badge { font-size: 0.9rem; padding: 0.1rem 0.4rem; }
+.story-strip { gap: 0; flex-wrap: nowrap; align-items: center; min-width: 0; overflow: hidden; }
+.story-phase {
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 0.25rem;
+  border: 1px solid transparent;
+  padding: 0.1rem 0.3rem;
+  background: transparent;
+  font-size: 0.95rem;
+}
+.story-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.story-phase.story-current { flex-shrink: 0; }
+.story-phase + .story-phase { margin-left: 0.8rem; position: relative; }
 .story-phase + .story-phase::before {
   content: '';
   position: absolute;
-  left: -1.05rem;
+  left: -0.75rem;
   top: 50%;
-  width: 0.95rem;
+  width: 0.7rem;
   height: 1px;
   background: var(--border-hi);
 }
-.story-num { border: 0; width: auto; min-width: 1.1rem; color: inherit; opacity: 0.7; }
+.story-num { border: 0; width: auto; min-width: 0.8rem; flex: none; color: inherit; opacity: 0.7; font-size: 0.75rem; }
 .story-phase[data-state="done"] { color: var(--accent-strong); border-color: transparent; background: transparent; }
 .story-phase[data-state="done"] + .story-phase::before { background: var(--accent-strong); }
 .story-phase[data-state="active"]:not(.story-current) { color: var(--accent); background: transparent; border-color: transparent; }
@@ -269,7 +282,7 @@ input { border-width: 1px; background: transparent; }
 .story-phase.story-current .story-num { opacity: 1; }
 .story-phase.story-current[data-state="waiting"],
 .story-phase.story-current[data-state="held"] { background: var(--warn); border-color: var(--warn); }
-.story-follow { border: 0; color: var(--muted); }
+.story-follow { flex: none; border: 0; padding: 0.2rem 0.3rem; font-size: 0.95rem; color: var(--muted); box-shadow: none; background: transparent; }
 
 /* Legend: a single line until you hover or tab to it */
 .map-legend { padding: 0.5rem 0.8rem; background: rgba(10, 10, 10, 0.6); }
@@ -366,74 +379,7 @@ body::before {
   #right-panel > *, #reasoning-log li { animation: none; }
 }
 
-/* ---------- Light mode ----------
-   Warm monochrome from the minimalist protocol. Same meaning for every
-   colour; tones are darkened so they stay readable on off-white.
-   The 3D view itself stays dark, like a viewport set into the page. */
-:root[data-theme="light"] {
-  color-scheme: light;
-  --bg: #f7f6f3;
-  --panel: #ffffff;
-  --panel-2: #f9f9f8;
-  --border: #eaeaea;
-  --border-hi: #d6d5d1;
-  --text: #2f3437;
-  --text-2: #3f4549;
-  --muted: #787774;
-  --accent: #0e7490;
-  --accent-strong: #0e7490;
-  --accent-soft: #155e75;
-  --focus: #956400;
-  --ok: #346538;
-  --ok-bg: #edf3ec;
-  --warn: #956400;
-  --warn-bg: #fbf3db;
-  --danger: #9f2f2d;
-  --danger-strong: #b42318;
-  --danger-bg: #fdebec;
-  --info-bg: #e1f3fe;
-  --shadow-px: 3px 3px 0 #2f3437;
-  color: var(--text);
-  background: var(--bg);
-}
-:root[data-theme="light"] body::before {
-  background: radial-gradient(900px 500px at 15% 0%, rgba(180, 140, 90, 0.05), transparent 70%);
-}
-:root[data-theme="light"] #top-bar > strong { text-shadow: none; color: var(--text); }
-:root[data-theme="light"] #top-bar,
-:root[data-theme="light"] #bottom-bar,
-:root[data-theme="light"] #right-panel { background: var(--bg); }
-:root[data-theme="light"] h2 { color: var(--muted); }
-:root[data-theme="light"] button { border-color: #2f3437; }
-:root[data-theme="light"] button:hover:not(:disabled) { background: #155e75; }
-:root[data-theme="light"] .btn-sm,
-:root[data-theme="light"] .btn-topbar,
-:root[data-theme="light"] .story-follow { color: var(--text-2); border-color: var(--border-hi); background: var(--panel); }
-:root[data-theme="light"] .btn-sm:hover:not(:disabled),
-:root[data-theme="light"] .btn-topbar:hover { background: var(--panel-2); color: var(--text); border-color: var(--text); }
-:root[data-theme="light"] .btn-highlight { color: var(--accent); border-color: var(--accent); background: var(--panel); }
-:root[data-theme="light"] input { background: var(--panel); border-color: var(--border-hi); color: var(--text); }
-:root[data-theme="light"] dialog,
-:root[data-theme="light"] .story-card,
-:root[data-theme="light"] .hardware-dialog { background: var(--panel); color: var(--text); border-color: var(--border-hi); box-shadow: 6px 6px 0 rgba(47, 52, 55, 0.18); }
-:root[data-theme="light"] dialog::backdrop { background: rgba(47, 52, 55, 0.35); }
-:root[data-theme="light"] .hardware-table th { background: var(--panel-2); color: var(--text); }
-/* Overlays on the dark map become light cards */
-:root[data-theme="light"] .story-head,
-:root[data-theme="light"] .map-legend,
-:root[data-theme="light"] .replan-banner,
-:root[data-theme="light"] .story-caption,
-:root[data-theme="light"] #asset-credits { background: rgba(255, 255, 255, 0.94) !important; color: var(--text) !important; border: 1px solid var(--border-hi) !important; }
-:root[data-theme="light"] .story-caption { padding: 0.3rem 0.7rem; }
-:root[data-theme="light"] .map-title-badge,
-:root[data-theme="light"] .cell-count-badge { color: #c3ccd8; }
-:root[data-theme="light"] .legend-row { color: var(--text-2); }
-:root[data-theme="light"] .story-phase { color: var(--muted); }
-:root[data-theme="light"] .story-phase.story-current { color: #fff; }
-:root[data-theme="light"] #asset-credits a { color: var(--accent) !important; }
-:root[data-theme="light"] .evidence-item { background: transparent; }
-:root[data-theme="light"] .aftershock-banner { color: #fff; }
-
 /* Readable text that style.css hard-codes for dark */
 .permit-reason { color: var(--text); }
 #reasoning-log small { color: var(--muted); }
+.story-phase:hover { flex-shrink: 0; }
