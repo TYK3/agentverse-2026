@@ -5,11 +5,13 @@ import importlib
 import inspect
 import json
 import logging
+import os
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from coord.messages import Envelope, validate_payload
 from coord.points import PointCloudPublisher
@@ -18,6 +20,10 @@ log = logging.getLogger(__name__)
 LANES = ("sim", "perception", "planner", "voice")
 BROWSER_TOPICS = {"operator/command", "gate/answer", "status/link"}
 LATEST_TOPICS = {"map/points"}
+# LIVE-UI: the console dev server (vite, port 5173) may call the hub's HTTP routes, such as
+# POST /inject. HUB_CORS_ORIGINS="http://a:5173,http://b:5173" adds origins (a LAN address).
+CONSOLE_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+INJECT_KINDS = ("aftershock", "block_added")
 
 
 class Bus:
@@ -130,13 +136,33 @@ async def lifespan(application):
         bus.subs.clear()
 
 
+def cors_origins(env=None):
+    extra = (os.environ if env is None else env).get("HUB_CORS_ORIGINS", "")
+    added = [origin.strip() for origin in extra.split(",")]
+    return CONSOLE_ORIGINS + [origin for origin in added if origin and origin != "*"]
+
+
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins(),
+    allow_methods=["GET", "POST"],
+    allow_headers=["content-type"],
 )
+
+
+@app.post("/inject")
+async def inject_without_sim(request: Request):
+    """Stand-in for the sim's POST /inject (sim/inject.py), which replaces this route when the sim
+    lane runs on the hub. Without a live sim it answers 503 instead of 404, so the console can fall
+    back to its local demo. It never publishes: world/change only comes from the sim."""
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or body.get("kind") not in INJECT_KINDS:
+        return JSONResponse({"error": "kind must be block_added or aftershock"}, status_code=400)
+    return JSONResponse({"error": "no live sim on this hub"}, status_code=503)
 
 
 @app.websocket("/ws")
