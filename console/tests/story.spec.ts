@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { StoryModel, PHASES } from '../src/story-model';
+import { parseJsonl } from '../src/replay-jsonl';
 
 // A whole rescue as bus events, in the shapes coord/CONTRACT.md fixes (t in sim seconds).
 const RUN: [string, unknown][] = [
@@ -104,4 +105,50 @@ test('DEMO-FLOW: time comes from sim clocks only, not from lanes that stamp thei
   m.apply('responder/pose', { t: 12.5, pos: [0, 0, 0], yaw: 0, state: 'idle', carrying: [] });
   m.setTime(14.9);
   expect(m.t).toBe(14.9);
+});
+
+// B3-SHIFT-STORY: a real tools/run_b2.py --floor B3 log (seed 0, 9/9 checks): the slab lands on B3 at
+// 225.8 s, the Scout stops, maps it from its own LiDAR and re-plans around it.
+test('B3-SHIFT-STORY: the real B3 run lights slab shift, then stop, then recheck, in that order', async () => {
+  const fs = await import('node:fs');
+  const parsed = parseJsonl(fs.readFileSync('public/replays/b3-shift.jsonl', 'utf-8'));
+  expect(parsed.issues).toEqual([]);
+  const m = new StoryModel();
+  const beats: [string, string, number][] = [];
+  for (const ev of parsed.events) {
+    const before = m.phase('recheck').state;
+    const moved = m.apply(ev.topic, ev.data);
+    if (moved === 'shift' || (moved === 'recheck' && m.phase('recheck').state !== before)) {
+      beats.push([moved, m.phase(moved).state, ev.t]);
+    }
+  }
+  expect(beats).toEqual([['shift', 'done', 225.8], ['recheck', 'held', 226.0], ['recheck', 'done', 226.0]]);
+  expect(m.phase('recheck').note).toBe('re-planned around the slab from a fresh scan');
+  expect(m.phase('descend').state).toBe('done');
+  expect(m.phase('found').note).toBe('Scout reached c3 on B3');
+  expect(m.facts.deepestZ).toBeLessThan(-1.7);                     // the real B3 height
+  expect(m.facts).toMatchObject({ scene: 'levels', shifts: 1, stops: 1, rechecks: 1 });
+  expect(m.facts.reportMarkdown).toContain('# Run checks: 9/9 passed');
+  expect(m.t).toBe(230.9);
+});
+
+test('B3-SHIFT-STORY: run_b2 records replay as run/<kind>; a record without kind or topic is still an issue', () => {
+  const parsed = parseJsonl([
+    '{"t": 225.8, "kind": "shift", "xy": [0.675, 0.925], "level": "B3"}',
+    '{"t": 226.0, "pose": [1, 2, 3]}',
+  ].join('\n'));
+  expect(parsed.events).toEqual([{ t: 225.8, topic: 'run/shift', data: { t: 225.8, xy: [0.675, 0.925], level: 'B3' }, line: 1 }]);
+  expect(parsed.issues).toEqual([{ line: 2, reason: 'missing topic' }]);
+});
+
+test('B3-SHIFT-STORY: in the browser the B3 replay shows the shift beat and its recheck on the card', async ({ page }) => {
+  await page.goto('/?run=/replays/b3-shift.jsonl&speed=400');
+  await expect(page.locator('#story .story-badge')).toContainText('end', { timeout: 60000 });
+  for (const phase of ['quake', 'descend', 'shift', 'recheck', 'found', 'report']) {
+    await expect(page.locator(`#story .story-phase[data-phase="${phase}"]`)).toHaveAttribute('data-state', 'done');
+  }
+  const card = page.locator('#story .story-card');
+  await expect(card).toContainText('Stops / rechecks');
+  await expect(card).toContainText('1 / 1');
+  await expect(card).toContainText('Run checks: 9/9 passed');
 });
