@@ -22,10 +22,11 @@ The slab is a spare free body added to a copy of sim/scenes/levels.xml under run
 files are not edited) and placed on the B2 floor by this runner; World.add_block assumes ground at z 0.
 
 runs/b2-<seed>.jsonl: one record per line {"t": sim seconds, "kind": ..., ...}: "pose" (every 0.1 s tick),
-"level" (each level reached), "plan" (each re-plan: status, why, target), "shift", "step" (each
-check, ok or FAIL) and "summary". The summary record and the verdict record each carry `seed`,
-the value passed to run(). evaluate() turns the records into the verdict, so the same log
-always gives the same result. Exit 0 only if every step passed.
+"level" (each level reached), "plan" (each re-plan: status, why, target), "shift", "relook" (after a
+hit, before the next plan: a fresh scan where the Scout stands, cause "blocked" or "refused", and how
+many cells that scan updated), "step" (each check, ok or FAIL) and "summary". The summary record and
+the verdict record each carry `seed`, the value passed to run(). evaluate() turns the records into the
+verdict, so the same log always gives the same result. Exit 0 only if every step passed.
 """
 
 import argparse
@@ -210,6 +211,44 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
         if verbose and kind not in ("pose",):
             print(json.dumps(r)[:160])
 
+    def apply_sensors(msg):
+        """One GridLevels update, the same call as the SCAN_EVERY path. Returns how many cells changed."""
+        before = {c: (v["state"], v["occupied"], v["source"]) for c, v in gl.cells.items()}
+        gl.add_sensors(msg)
+        updated = sum(1 for c, v in gl.cells.items()
+                      if before.get(c) != (v["state"], v["occupied"], v["source"]))
+        updated += sum(1 for c in before if c not in gl.cells)
+        return updated
+
+    def grid_snap():
+        cells = {c: (v["state"], v["occupied"], v["source"]) for c, v in gl.cells.items()}
+        return cells, list(gl.poses), dict(gl.trail), set(gl.changed)
+
+    def grid_restore(snap):
+        cells, poses, trail, changed = snap
+        gl.cells.clear()
+        gl.cells.update({c: {"state": state, "occupied": occupied, "source": source}
+                         for c, (state, occupied, source) in cells.items()})
+        gl.poses = list(poses)
+        gl.trail.clear()
+        gl.trail.update(trail)
+        gl.changed = set(changed)
+
+    def slab_mapped():
+        """(sources, hit cause or None, cell count) when the slab is occupied in the map, else None.
+
+        A hit cause is refused, collision, contact or bump. LiDAR alone is the mapped update, not a hit.
+        """
+        if shift is None or mapped_done:
+            return None
+        hit = [(c, v["source"]) for c, v in gl.cells.items()
+               if v["occupied"] and (c[0], c[1]) in shift["area"] and abs(c[2] - shift["k"]) <= 3]
+        if not hit:
+            return None
+        sources = sorted({s for _, s in hit})
+        cause = next((s for s in ("refused", "collision", "contact", "bump") if s in sources), None)
+        return sources, cause, len(hit)
+
     rec("level", level=w.level())
     last_level = w.level()
     probing, plan, frame, next_pose = None, None, 0, 0.0
@@ -217,18 +256,47 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
     while w.t < max_t:
         stopped = w.state != "moving"
         frame += 1
-        if stopped or frame % SCAN_EVERY == 0:
-            gl.add_sensors(w.sensors_message(camera=False))
-        if shift and not mapped_done:
-            hit = [(c, v["source"]) for c, v in gl.cells.items()
-                   if v["occupied"] and (c[0], c[1]) in shift["area"] and abs(c[2] - shift["k"]) <= 3]
-            if hit:
-                rec("mapped", cells=len(hit), sources=sorted({s for _, s in hit}))
-                mapped_done = True
-        if w.t >= next_pose:
+        pose_due = w.t >= next_pose
+        blocked_hit = pose_due and w.state == "blocked"
+        need_scan = stopped or frame % SCAN_EVERY == 0
+        seeking = shift is not None and not mapped_done
+        # One sensor read per scan frame. On a hit, keep it out of the map until the hit is logged:
+        # the relook below is the GridLevels update the next find_route snapshot includes.
+        msg = None
+        mapped = None
+        if need_scan and (seeking or blocked_hit):
+            msg = w.sensors_message(camera=False)
+            if seeking:
+                snap = grid_snap()
+                apply_sensors(msg)
+                mapped = slab_mapped()
+                grid_restore(snap)
+        elif need_scan:
+            apply_sensors(w.sensors_message(camera=False))
+        elif seeking:
+            mapped = slab_mapped()
+        mapped_cause = None
+        if mapped is not None:
+            sources, mapped_cause, n_cells = mapped
+            rec("mapped", cells=n_cells, sources=sources)
+            mapped_done = True
+        # A moving pose means the Scout has moved on, so a mapped hit is re-scanned before that record.
+        if mapped_cause and pose_due and w.state == "moving":
+            if msg is None:
+                msg = w.sensors_message(camera=False)
+            rec("relook", cause=mapped_cause, cells=apply_sensors(msg))
+            msg = None
+            mapped_cause = None
+        if pose_due:
             rec("pose", pos=[round(float(v), 3) for v in w.pos], state=w.state, level=w.level(),
                 cell=cell(w.pos[0], w.pos[1], w.floor_z))
             next_pose = round(w.t + DT, 6)   # next tick; += 0.1 drifts off World.tick's clock
+        if blocked_hit or mapped_cause:
+            if msg is None:
+                msg = w.sensors_message(camera=False)
+            rec("relook", cause="blocked" if blocked_hit else mapped_cause, cells=apply_sensors(msg))
+        elif msg is not None:
+            apply_sensors(msg)
         if stopped:
             here = w.pos
             if math.hypot(here[0] - goal[0], here[1] - goal[1]) < 0.15 and w.level() == floor:
