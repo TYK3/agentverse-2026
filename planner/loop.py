@@ -50,6 +50,7 @@ class Loop:
             raise ValueError("gate timeout must be positive and at most 60 seconds")
         self.bus, self.router = bus, router
         self.defer_approved_actions = defer_approved_actions
+        self.revoked_permits = set()
         self.budget = budget  # planner.budget.Budget: times each local step for status/budget
         self.places = places or {}  # operator place name -> goal cell, for operator/command
         self.start_cell = start_cell  # () -> the Responder's current cell
@@ -84,6 +85,7 @@ class Loop:
 
     def attach(self):
         for topic, fn in (("route/verified", self.on_verified), ("world/change", self.on_world_change),
+                          ("permit/route", self.on_permit),
                           ("map/cells", self.on_map), ("map/hazards", self.on_hazards),
                           ("map/casualties", self.on_casualties), ("gate/answer", self.on_answer),
                           ("status/link", self.on_link), ("operator/command", self.on_command)):
@@ -389,6 +391,23 @@ class Loop:
             await self.bus.publish("responder/action", msg)
 
     # ---- perception updates and the visible re-plan -------------------------------------------
+
+    async def on_permit(self, data):
+        rid = data["route"]
+        if not data["granted"]:
+            self.revoked_permits.add(rid)
+            return
+        was_revoked = rid in self.revoked_permits
+        self.revoked_permits.discard(rid)
+        if was_revoked and self.route and self.route["id"] == rid and self.state == EXECUTING:
+            async def resume():
+                # Let the sim lift its hold first. A new route starts at the measured pose
+                # and repeats physics/confidence checks rather than replaying old waypoints.
+                if self.route and self.route["id"] == rid and self.state == EXECUTING and rid not in self.revoked_permits:
+                    await self.propose(f"move permit for {rid} re-earned by fresh observation; resume delivery")
+            task = asyncio.create_task(resume())
+            self._gate_tasks.add(task)
+            task.add_done_callback(self._gate_tasks.discard)
 
     async def on_world_change(self, data):
         await self.cancel_request("world changed")

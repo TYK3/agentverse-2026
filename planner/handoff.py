@@ -82,6 +82,7 @@ class Handoff:
         for topic, fn in (("map/casualties", self.on_casualties), ("map/cells", self.on_map),
                           ("map/hazards", self.on_hazards), ("sensors/scout", self.on_sensors),
                           ("log/decision", self.on_log), ("world/change", self.on_world_change),
+                          ("responder/pose", self.on_pose),
                           ("scene/loaded", self.finder.on_scene), ("casualty/triage", self.on_triage_ready),
                           ("casualty/contact", self.on_contact)):
             self.bus.subscribe(topic, fn)
@@ -307,7 +308,13 @@ class Handoff:
                                f"{reason} for {self.active}; next casualty")
                 self.active = None
                 await self.dispatch()
-            elif outcome in ("blocked", "frozen") and self.active:
+            elif outcome == "frozen" and self.active:
+                # A sensed safety hold is part of this mission, not a failed delivery attempt.
+                # T13 owns the re-plan and L1 owns re-observation; starting another handoff
+                # here would replace their recovery with a competing mission five seconds later.
+                await self.log(f"Responder paused for {self.active}", "waiting",
+                               f"{reason}; keeping the delivery assigned while the route is rechecked")
+            elif outcome == "blocked" and self.active:
                 await self.responder_blocked(outcome, reason)
         elif outcome == "hold" and self.active and self.loop.state == "IDLE":
             # T13 refused or a human declined: the casualty stays queued but this mission is over.
@@ -348,6 +355,15 @@ class Handoff:
             # T13 drops the route and re-plans on the next scan; keep the casualty as the active job.
             await self.log(f"{data.get('kind')} during handoff of {self.active}", "waiting",
                            "T13 re-plans after the re-scan; handoff keeps the casualty assigned")
+
+    def on_pose(self, data):
+        """E2's measured pose supplies the next re-plan's start, never the mission's old origin."""
+        res = (self.router.map_cells or {}).get("res", 0.05)
+        self.responder_cell = self._cell_of(*data["pos"][:2], res=res)
+        mission = self.loop.mission_args
+        if self.active and mission and mission["casualty"] == self.active:
+            start = self.start_cell()
+            mission["start"] = tuple(start if start is not None else self.responder_cell)
 
     # ---- Scout blocked: the Responder keeps working -------------------------------------------------
 

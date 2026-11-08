@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from perception.triage import Triager
-from planner.tests.test_handoff import World, casualty, map_cells
+from planner.tests.test_handoff import World, casualty, map_cells, sim_log
 
 
 @pytest.fixture(autouse=True)
@@ -144,4 +144,67 @@ def test_world_change_discards_a_deferred_approved_dispatch():
         await asyncio.sleep(0)
         assert not world.topics("responder/action")
         assert any(d["outcome"] == "hold" and "stale dispatch" in d["reason"] for d in world.topics("log/decision"))
+    asyncio.run(scenario())
+
+
+def test_permit_freeze_keeps_the_same_delivery_without_spending_another_attempt():
+    async def scenario():
+        world = await World().start()
+        await world.bus.publish("map/casualties", [casualty()])
+        await world.bus.publish("log/decision", sim_log("frozen", "move permit revoked", at=(0.6, 0.4)))
+        assert world.handoff.active == "c1"
+        assert world.handoff.attempts["c1"] == 1
+        assert not world.handoff.waiting_scan and "c1" not in world.handoff.skipped
+        await world.bus.publish("map/cells", map_cells())
+        assert len(world.topics("route/proposed")) == 1, "a safety pause must not start a competing handoff mission"
+    asyncio.run(scenario())
+
+
+def test_replan_starts_from_the_measured_responder_pose():
+    async def scenario():
+        world = await World().start()
+        await world.bus.publish("map/casualties", [casualty()])
+        await world.bus.publish("responder/pose", {"t": 2, "pos": [0.7, 0.4, 0.08], "yaw": 0,
+                                                   "state": "moving", "route": "r1", "carrying": ["water"]})
+        await world.bus.publish("world/change", {"kind": "block_added", "t": 2, "moved_blocks": ["x1"]})
+        await world.bus.publish("map/cells", map_cells())
+        assert world.topics("route/proposed")[-1]["cells"][0] == [14, 8, 0]
+        assert world.handoff.active == "c1" and world.handoff.attempts["c1"] == 1
+    asyncio.run(scenario())
+
+
+def test_fresh_permit_rechecks_the_paused_delivery_from_its_current_pose():
+    async def scenario():
+        world = await World().start()
+        await world.bus.publish("map/casualties", [casualty()])
+        await world.bus.publish("responder/pose", {"t": 2, "pos": [0.7, 0.4, 0.08], "yaw": 0,
+                                                   "state": "frozen", "route": "r1", "carrying": ["water"]})
+        await world.bus.publish("log/decision", sim_log("frozen", "move permit revoked", at=(0.7, 0.4)))
+        await world.bus.publish("permit/route", {"route": "r1", "granted": False, "t": 2,
+                                                "reason": "sensed shift", "evidence": []})
+        before = len(world.topics("route/proposed"))
+        assert before == 1
+        await world.bus.publish("permit/route", {"route": "r1", "granted": True, "t": 3,
+                                                "reason": "fresh scan", "evidence": []})
+        await asyncio.sleep(0)
+        route = world.topics("route/proposed")[-1]
+        assert len(world.topics("route/proposed")) == 2 and route["id"] != "r1"
+        assert route["cells"][0] == [14, 8, 0]
+        assert world.topics("responder/action")[-1]["route"] == route["id"]
+        assert world.handoff.active == "c1" and world.handoff.attempts["c1"] == 1
+    asyncio.run(scenario())
+
+
+def test_a_new_unseen_pose_cannot_replan_from_the_old_safe_start():
+    async def scenario():
+        world = await World().start()
+        await world.bus.publish("map/casualties", [casualty()])
+        before = len(world.topics("responder/action"))
+        await world.bus.publish("responder/pose", {"t": 2, "pos": [10, 10, 0.08], "yaw": 0,
+                                                   "state": "frozen", "route": "r1", "carrying": ["water"]})
+        await world.bus.publish("world/change", {"kind": "block_added", "t": 2, "moved_blocks": ["x1"]})
+        await world.bus.publish("map/cells", map_cells())
+        assert world.loop.mission_args["start"] == (200, 200, 0)
+        assert len(world.topics("responder/action")) == before
+        assert world.loop.waiting_scan
     asyncio.run(scenario())

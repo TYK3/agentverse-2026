@@ -149,6 +149,13 @@ approval handler can run before move commands. Dispatch still checks the route
 ID and current risks; a scene change cancels stale work. Standalone loop callers
 retain immediate awaited dispatch by default.
 
+A permit freeze keeps the same casualty delivery assigned and does not spend a
+collision retry. The handoff consumes the measured `responder/pose` to update
+the next route's start; if that position is unobserved, routing holds for a
+re-look rather than returning to the old origin. A permit re-earned by fresh
+observation re-proposes the paused delivery from that current pose and repeats
+physics/confidence checks. It does not replay the original route's waypoints.
+
 `router = await planner.start(bus)` attaches the verification loop as
 `router.loop`, plus the budget publisher as `router.task`. Use that existing loop.
 `await loop.mission(start, goal, item="water", action="deliver")` dispatches
