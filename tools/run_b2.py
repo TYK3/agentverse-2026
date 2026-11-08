@@ -21,8 +21,8 @@ SHIFT_AHEAD ahead of the Scout. Not on any other explore path: there it can land
 The slab is a spare free body added to a copy of sim/scenes/levels.xml under runs/ (the sim's scene
 files are not edited) and placed on the B2 floor by this runner; World.add_block assumes ground at z 0.
 
-runs/b2-<seed>.jsonl: one record per line {"t": sim seconds, "kind": ..., ...}: "pose" (1 Hz),
-"level" (each level reached), "plan" (each re-plan: status, why, target), "shift", "step" (each
+runs/b2-<seed>.jsonl starts with a scene/loaded topic envelope, followed by records
+{"t": sim seconds, "kind": ..., ...}: "pose" (1 Hz), "level" (each level reached), "plan" (each re-plan: status, why, target), "shift", "step" (each
 check, ok or FAIL) and "summary". evaluate() turns the records into the verdict, so the same log
 always gives the same result. Exit 0 only if every step passed.
 """
@@ -139,6 +139,7 @@ def point_ahead(cells, here, ahead=SHIFT_AHEAD):
 # ---- the verdict (pure) ------------------------------------------------------------------------
 def evaluate(records):
     """{"steps": {name: {"ok", "t", "detail"}}, "passed", "failed"} from a run's records."""
+    records = [r for r in records if r.get("topic") != "scene/loaded"]
     out = {}
 
     def put(name, ok, t, detail):
@@ -192,12 +193,21 @@ def evaluate(records):
 def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
     from perception.levels import GridLevels
     from planner.levels import Levels, find_route, waypoints
+    from sim import scene
     from sim.demo_descent import DT, GOALS, SCAN_EVERY, _near, cell, probe_target
-    from sim.levels import LevelWorld, max_jump
+    from sim.levels import LEVEL_Z, LEVELS, LevelWorld, max_jump
 
     out_dir = pathlib.Path(out_dir or ROOT / "runs")
     out_dir.mkdir(parents=True, exist_ok=True)
     w = LevelWorld(path=scene_with_slab(out_dir), seed=seed, render=False)
+    # Capture the loaded scene before the run moves anything. This is a bus envelope,
+    # not another kind record; keep it out of the verdict's simulation records.
+    loaded = {"t": w.t, "topic": "scene/loaded", "data": {
+        **scene.scene_loaded(w.m, w.d, scene=LEVELS.stem),
+        "building_id": w.m.names.split(b"\0", 1)[0].decode(),
+        "floors": dict(LEVEL_Z), "robots": [w.m.body(w.scout).name],
+        "survivor_seed": seed,
+    }}
     gl = GridLevels(RES)
     goal = GOALS[floor]
     goal_cell = cell(*goal)
@@ -282,6 +292,7 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
         max_jump=round(max_jump(w.trace), 4), route=route["status"], route_k=[max(ks), min(ks)] if ks else None)
     path = out_dir / f"{floor.lower()}-{seed}.jsonl"
     with open(path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(loaded) + "\n")
         f.writelines(json.dumps(r) + "\n" for r in records)
     verdict = evaluate(records)
     with open(path, "a", encoding="utf-8") as f:

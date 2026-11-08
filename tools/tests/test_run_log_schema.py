@@ -83,16 +83,36 @@ def test_recorder_real_writer(tmp_path):
         assert line_valid(row)
 
 
+@pytest.mark.parametrize('seed', [0, 17])
 @pytest.mark.parametrize('floor', ['B1', 'B2', 'B3'])
-def test_short_real_b2_log(tmp_path, monkeypatch, floor):
+def test_short_real_b2_log(tmp_path, monkeypatch, floor, seed):
     pytest.importorskip('mujoco')
     monkeypatch.setenv('GEMINI_MODE', 'off')
-    _, path = run_b2.run(seed=0, max_t=0.2, out_dir=tmp_path, floor=floor)
+    verdict, path = run_b2.run(seed=seed, max_t=0.2, out_dir=tmp_path, floor=floor)
     rows = [json.loads(line) for line in path.read_text().splitlines()]
-    assert {'level', 'pose', 'plan', 'summary', 'verdict'} <= {r['kind'] for r in rows}
+    from sim import scene
+    from sim.levels import LEVEL_Z, LEVELS, LevelWorld
+
+    assert run_b2.evaluate(rows) == verdict
+    assert rows[0]['topic'] == 'scene/loaded'
+    assert rows[0]['t'] == 0
+    loaded = rows[0]['data']
+    expected = LevelWorld(path=tmp_path / 'levels_with_slab.xml', seed=seed, render=False)
+    assert loaded['scene'] == LEVELS.stem
+    assert loaded['blocks'] == scene.blocks(expected.m, expected.d)
+    assert loaded['building_id'] == expected.m.names.split(b'\0', 1)[0].decode()
+    assert loaded['floors'] == LEVEL_Z
+    # Every configured floor has a real support surface in the loaded model.
+    surfaces = [expected.d.geom_xpos[i][2] + expected.m.geom_size[i][2]
+                for i in range(expected.m.ngeom) if '_floor' in expected.m.geom(i).name]
+    assert all(any(math.isclose(z, top, abs_tol=1e-6) for top in surfaces) for z in loaded['floors'].values())
+    assert loaded['robots'] == [expected.m.body(expected.scout).name]
+    assert loaded['survivor_seed'] == seed
+    kind_rows = [r for r in rows if 'kind' in r]
+    assert {'level', 'pose', 'plan', 'summary', 'verdict'} <= {r['kind'] for r in kind_rows}
     for row in rows:
         assert line_valid(row), row
-    summary = next(row for row in rows if row['kind'] == 'summary')
+    summary = next(row for row in kind_rows if row['kind'] == 'summary')
     assert summary['floor'] == floor
     assert not line_valid(dict(summary, floor='B4'))
     assert not line_valid(dict(summary, floor=2))
