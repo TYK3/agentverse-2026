@@ -20,32 +20,35 @@ function badges(node: HTMLElement, data: Data): void {
 // stay untouched; every message string goes in through textContent, never as HTML.
 const TALK_LIMIT = 120;
 const TALK_CSS = `
-.talk-panel { background: #131d2e; border: 1px solid #233754; border-radius: 0.5rem; padding: 0.75rem;
-  margin-bottom: 1.5rem; font-size: 0.78rem; color: #cbd5e1; }
-.talk-empty { color: #64748b; font-style: italic; margin: 0; }
+.talk-panel { background: var(--panel-2, #131d2e); border: 1px solid var(--border, #233754); border-radius: 0.5rem;
+  padding: 0.75rem; margin-bottom: 1.5rem; font-size: 0.78rem; color: var(--text-2, #cbd5e1); }
+.talk-empty { color: var(--muted, #64748b); font-style: italic; margin: 0; }
 .talk-contacts { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.5rem; }
-.talk-contact { display: inline-flex; align-items: center; gap: 0.35rem; background: #0e1726;
-  border: 1px solid #233754; border-radius: 999px; padding: 0.15rem 0.55rem; }
-.talk-contact b { color: #e2e8f0; }
+.talk-contact { display: inline-flex; align-items: center; gap: 0.35rem; background: var(--panel, #0e1726);
+  border: 1px solid var(--border, #233754); border-radius: 999px; padding: 0.15rem 0.55rem; }
+.talk-contact b { color: var(--text, #e2e8f0); }
 .talk-status { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
-.talk-status.talking { color: #34d399; } .talk-status.done { color: #93c5fd; }
-.talk-status.unresponsive, .talk-status.stopped { color: #f87171; }
+.talk-status.talking { color: var(--ok, #34d399); } .talk-status.done { color: var(--accent-soft, #93c5fd); }
+.talk-status.unresponsive, .talk-status.stopped { color: var(--danger, #f87171); }
 .talk-facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 0.6rem; margin: 0 0 0.6rem;
-  padding: 0.45rem 0.55rem; background: #0e1726; border-radius: 0.35rem; }
-.talk-facts dt { color: #64748b; } .talk-facts dd { margin: 0; color: #e2e8f0; overflow-wrap: anywhere; }
+  padding: 0.45rem 0.55rem; background: var(--panel, #0e1726); border-radius: 0.35rem; }
+.talk-facts dt { color: var(--muted, #64748b); }
+.talk-facts dd { margin: 0; color: var(--text, #e2e8f0); overflow-wrap: anywhere; }
 .talk-log { list-style: none; margin: 0; padding: 0; max-height: 22rem; overflow-y: auto; display: flex;
   flex-direction: column; gap: 0.35rem; }
-.talk-line { padding: 0.35rem 0.5rem; border-radius: 0.35rem; border-left: 3px solid #475569;
-  background: #0e1726; overflow-wrap: anywhere; line-height: 1.35; }
-.talk-line small { display: block; color: #64748b; font-size: 0.68rem; margin-bottom: 0.1rem; }
-.talk-line.robot { border-left-color: #60a5fa; } .talk-line.casualty { border-left-color: #34d399; }
-.talk-line.ask { border-left-color: #f59e0b; } .talk-line.ask.rejected { border-left-color: #f87171; }
-.talk-line.ask.approved { border-left-color: #34d399; }
+.talk-line { padding: 0.35rem 0.5rem; border-radius: 0.35rem; border-left: 3px solid var(--border-hi, #475569);
+  background: var(--panel, #0e1726); overflow-wrap: anywhere; line-height: 1.35; }
+.talk-line small { display: block; color: var(--muted, #64748b); font-size: 0.68rem; margin-bottom: 0.1rem; }
+.talk-line.robot { border-left-color: var(--accent, #60a5fa); }
+.talk-line.casualty { border-left-color: var(--accent-soft, #34d399); }
+.talk-line.ask { border-left-color: var(--warn, #f59e0b); }
+.talk-line.ask.rejected { border-left-color: var(--danger, #f87171); }
+.talk-line.ask.approved { border-left-color: var(--ok, #34d399); }
 .talk-tag { font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-  margin-left: 0.35rem; color: #94a3b8; }
+  margin-left: 0.35rem; color: var(--muted, #94a3b8); }
 .talk-level { display: inline-block; width: 3rem; height: 0.3rem; margin-left: 0.4rem; vertical-align: middle;
-  background: #233754; border-radius: 1px; overflow: hidden; }
-.talk-level > span { display: block; height: 100%; background: #34d399; }
+  background: var(--border, #233754); border-radius: 1px; overflow: hidden; }
+.talk-level > span { display: block; height: 100%; background: var(--accent-soft, #34d399); }
 `;
 const FACT_LABELS: Record<string, string> = { responsive: 'Responsive', hurt: 'Hurts', bleeding: 'Bleeding',
   trapped: 'Trapped', breathing: 'Breathing', conscious: 'Conscious' };
