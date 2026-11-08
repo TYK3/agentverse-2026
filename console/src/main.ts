@@ -12,6 +12,7 @@ import {
   type WorldChangePayload
 } from './map';
 import { setupPanels } from './panels';
+import { setupHardwarePanel } from './hardware';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);
@@ -102,6 +103,9 @@ on('world/change', data => {
 
 // Setup operator reasoning, approval and status panels (T20)
 setupPanels();
+
+// Setup robot hardware specification panel (Y7c)
+setupHardwarePanel();
 
 // Initial boot
 if (isFakeMode) {
