@@ -23,5 +23,9 @@ async def start(bus) -> RoutePlanner:
     lp = await loop.start(bus, planner)
     planner.loop, planner.task = lp, lp.task
     planner.handoff = handoff.start(bus, lp, planner)
+    if lp.start_cell is None:
+        # SUPPLY-RAY-R1R3: a re-plan after a block (and a typed command) starts where the Responder is,
+        # from responder/pose, not from where its mission began.
+        lp.start_cell = planner.handoff.start_cell
     planner.permits = permit.start(bus)  # L1: move permits that only fresh observation re-earns
     return planner
