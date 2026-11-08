@@ -63,6 +63,9 @@ async def start(bus, loop=True):
     name, path = scene.resolve()          # SIM_SCENE=backup (default) | tower | path to an MJCF file
     world = World(path=path)
     world.scene = name
+    from sim import recorder  # here, so `python -m sim.recorder` imports it only once
+
+    world.recorder = recorder.attach(world, bus)   # S1: SIM_RECORD=file.jsonl records the run
     await bus.publish("scene/loaded", scene.scene_loaded(world.m, world.d, scene=name))
     bus.subscribe("scout/goto", world.goto)
     bus.subscribe("say", world.on_say)  # L2: the casualty knocks back when the Scout calls out
