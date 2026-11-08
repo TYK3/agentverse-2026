@@ -12,10 +12,10 @@ from sim.levels import LEVEL_Z, RIDE, LevelWorld, max_jump
 
 B1, B2 = LEVEL_Z["B1"], LEVEL_Z["B2"]
 # Hand-picked legs for the scripted-drive tests only: R2 to ground, R1 to B1, round R1's shaft wall,
-# R3 to B2, out from R3's foot under its rail, then west to casualty c2. The closed-loop test below is
-# given none of these.
+# R3 to B2, out from R3's foot under its rail, west along y 1.5 (clear of B2's rubble and R4's rail)
+# to casualty c2. The closed-loop test below is given none of these.
 TO_B1 = [(1.2, 2.1, 0.6), (3.8, 2.1, 0.0), (3.8, 0.3, 0.0), (1.3, 0.3, B1)]
-TO_B2 = [(1.35, 1.5, B1), (2.3, 2.1, B1), (4.75, 2.1, B2), (4.75, 0.6, B2), (0.75, 0.6, B2)]
+TO_B2 = [(1.35, 1.5, B1), (2.3, 2.1, B1), (4.75, 2.1, B2), (4.75, 1.5, B2), (0.75, 1.5, B2), (0.75, 0.8, B2)]
 
 
 @pytest.fixture(scope="module")
@@ -61,7 +61,7 @@ def test_scripted_legs_reach_b2_on_r3_with_measured_heights_on_the_ramp():
 def test_over_the_b2_goal_but_on_b1_is_not_arrival():
     w = LevelWorld(render=False)
     drive_all(w, TO_B1)
-    assert drive(w, (0.75, 0.6, B2)) == "blocked"     # right (x, y), one level too high
+    assert drive(w, (0.75, 0.8, B2)) == "blocked"     # right (x, y), one level too high
     assert w.level() == "B1"
 
 
