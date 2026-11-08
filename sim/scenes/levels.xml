@@ -1,6 +1,6 @@
 <!--
   L4 multi-level scene, written by sim/scenes/make_levels.py (edit that, not this file).
-  A mezzanine L1 (floor z = +0.6), the ground floor (z = 0) and a basement B1 (z = -0.6).
+  A mezzanine L1 (floor z = +0.6), the ground floor (z = 0) and basements B1 (z = -0.6), B2 (z = -1.2).
 
   Plan view (x right, y up), footprint 5 m x 2.4 m:
      y=2.4 +-------------------------------------------+
@@ -11,6 +11,10 @@
      y=0   +-------------------------------------------+
          x=0         x=1.5                  x=3.5    x=5
   B1 lies under the whole footprint; R1 lands on it at x = 1.5. Casualty c1 lies in B1 at the west end.
+
+  B1 plan view: ramp R3 (B1 -> B2) runs east over y 1.8..2.4, x 2.5 -> 4.5, in a railed shaft that is open
+  down to B2 for x 2.5..5. B2 lies under the whole footprint; the Scout leaves R3's foot (x 4.5..5) south,
+  under the rail at y = 1.8, which is 0.54 m above B2. Casualty c2 lies in B2 at the west end.
   Every drop is railed (0.2 m) except the ramp mouths, because a 2D LiDAR cannot see a drop.
   Levels are static geoms, not b<number> blocks, so the aftershock check has nothing to shake here.
 -->
@@ -21,11 +25,17 @@
   <worldbody>
     <light name="sun" pos="2.5 1.2 6" dir="0 0 -1" directional="true" diffuse="0.8 0.8 0.8"/>
     <body name="ground" mocap="true" pos="0 0 0"/>
-    <geom name="b1_floor" type="box" pos="2.5000 1.2000 -0.6300" size="2.5000 1.2000 0.0300" rgba="0.5 0.5 0.5 1"/>
-    <geom name="wall_s" type="box" pos="2.5000 -0.0400 0.4000" size="2.5400 0.0400 1.0000" rgba="0.8 0.7 0.5 1"/>
-    <geom name="wall_n" type="box" pos="2.5000 2.4400 0.4000" size="2.5400 0.0400 1.0000" rgba="0.8 0.7 0.5 1"/>
-    <geom name="wall_w" type="box" pos="-0.0400 1.2000 0.4000" size="0.0400 1.2000 1.0000" rgba="0.8 0.7 0.5 1"/>
-    <geom name="wall_e" type="box" pos="5.0400 1.2000 0.4000" size="0.0400 1.2000 1.0000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="b2_floor" type="box" pos="2.5000 1.2000 -1.2300" size="2.5000 1.2000 0.0300" rgba="0.5 0.5 0.5 1"/>
+    <geom name="wall_s" type="box" pos="2.5000 -0.0400 0.1000" size="2.5400 0.0400 1.3000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="wall_n" type="box" pos="2.5000 2.4400 0.1000" size="2.5400 0.0400 1.3000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="wall_w" type="box" pos="-0.0400 1.2000 0.1000" size="0.0400 1.2000 1.3000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="wall_e" type="box" pos="5.0400 1.2000 0.1000" size="0.0400 1.2000 1.3000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="b1_floor_s" type="box" pos="2.5000 0.9000 -0.6300" size="2.5000 0.9000 0.0300" rgba="0.5 0.5 0.5 1"/>
+    <geom name="b1_floor_nw" type="box" pos="1.2500 2.1000 -0.6300" size="1.2500 0.3000 0.0300" rgba="0.5 0.5 0.5 1"/>
+    <geom name="ramp_r3" type="box" pos="3.4914 2.1000 -0.9287" size="1.0540 0.3000 0.0300" euler="0 16.6992 0" rgba="0.45 0.55 0.6 1"/>
+    <geom name="r3_side" type="box" pos="3.5000 1.7600 -0.8000" size="1.0000 0.0400 0.4000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="r3_end_rail" type="box" pos="4.7500 1.7600 -0.5300" size="0.2500 0.0400 0.1300" rgba="0.8 0.7 0.5 1"/>
+    <geom name="r3_back" type="box" pos="2.4600 2.1000 -0.9300" size="0.0400 0.3000 0.2700" rgba="0.8 0.7 0.5 1"/>
     <geom name="g_floor_w" type="box" pos="0.7500 1.2000 -0.0300" size="0.7500 1.2000 0.0300" rgba="0.5 0.5 0.5 1"/>
     <geom name="g_floor_m" type="box" pos="2.5000 1.5000 -0.0300" size="1.0000 0.9000 0.0300" rgba="0.5 0.5 0.5 1"/>
     <geom name="g_floor_e" type="box" pos="4.2500 1.2000 -0.0300" size="0.7500 1.2000 0.0300" rgba="0.5 0.5 0.5 1"/>
@@ -39,9 +49,14 @@
     <geom name="r2_back" type="box" pos="1.5400 2.1000 0.2700" size="0.0400 0.3000 0.2700" rgba="0.8 0.7 0.5 1"/>
     <geom name="b20_rubble" type="box" pos="4.4000 1.1500 0.0750" size="0.2000 0.1500 0.0750" rgba="0.55 0.5 0.45 1"/>
     <geom name="b21_rubble" type="box" pos="1.0500 1.0500 -0.5400" size="0.1500 0.1500 0.0600" rgba="0.55 0.5 0.45 1"/>
+    <geom name="b22_rubble" type="box" pos="2.1500 1.0500 -1.1400" size="0.1500 0.1500 0.0600" rgba="0.55 0.5 0.45 1"/>
     <!-- Casualty c1 in B1: a fixed visual marker, no collisions. -->
     <body name="casualty_c1" pos="0.45 1.9 -0.48" euler="0 90 0">
       <geom name="c1_g" type="capsule" size="0.1 0.25" contype="0" conaffinity="0" rgba="1 0.3 0.3 1"/>
+    </body>
+    <!-- Casualty c2 in B2: a fixed visual marker, no collisions. -->
+    <body name="casualty_c2" pos="0.45 0.4 -1.08" euler="0 90 0">
+      <geom name="c2_g" type="capsule" size="0.1 0.25" contype="0" conaffinity="0" rgba="1 0.3 0.3 1"/>
     </body>
     <!-- Scout as in backup.xml: mocap, origin = sensor origin 0.075 m above the floor, robot geoms in
          group 3. It starts on L1; sim/levels.py sets its height from the floor under it. -->
