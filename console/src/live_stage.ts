@@ -1,5 +1,6 @@
 // CONSOLE-LIVE-STAGE: the rescue stage right now, from the live bus (or a run replayed onto it), in the same
-// stages, labels and pill as rescue_stage.ts (CONSOLE-STAGE, which reads a finished run log).
+// stages and labels as CONSOLE-STAGE (#275, rescue_stage.ts, which reads a finished run log). Standalone on
+// main: the stage type and labels below match rescue_stage.ts's, so its renderRescueStage() draws these too.
 //
 // Live there is no run log, so each stage comes from a message the console already gets (coord/CONTRACT.md):
 //   scene/loaded                   starts over (start)
@@ -16,13 +17,38 @@
 // Nothing is guessed: with no casualty known yet the target is the floor the Scout is on, a casualty is reached
 // only when the bus says so (never from distance), and sim time is the message's t (else the last one seen).
 //
-// LiveStage is pure (no DOM, no bus import): apply(topic, data) and read `current` / `history`. attachLiveStage(on)
-// subscribes it with bus.ts's on(); renderRescueStage() from rescue_stage.ts draws it. Not wired into main.ts:
+// LiveStage is pure (no DOM, no bus import): apply(topic, data) and read `current` / `history` (each with a
+// plain `label`). attachLiveStage(on) subscribes it with bus.ts's on(). Not wired into main.ts:
 //   import { on } from './bus';
 //   const live = attachLiveStage(on);
-//   live.onChange = s => renderRescueStage(document.querySelector('#rescue-stage')!, s);
+//   live.onChange = s => { stageEl.textContent = s.label; };   // or renderRescueStage(el, s) from #275
 
-import { stageLabel, type RescueStage, type StageId } from './rescue_stage';
+export type StageId = 'start' | 'descend' | 'search' | 'shift' | 'recheck' | 'reached' | 'done';
+export type RescueStage = {
+  t: number;
+  stage: StageId;
+  floor: string | null;           // the floor (or 'ramp') the Scout is on
+  target: string | null;          // the floor of the casualty being sought
+  casualty: string | null;        // its id, when known
+  label: string;
+  ok?: boolean;                   // done: every check passed
+};
+
+const fmtFloor = (f: string | null) => (f === 'ground' ? 'the ground floor' : f === 'ramp' ? 'a ramp' : f ?? 'an unknown floor');
+
+/** The stage as one plain line (the same wording as rescue_stage.ts). */
+export function stageLabel(s: Omit<RescueStage, 'label'>, passed?: number, total?: number): string {
+  const who = s.casualty ?? 'the casualty';
+  switch (s.stage) {
+    case 'start': return 'Waiting for the run to start';
+    case 'descend': return `Descending: on ${fmtFloor(s.floor)}, heading for ${fmtFloor(s.target)}`;
+    case 'search': return `Searching ${fmtFloor(s.target)} for ${who}`;
+    case 'shift': return `Slab shifted on ${fmtFloor(s.floor)}: Scout stopping`;
+    case 'recheck': return `Re-planning around the slab on ${fmtFloor(s.floor)}`;
+    case 'reached': return `Reached ${who} on ${fmtFloor(s.target)}`;
+    case 'done': return total ? `Run over: ${passed} of ${total} checks passed` : 'Run over: no checks in the log';
+  }
+}
 
 export const LEVEL_Z: { id: string; z: number }[] = [
   { id: 'L1', z: 0.6 }, { id: 'ground', z: 0 }, { id: 'B1', z: -0.6 }, { id: 'B2', z: -1.2 }, { id: 'B3', z: -1.8 },
