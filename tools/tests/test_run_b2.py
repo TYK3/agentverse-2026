@@ -116,3 +116,15 @@ def test_real_b3_run_passes(tmp_path):
     verdict, path = run(seed=0, out_dir=tmp_path, floor="B3")
     assert path.name == "b3-0.jsonl"
     assert verdict["failed"] == [], verdict["steps"]
+
+
+def test_toward_casualty_takes_ok_routes_and_explore_paths_ending_near_the_goal():
+    from tools.run_b2 import toward_casualty
+
+    goal = (0.75, 1.55, -0.6)
+    near = [[30, 30, -12], [16, 30, -12]]                 # ends at (0.825, 1.525): 0.08 m from the goal
+    far = [[30, 30, -12], [90, 40, -12]]                  # ends 3.8 m away
+    assert toward_casualty({"status": "ok", "cells": far}, goal)
+    assert toward_casualty({"status": "explore", "cells": near}, goal)
+    assert not toward_casualty({"status": "explore", "cells": far}, goal)
+    assert not toward_casualty({"status": "no_route", "cells": near}, goal)
