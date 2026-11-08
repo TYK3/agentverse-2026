@@ -13,9 +13,15 @@ Bounded, so it is safe to run live:
   medical advice words); anything else in its answer is dropped and the local reader is used;
 - at most MAX_TURNS robot lines and MAX_S seconds per casualty; REPLY_WAIT_S without an answer
   repeats the question once, and MAX_SILENT unanswered lines end the contact as unresponsive;
-- an aftershock (`world/change`) stops it at once with the protect-your-head line.
+- an aftershock (`world/change`) stops it at once with the protect-your-head line;
+- in range only (CONTACT-HAS-RANGE): a contact starts only while the Scout is within HEAR_M of the
+  casualty's `map/casualties` pos and on its floor, as a casualty hears a call only that close
+  (sim/world.py HEAR_CALL_M). While the Scout is out of range an unanswered line does not count as
+  silence, so a casualty nobody could hear is never reported "unresponsive". With no Scout pose or no
+  casualty pos yet, range is not checked.
 
-In:  map/casualties (starts contact with the most confident casualty), casualty/reply, world/change.
+In:  map/casualties (starts contact with the most confident casualty in range), casualty/reply,
+     world/change, sensors/scout (the Scout's pose, for range).
 Out: say (to the casualty), casualty/contact (status, facts, injuries in their words, receipts) and
      log/decision (heard -> understood -> said, model "local-contact" or the Gemini model id).
 """
@@ -38,6 +44,8 @@ MAX_SILENT = 2         # unanswered lines in a row -> unresponsive
 ACK_WORDS = 12         # Gemini's acknowledgement before the fixed line, at most this many words
 GEM_TIMEOUT_S = 4.0
 START_CONFIDENCE = 0.5
+HEAR_M = 6.0           # the Scout must be this close (plan view) to talk: sim/world.py HEAR_CALL_M
+SAME_FLOOR_M = 0.3     # and this close in height (floors are 0.6 m apart)
 MODEL = "local-contact"
 
 FACTS = ("responsive", "hurt", "bleeding", "breathing_hard", "can_move", "cold", "can_walk")
@@ -233,14 +241,32 @@ class Contact:
         self.sessions: dict[str, Session] = {}
         self.active: str | None = None
         self.queue: list[str] = []
+        self.scout: list[float] | None = None          # the Scout's sensor position, from sensors/scout
+        self.where: dict[str, list[float]] = {}        # casualty id -> pos from map/casualties
 
     # -- in --
     def on_casualties(self, casualties: list[dict[str, Any]], now: float | None = None) -> list[tuple[str, Any]]:
         now = self.clock() if now is None else now
         for c in sorted(casualties, key=lambda c: -c.get("confidence", 0)):
+            if c.get("pos"):
+                self.where[c["id"]] = list(c["pos"])
             if c.get("confidence", 0) >= START_CONFIDENCE and c["id"] not in self.sessions and c["id"] not in self.queue:
                 self.queue.append(c["id"])
         return self._start_next(now)
+
+    def on_scout(self, pos, now: float | None = None) -> list[tuple[str, Any]]:
+        """The Scout's position (sensors/scout pose.pos): a queued casualty may now be in range."""
+        now = self.clock() if now is None else now
+        self.scout = list(pos)
+        return self._start_next(now)
+
+    def in_range(self, cid: str) -> bool:
+        """Whether casualty `cid` can hear the Scout: within HEAR_M and on its floor (True if unknown)."""
+        c = self.where.get(cid)
+        if self.scout is None or c is None:
+            return True
+        far = ((c[0] - self.scout[0]) ** 2 + (c[1] - self.scout[1]) ** 2) ** 0.5 > HEAR_M
+        return not far and (len(c) < 3 or len(self.scout) < 3 or abs(c[2] - self.scout[2]) <= SAME_FLOOR_M)
 
     def on_world_change(self, data: dict[str, Any], now: float | None = None) -> list[tuple[str, Any]]:
         now = self.clock() if now is None else now
@@ -292,6 +318,9 @@ class Contact:
         if now - s.started >= MAX_S:
             return self._end(s, now, "done", f"time cap {MAX_S:.0f} s reached")
         if s.waiting and now - s.said_at >= REPLY_WAIT_S:
+            if not self.in_range(s.cid):   # nobody could hear it: not silence, wait for the Scout
+                s.said_at = now
+                return []
             s.silent += 1
             if s.silent >= MAX_SILENT:
                 return self._end(s, now, "unresponsive", f"no answer to {s.silent} lines")
@@ -301,9 +330,12 @@ class Contact:
 
     # -- helpers --
     def _start_next(self, now):
-        if self.active or not self.queue:
+        if self.active:
             return []
-        cid = self.queue.pop(0)
+        cid = next((q for q in self.queue if self.in_range(q)), None)
+        if cid is None:
+            return []
+        self.queue.remove(cid)
         s = self.sessions[cid] = Session(cid, now)
         self.active = cid
         return self._say(s, "hear", now)
@@ -412,7 +444,13 @@ def start(bus, *, clock=None, gem=None):
     async def on_change(data):
         await emit(c.on_world_change(data))
 
+    async def on_scout(data):
+        pos = (data.get("pose") or {}).get("pos")
+        if pos:
+            await emit(c.on_scout(pos))
+
     bus.subscribe("map/casualties", on_cas)
     bus.subscribe("casualty/reply", on_reply)
     bus.subscribe("world/change", on_change)
+    bus.subscribe("sensors/scout", on_scout)
     return c
