@@ -1,0 +1,472 @@
+"""Build the console's demo model (ref A1): one GLB with the tower, its basements and core, the robots and
+the first aid kit, from the free assets fetched by sim/assets/fetch.py.
+
+    python3 sim/assets/fetch.py
+    uv run --no-project --python 3.11 --with bpy --with mujoco python sim/assets/build_glb.py [--preview out.png]
+
+Writes console/public/models/aftershock.glb (scene frame: metres, z up, NOT converted to glTF's y up),
+the HDRI next to it and CREDITS.json. Headless Blender (the bpy wheel) does the modelling and export.
+
+Nodes, so the console can find them by name:
+  building/      b1..b27, one mesh per tower block, named by its block id (scene/loaded "id") and posed
+                 as in tower.xml; rebar_* rods and the ground (with the excavation pit) are visual extras
+  annex/         the basements and stair/lift core from sim/assets/annex.py (same boxes as the MuJoCo
+                 collision scene sim/scenes/tower_annex.xml), plus visual debris on B1 and in the pit
+  scout          menagerie Unitree Go1 in its home pose, fitted to the tower scene's Scout footprint
+  responder      Quaternius Rover, fitted to the tower scene's Responder footprint (0.32 x 0.14 m)
+  first_aid_kit  Quaternius First Aid Kit, fitted to the scene's kit box
+Robot and kit origins are on the ground under their centre, facing +x, like the sim's mocap bodies.
+Casualties are NOT in the model: where people are is what perception has to find.
+
+Ground-storey geometry stays inside its MuJoCo boxes: rubble and broken edges are only ever pushed
+inwards, so the model never shows an obstacle where the simulator has free space.
+"""
+
+import argparse
+import importlib.util
+import json
+import math
+import pathlib
+import random
+import shutil
+import sys
+
+import mujoco
+import numpy as np
+
+# isort: off
+import bpy  # the bpy wheel only makes bmesh and mathutils importable after bpy itself
+import bmesh
+from mathutils import Matrix, Vector, noise
+# isort: on
+
+HERE = pathlib.Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
+CACHE = HERE / "cache"
+TOWER = ROOT / "sim" / "scenes" / "tower.xml"
+OUT_DIR = ROOT / "console" / "public" / "models"
+GLB = OUT_DIR / "aftershock.glb"
+UV_TILE_M = 0.75         # one texture repeat per 0.75 m: brick courses in proportion to 0.3 m robots
+SATURATION = 0.25        # the Poly Haven texture is red-painted; keep a trace of the paint, mostly grey
+MAX_MB = 20.0
+
+
+def _module(name):
+    spec = importlib.util.spec_from_file_location(name, HERE / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+annex = _module("annex")
+fetch = _module("fetch")
+
+
+# ---------------------------------------------------------------- materials
+
+def concrete(name, tint, rough_scale=1.0):
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes["Principled BSDF"]
+    diff = nt.nodes.new("ShaderNodeTexImage")
+    diff.image = _image("concrete_diff_1k.jpg", "sRGB")
+    tint_node = nt.nodes.new("ShaderNodeMix")
+    tint_node.data_type = "RGBA"
+    tint_node.blend_type = "MULTIPLY"
+    tint_node.inputs["Factor"].default_value = 1.0
+    tint_node.inputs[7].default_value = (*tint, 1.0)          # B colour input
+    nt.links.new(diff.outputs["Color"], tint_node.inputs[6])  # A colour input
+    nt.links.new(tint_node.outputs[2], bsdf.inputs["Base Color"])
+    rough = nt.nodes.new("ShaderNodeTexImage")
+    rough.image = _image("concrete_rough_1k.jpg", "Non-Color")
+    nt.links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
+    nor = nt.nodes.new("ShaderNodeTexImage")
+    nor.image = _image("concrete_nor_gl_1k.jpg", "Non-Color")
+    nmap = nt.nodes.new("ShaderNodeNormalMap")
+    nmap.inputs["Strength"].default_value = rough_scale
+    nt.links.new(nor.outputs["Color"], nmap.inputs["Color"])
+    nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+    return mat
+
+
+def flat(name, rgba, metallic=0.0, roughness=0.6):
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes["Principled BSDF"]
+    bsdf.inputs["Base Color"].default_value = rgba
+    bsdf.inputs["Metallic"].default_value = metallic
+    bsdf.inputs["Roughness"].default_value = roughness
+    return mat
+
+
+_images = {}
+
+
+def _image(fname, colorspace):
+    if fname not in _images:
+        path = CACHE / fname
+        if fname == "concrete_diff_1k.jpg":
+            path = _desaturated(path)
+        img = bpy.data.images.load(str(path))
+        img.colorspace_settings.name = colorspace
+        _images[fname] = img
+    return _images[fname]
+
+
+def _desaturated(src):
+    """A grey copy of the diffuse texture (baked, because glTF cannot carry Blender's colour nodes)."""
+    out = src.with_name(src.stem + "_grey.jpg")
+    img = bpy.data.images.load(str(src))
+    px = np.empty(len(img.pixels), dtype=np.float32)
+    img.pixels.foreach_get(px)
+    rgba = px.reshape(-1, 4)
+    lum = rgba[:, :3] @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    rgba[:, :3] = lum[:, None] + (rgba[:, :3] - lum[:, None]) * SATURATION
+    img.pixels.foreach_set(rgba.ravel())
+    img.filepath_raw = str(out)
+    img.file_format = "JPEG"
+    img.save()
+    bpy.data.images.remove(img)
+    return out
+
+
+# ---------------------------------------------------------------- meshes
+
+def box_mesh(name, half, cuts=0):
+    """A box mesh centred on the origin with half-extents `half`, optionally subdivided."""
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=2.0)
+    for v in bm.verts:
+        v.co = Vector((v.co.x * half[0], v.co.y * half[1], v.co.z * half[2]))
+    if cuts:
+        bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=cuts, use_grid_fill=True)
+    return bm
+
+
+def roughen(bm, half, depth, seed):
+    """Push vertices inwards by up to `depth` x the smallest half-extent: a chunk, never larger than its box."""
+    m = min(half) * depth
+    off = Vector((seed * 1.7, seed * 3.1, seed * 0.7))
+    for v in bm.verts:
+        n = noise.noise(v.co * 9.0 + off) * 0.5 + 0.5
+        inward = Vector((-v.co.x / half[0], -v.co.y / half[1], -v.co.z / half[2]))
+        v.co += Vector((inward.x * half[0], inward.y * half[1], inward.z * half[2])).normalized() * (m * n)
+
+
+def break_face(bm, half, axis, sign, depth, seed):
+    """Jag one face: its vertices move inwards (along -axis) by a noisy amount up to `depth` metres."""
+    i = "xyz".index(axis)
+    rng = random.Random(seed)
+    for v in bm.verts:
+        if abs(v.co[i] - sign * half[i]) < 1e-6:
+            n = noise.noise(v.co * 6.0 + Vector((seed, 0, 0))) * 0.5 + 0.5
+            v.co[i] -= sign * depth * (0.35 + 0.65 * n) * rng.uniform(0.7, 1.0)
+
+
+def to_object(name, bm, mat, matrix, parent):
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    obj = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(obj)
+    obj.matrix_world = matrix
+    obj.parent = parent
+    obj.matrix_parent_inverse = Matrix.Identity(4)
+    if mat:
+        me.materials.append(mat)
+        box_uv(obj)
+    return obj
+
+
+def box_uv(obj):
+    """World-space box mapping: each face takes the two world axes across its normal, so textures keep
+    their real size on every block whatever its scale or rotation."""
+    me = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    uv = bm.loops.layers.uv.new("UVMap")
+    mw = obj.matrix_world
+    rot = mw.to_3x3()
+    for f in bm.faces:
+        n = rot @ f.normal
+        a = max(range(3), key=lambda k: abs(n[k]))
+        u, w = [k for k in range(3) if k != a]
+        for loop in f.loops:
+            p = mw @ loop.vert.co
+            loop[uv].uv = (p[u] / UV_TILE_M, p[w] / UV_TILE_M)
+    bm.to_mesh(me)
+    bm.free()
+
+
+def empty(name, parent=None):
+    e = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(e)
+    e.parent = parent
+    return e
+
+
+def pose_matrix(pos, xmat):
+    r = np.asarray(xmat).reshape(3, 3)
+    m = Matrix(((r[0, 0], r[0, 1], r[0, 2], pos[0]),
+                (r[1, 0], r[1, 1], r[1, 2], pos[1]),
+                (r[2, 0], r[2, 1], r[2, 2], pos[2]),
+                (0, 0, 0, 1)))
+    return m
+
+
+# ---------------------------------------------------------------- the tower
+
+BROKEN = {                 # block id: (axis, side, depth m) of the broken face (inwards only)
+    "b9": ("x", 1, 0.10),      # F1 ledge over the collapsed east room
+    "b14": ("x", 1, 0.08),     # F2 east edge
+    "b15": ("z", 1, 0.25),     # broken storey-3 west wall
+    "b16": ("z", 1, 0.25),     # broken storey-3 north wall
+    "b13": ("z", 1, 0.12),     # storey-2 east wall, cracked top
+    "b17": ("x", -1, 0.06),    # lean-to slab, sheared end
+    "b23": ("y", 1, 0.06),     # pancake slab
+}
+
+
+def tower(mats, root):
+    m = mujoco.MjModel.from_xml_path(str(TOWER))
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    out = {}
+    for b in range(m.nbody):
+        name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) or ""
+        if not (name.startswith("b") and name[1:].isdigit()):
+            continue
+        g = m.body_geomadr[b]
+        gname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, g) or ""
+        label = gname.split("_", 1)[1] if "_" in gname else "block"
+        half = [float(v) for v in m.geom_size[g]]
+        seed = int(name[1:])
+        if label == "rubble":
+            bm = box_mesh(name, half, cuts=4)
+            roughen(bm, half, 0.45, seed)
+        elif name in BROKEN:
+            axis, side, depth = BROKEN[name]
+            bm = box_mesh(name, half, cuts=8)
+            break_face(bm, half, axis, side, min(depth, 1.6 * half["xyz".index(axis)]), seed)
+        else:
+            bm = box_mesh(name, half)
+        mat = mats.get(label, mats["wall"])
+        obj = to_object(name, bm, mat, pose_matrix(d.geom_xpos[g], d.geom_xmat[g]), root)
+        obj["label"] = label
+        out[name] = (obj, half, d.geom_xpos[g].copy())
+    return out
+
+
+def rebar(blocks, mat, root):
+    """Rods sticking out of the broken slab edges (visual only, 6 mm, drooping)."""
+    rng = random.Random(7)
+    k = 0
+    for bid in ("b9", "b14"):
+        _obj, half, pos = blocks[bid]
+        x_edge = pos[0] + half[0] - 0.04
+        for y in np.arange(pos[1] - half[1] + 0.12, pos[1] + half[1] - 0.1, 0.22):
+            length = rng.uniform(0.08, 0.26)
+            droop = rng.uniform(5, 35)
+            z = pos[2] + rng.uniform(-0.6, 0.6) * half[2]
+            bm = bmesh.new()
+            bmesh.ops.create_cone(bm, cap_ends=True, segments=6, radius1=0.006, radius2=0.006, depth=length)
+            bmesh.ops.translate(bm, verts=bm.verts, vec=Vector((0, 0, length / 2)))
+            mw = (Matrix.Translation((x_edge, float(y), z))
+                  @ Matrix.Rotation(math.radians(90 + droop), 4, "Y"))
+            to_object(f"rebar_{k}", bm, mat, mw, root)
+            k += 1
+
+
+def ground(mat, root):
+    """The ground around the tower with the excavation pit east of it and a hole over the core."""
+    z0, z1 = -0.1, 0.0
+    pieces = [  # (lo, hi) in x/y; the pit is x 2.05..3.2, y -1.55..1.55; the core is x -2.95..-2.05
+        ((-4.5, -4.5), (4.5, -1.65)),
+        ((-4.5, 1.65), (4.5, 4.5)),
+        ((-4.5, -1.65), (-2.95, 1.65)),
+        ((-2.05, -1.65), (2.05, 1.65)),
+        ((3.3, -1.65), (4.5, 1.65)),
+        ((-2.95, -1.65), (-2.05, -1.55)),
+        ((-2.95, 1.55), (-2.05, 1.65)),
+        ((2.05, -1.65), (3.3, -1.55)),
+        ((2.05, 1.55), (3.3, 1.65)),
+    ]
+    for i, (lo, hi) in enumerate(pieces):
+        half = [(hi[0] - lo[0]) / 2, (hi[1] - lo[1]) / 2, (z1 - z0) / 2]
+        c = ((hi[0] + lo[0]) / 2, (hi[1] + lo[1]) / 2, (z1 + z0) / 2)
+        to_object(f"ground_{i}", box_mesh("g", half), mat, Matrix.Translation(c), root)
+
+
+def build_annex(mats, root):
+    for name, label, lo, hi in annex.boxes():
+        half = [(b - a) / 2 for a, b in zip(lo, hi, strict=True)]
+        c = [(a + b) / 2 for a, b in zip(lo, hi, strict=True)]
+        mat = mats["lift"] if label == "lift" else mats["slab"] if label in ("slab", "stair") else mats["wall"]
+        to_object(name, box_mesh(name, half), mat, Matrix.Translation(c), root)
+    rng = random.Random(11)
+    piles = [((0.5, -1.3, -1.0), (1.9, 1.3, -1.0), 28),     # B1 under the collapsed east room
+             ((2.2, -1.4, -3.0), (3.1, 1.4, -3.0), 14)]     # spoil in the pit
+    k = 0
+    for lo, hi, n in piles:
+        for _ in range(n):
+            half = [rng.uniform(0.04, 0.16), rng.uniform(0.04, 0.12), rng.uniform(0.03, 0.08)]
+            bm = box_mesh("d", half, cuts=3)
+            roughen(bm, half, 0.5, k + 100)
+            c = (rng.uniform(lo[0], hi[0]), rng.uniform(lo[1], hi[1]), lo[2] + half[2] * 0.8)
+            mw = Matrix.Translation(c) @ Matrix.Rotation(rng.uniform(0, math.pi), 4, "Z") \
+                @ Matrix.Rotation(rng.uniform(-0.4, 0.4), 4, "X")
+            to_object(f"debris_{k}", bm, mats["rubble"], mw, root)
+            k += 1
+
+
+# ---------------------------------------------------------------- robots and kit
+
+def footprint(name):
+    """Half-extents of a geom in the tower scene (the robots' chassis boxes and the kit)."""
+    m = mujoco.MjModel.from_xml_path(str(TOWER))
+    return [float(v) for v in m.geom_size[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, name)]]
+
+
+def fit(root, objs, half, *, keep_height=False):
+    """Uniformly scale and move `objs` (already posed in world space) so their xy bounds fit inside the
+    box `half`, centred, standing on z 0; then parent them to `root` at the origin."""
+    bpy.context.view_layer.update()
+    pts = [o.matrix_world @ Vector(c) for o in objs for c in o.bound_box]
+    lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
+    hi = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
+    size = hi - lo
+    s = min(2 * half[0] / size.x, 2 * half[1] / size.y)
+    if not keep_height:
+        s = min(s, 2 * half[2] / size.z) if len(half) > 2 and half[2] > 0 else s
+    centre = Vector(((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, lo.z))
+    mw = Matrix.Diagonal((s, s, s, 1)) @ Matrix.Translation(-centre)
+    for o in objs:
+        o.matrix_world = mw @ o.matrix_world
+        o.parent = root
+        o.matrix_parent_inverse = Matrix.Identity(4)
+    return s, size * s
+
+
+def scout(root):
+    """Menagerie Go1 in its home keyframe: MuJoCo's own processed mesh vertices, posed by geom_xpos/xmat."""
+    m = mujoco.MjModel.from_xml_path(str(CACHE / "go1" / "go1.xml"))
+    d = mujoco.MjData(m)
+    mujoco.mj_resetDataKeyframe(m, d, 0)
+    mujoco.mj_forward(m, d)
+    mats = {}
+    objs = []
+    for g in range(m.ngeom):
+        if m.geom_type[g] != mujoco.mjtGeom.mjGEOM_MESH or m.geom_contype[g] or m.geom_conaffinity[g]:
+            continue                                   # visual meshes only
+        mid = m.geom_dataid[g]
+        va, vn = m.mesh_vertadr[mid], m.mesh_vertnum[mid]
+        fa, fn = m.mesh_faceadr[mid], m.mesh_facenum[mid]
+        verts = [tuple(v) for v in m.mesh_vert[va:va + vn]]
+        faces = [tuple(int(i) for i in f) for f in m.mesh_face[fa:fa + fn]]
+        rgba = tuple(m.mat_rgba[m.geom_matid[g]]) if m.geom_matid[g] >= 0 else tuple(m.geom_rgba[g])
+        key = tuple(round(c, 2) for c in rgba)
+        if key not in mats:
+            mats[key] = flat(f"go1_{len(mats)}", rgba, metallic=0.2, roughness=0.45)
+        me = bpy.data.meshes.new(f"go1_{g}")
+        me.from_pydata(verts, [], faces)
+        me.materials.append(mats[key])
+        obj = bpy.data.objects.new(f"scout_part_{g}", me)
+        bpy.context.collection.objects.link(obj)
+        obj.matrix_world = pose_matrix(d.geom_xpos[g], d.geom_xmat[g])
+        if len(faces) > 6000:
+            dec = obj.modifiers.new("decimate", "DECIMATE")
+            dec.ratio = 6000 / len(faces)
+        objs.append(obj)
+    half = footprint("scout_chassis")
+    return fit(root, objs, half, keep_height=True)
+
+
+def imported(path):
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=str(path))
+    new = [o for o in bpy.data.objects if o not in before]
+    for o in new:                                 # glTF import adds a y-up -> z-up rotation on the roots
+        if o.parent is None:
+            o.matrix_world = o.matrix_world
+    return [o for o in new if o.type == "MESH"], [o for o in new if o.type != "MESH"]
+
+
+def placed(root, path, half, yaw_deg=0.0, keep_height=True):
+    meshes, others = imported(path)
+    bpy.context.view_layer.update()
+    for o in meshes:
+        o.matrix_world = Matrix.Rotation(math.radians(yaw_deg), 4, "Z") @ o.matrix_world.copy()
+        o.parent = None
+    bpy.context.view_layer.update()
+    for o in others:
+        bpy.data.objects.remove(o)
+    return fit(root, meshes, half, keep_height=keep_height)
+
+
+# ---------------------------------------------------------------- main
+
+def build(preview=None, rover_yaw=0.0, kit_yaw=0.0):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    mats = {
+        "wall": concrete("wall", (0.92, 0.86, 0.76)),
+        "slab": concrete("slab", (0.78, 0.78, 0.8)),
+        "rubble": concrete("rubble", (0.62, 0.57, 0.52), 1.5),
+        "ground": concrete("ground", (0.55, 0.55, 0.56), 0.6),
+        "lift": flat("lift", (0.45, 0.48, 0.52, 1), metallic=0.8, roughness=0.35),
+        "rebar": flat("rebar", (0.35, 0.22, 0.15, 1), metallic=0.7, roughness=0.6),
+    }
+    building = empty("building")
+    blocks = tower(mats, building)
+    rebar(blocks, mats["rebar"], building)
+    ground(mats["ground"], building)
+    build_annex(mats, empty("annex"))
+    report = {"blocks": sorted(blocks, key=lambda b: int(b[1:]))}
+    s, size = scout(empty("scout"))
+    report["scout"] = {"scale": round(s, 4), "size_m": [round(v, 3) for v in size]}
+    s, size = placed(empty("responder"), CACHE / "rover.glb", footprint("responder_chassis"), rover_yaw)
+    report["responder"] = {"scale": round(s, 4), "size_m": [round(v, 3) for v in size]}
+    s, size = placed(empty("first_aid_kit"), CACHE / "first_aid_kit.glb", footprint("first_aid_kit_supply"),
+                     kit_yaw, keep_height=False)
+    report["first_aid_kit"] = {"scale": round(s, 4), "size_m": [round(v, 3) for v in size]}
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    bpy.ops.export_scene.gltf(filepath=str(GLB), export_format="GLB", export_yup=False, export_apply=True,
+                              export_image_format="AUTO", export_extras=True, export_cameras=False,
+                              export_lights=False)
+    shutil.copyfile(CACHE / "parking_garage_1k.hdr", OUT_DIR / "parking_garage_1k.hdr")
+    (OUT_DIR / "CREDITS.json").write_text(json.dumps(fetch.CREDITS, indent=2) + "\n")
+    mb = GLB.stat().st_size / 1e6
+    report["glb_mb"] = round(mb, 2)
+    print(json.dumps(report))
+    if mb > MAX_MB:
+        raise SystemExit(f"{GLB} is {mb:.1f} MB, over the {MAX_MB} MB budget")
+    if preview:
+        render(preview)
+
+
+def render(path):
+    scene = bpy.context.scene
+    cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam"))
+    scene.collection.objects.link(cam)
+    cam.location = (7.5, -8.0, 6.5)
+    cam.rotation_euler = (Vector((0.0, 0.0, -0.8)) - cam.location).to_track_quat("-Z", "Y").to_euler()
+    scene.camera = cam
+    sun = bpy.data.objects.new("sun", bpy.data.lights.new("sun", "SUN"))
+    sun.rotation_euler = (0.7, 0.2, 0.8)
+    scene.collection.objects.link(sun)
+    scene.render.engine = "BLENDER_WORKBENCH"
+    scene.display.shading.light = "STUDIO"
+    scene.display.shading.color_type = "TEXTURE"
+    scene.render.resolution_x, scene.render.resolution_y = 1280, 800
+    scene.render.filepath = str(path)
+    bpy.ops.render.render(write_still=True)
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--preview", help="also render a PNG preview to this path")
+    ap.add_argument("--rover-yaw", type=float, default=90.0, help="degrees, turns the rover to face +x")
+    ap.add_argument("--kit-yaw", type=float, default=0.0)
+    args = ap.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:])
+    build(args.preview, args.rover_yaw, args.kit_yaw)
