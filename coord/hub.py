@@ -5,17 +5,25 @@ import importlib
 import inspect
 import json
 import logging
+import os
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from coord.messages import Envelope, validate_payload
+from coord.points import PointCloudPublisher
 
 log = logging.getLogger(__name__)
 LANES = ("sim", "perception", "planner", "voice")
 BROWSER_TOPICS = {"operator/command", "gate/answer", "status/link"}
+LATEST_TOPICS = {"map/points"}
+# LIVE-UI: the console dev server (vite, port 5173) may call the hub's HTTP routes, such as
+# POST /inject. HUB_CORS_ORIGINS="http://a:5173,http://b:5173" adds origins (a LAN address).
+CONSOLE_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+INJECT_KINDS = ("aftershock", "block_added")
 
 
 class Bus:
@@ -23,6 +31,7 @@ class Bus:
         self.subs = defaultdict(list)
         self.clients = set()
         self.history = deque(maxlen=200)
+        self.latest = {}  # large frame topics keep only their latest bounded message
         self._delivery_lock = asyncio.Lock()
 
     def subscribe(self, topic, fn):
@@ -34,7 +43,12 @@ class Bus:
         if topic != "sensors/scout":
             msg = {"topic": topic, "data": data}
             async with self._delivery_lock:
-                self.history.append(msg)
+                if topic == "scene/loaded":
+                    self.latest.pop("map/points", None)
+                if topic in LATEST_TOPICS:
+                    self.latest[topic] = msg
+                else:
+                    self.history.append(msg)
                 for client in tuple(self.clients):
                     try:
                         await client.send_text(json.dumps(msg, allow_nan=False))
@@ -54,6 +68,8 @@ class Bus:
         async with self._delivery_lock:
             for msg in self.history:
                 await websocket.send_text(json.dumps(msg))
+            for msg in self.latest.values():
+                await websocket.send_text(json.dumps(msg))
             self.clients.add(websocket)
 
 
@@ -68,12 +84,24 @@ async def publish_gemini_status(target_bus, gem, interval=2):
     forwarded = set()
     while True:
         await target_bus.publish("status/gemini", gem.status())
-        history = getattr(gem, "receipts", list)()
-        for receipt in history:
-            if receipt["id"] not in forwarded:
-                await target_bus.publish("gemini/receipt", receipt)
-        # Bounded by gem's receipt ring. Each completed invocation is forwarded once.
-        forwarded = {receipt["id"] for receipt in history}
+        try:
+            history = getattr(gem, "receipts", list)()
+            current = set()
+            for receipt in history:
+                try:
+                    call_id = receipt["id"]
+                    if not isinstance(call_id, str) or not call_id:
+                        raise ValueError("invalid receipt ID")
+                    current.add(call_id)
+                    if call_id not in forwarded:
+                        await target_bus.publish("gemini/receipt", receipt)
+                        forwarded.add(call_id)  # only successful deliveries are deduplicated
+                except Exception as exc:  # noqa: BLE001 - isolate optional telemetry without logging private exception text
+                    log.warning("Gemini receipt delivery skipped (%s); will retry", type(exc).__name__)
+            # Bound deduplication to the current ring, retaining it if a snapshot fails.
+            forwarded.intersection_update(current)
+        except Exception as exc:  # noqa: BLE001 - optional provider snapshots must not kill the status loop
+            log.warning("Gemini receipt snapshot skipped (%s); will retry", type(exc).__name__)
         await asyncio.sleep(interval)
 
 
@@ -81,6 +109,8 @@ async def publish_gemini_status(target_bus, gem, interval=2):
 async def lifespan(application):
     tasks = []
     try:
+        points = PointCloudPublisher(bus)
+        tasks.append(asyncio.create_task(points.run()))
         for name in LANES:
             try:
                 lane = importlib.import_module(name)
@@ -118,13 +148,33 @@ async def lifespan(application):
         bus.subs.clear()
 
 
+def cors_origins(env=None):
+    extra = (os.environ if env is None else env).get("HUB_CORS_ORIGINS", "")
+    added = [origin.strip() for origin in extra.split(",")]
+    return CONSOLE_ORIGINS + [origin for origin in added if origin and origin != "*"]
+
+
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins(),
+    allow_methods=["GET", "POST"],
+    allow_headers=["content-type"],
 )
+
+
+@app.post("/inject")
+async def inject_without_sim(request: Request):
+    """Stand-in for the sim's POST /inject (sim/inject.py), which replaces this route when the sim
+    lane runs on the hub. Without a live sim it answers 503 instead of 404, so the console can fall
+    back to its local demo. It never publishes: world/change only comes from the sim."""
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or body.get("kind") not in INJECT_KINDS:
+        return JSONResponse({"error": "kind must be block_added or aftershock"}, status_code=400)
+    return JSONResponse({"error": "no live sim on this hub"}, status_code=503)
 
 
 @app.websocket("/ws")

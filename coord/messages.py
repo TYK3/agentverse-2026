@@ -321,6 +321,13 @@ class Say(Message):
     lang: Text
 
 
+class CasualtyTriage(Message):
+    """An accepted supply choice; planner routing and movement gates still apply."""
+    id: Text
+    injuries: list[Text]
+    recommended_action: Literal["water", "first_aid_kit", "radio", "bandage", "splint", "thermal_blanket"]
+
+
 class CasualtyReply(Message):
     """G3: what one casualty said back (sim persona now, a microphone later), in English."""
     id: Text
@@ -378,6 +385,7 @@ TOPICS: dict[str, type[BaseModel]] = {
     "status/gemini": StatusGemini,
     "gemini/receipt": GeminiReceipt,
     "say": Say,
+    "casualty/triage": CasualtyTriage,
     "casualty/reply": CasualtyReply,
     "casualty/contact": CasualtyContact,
     "report/handover": ReportHandover,

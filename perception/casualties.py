@@ -40,9 +40,12 @@ CAM_FOVY = math.radians(60.0)   # sim/scenes/backup.xml scout_cam; horizontal FO
 AGREE_DEG = 12.0      # camera blob and thermal peak must point within this many degrees of each other
 MIN_BLOB = 0.002      # blob area as a fraction of the frame, below this it is noise
 CAM_STEP = 4          # check every 4th pixel each way (80x60 for a 320x240 frame)
-PROMPT = ('Is there a person-shaped figure lying or sitting in this image? Answer JSON only: '
-          '{"person": bool, "bbox": [x,y,w,h], "posture": "lying|sitting|standing|unknown"}. '
-          'Do not describe faces.')
+PROMPT = (
+    "Is there a person-shaped figure (or a red capsule/cylinder representing a trapped casualty "
+    "in this physics simulation) lying or sitting in this image? Answer JSON only: "
+    '{"person": bool, "bbox": [x,y,w,h], "posture": "lying|sitting|standing|unknown"}. '
+    "Do not describe faces."
+)
 
 try:
     from coord import gem
@@ -240,6 +243,7 @@ class Casualties:
             if math.dist(c["pos"], xy) < MERGE:
                 before = self._entry(c, 0)
                 c["pos"] = xy
+                c["z"] = z
                 c["thermal"] = max(c["thermal"], thermal)
                 c["sound"] = max(c["sound"], sound)
                 return self._entry(c, 0) != before
@@ -289,7 +293,7 @@ def local_person(b64, thermal_rel):
     for j, y in enumerate(rows):
         for i, x in enumerate(cols):
             r, g, b = px[x, y]
-            if r > 140 and r > 1.5 * g and r > 1.5 * b:
+            if r > 90 and r > 1.5 * g and r > 1.5 * b:
                 warm.add((i, j))
     best, seen = None, set()
     for start in warm:
@@ -330,8 +334,8 @@ def gem_ask(prompt, b64):
     if gem is None:
         return None
     try:
-        contents = [{"role": "user", "parts": [{"inline_data": {"mime_type": "image/jpeg", "data": b64}},
-                                               {"text": prompt}]}]
+        contents = [{"type": "image", "mime_type": "image/jpeg", "data": b64},
+                    {"type": "text", "text": prompt}]
         return gem.ask("fast_subagent", contents, thinking="low", feature="vision")
     except gem.GeminiOff:
         gem.mark_stand_in("vision")
