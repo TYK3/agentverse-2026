@@ -12,6 +12,7 @@ import types
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from voice import speak, translate
 
@@ -178,3 +179,43 @@ def test_subscribe_registers_handler():
     speak.subscribe(bus)
     assert "say" in bus.handlers
     assert bus.handlers["say"] == speak.handle_say
+
+
+def _wav(frames: bytes, rate: int = 24000) -> bytes:
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(frames)
+    return buf.getvalue()
+
+
+def test_wav_from_tts_is_played_without_its_header(monkeypatch, tmp_path):
+    """The live TTS returns audio/wav (#76 live test); the RIFF header must not be played as samples."""
+    monkeypatch.setenv("GEMINI_MODE", "live")
+    _, _, modules = _fake_gem(tmp_path, audio=_wav(b"\x01\x00\x02\x00\x03\x00"))
+    sd = _fake_sd()
+    with patch.dict("sys.modules", {**modules, "sounddevice": sd}):
+        res = speak.speak_text("Help is coming.")
+    assert res["spoken"] is True
+    samples, rate = sd.play.call_args.args
+    assert samples.tolist() == [1, 2, 3] and rate == 24000
+
+
+def test_decode_raw_pcm_and_rejects_8_bit_wav():
+    assert speak.decode(b"\x01\x00\x02") == (b"\x01\x00", 24000, 1)
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(1)
+        wf.setframerate(8000)
+        wf.writeframes(b"\x80\x80")
+    with pytest.raises(ValueError):
+        speak.decode(buf.getvalue())
