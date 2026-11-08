@@ -1,5 +1,6 @@
 """Load a MuJoCo scene and describe its blocks for the scene/loaded message (T03)."""
 
+import os
 import pathlib
 import re
 
@@ -7,6 +8,22 @@ import mujoco
 
 SCENES = pathlib.Path(__file__).parent / "scenes"
 BACKUP = SCENES / "backup.xml"
+TOWER = SCENES / "tower.xml"
+NAMED = {"backup": BACKUP, "tower": TOWER}
+
+
+def resolve(name=None):
+    """(scene name, path) for a scene name: `backup` (default), `tower`, or an MJCF path (name: its stem).
+
+    With no name, the SIM_SCENE environment variable picks it.
+    """
+    name = name or os.environ.get("SIM_SCENE") or "backup"
+    if name in NAMED:
+        return name, NAMED[name]
+    path = pathlib.Path(name)
+    if not path.is_file():
+        raise ValueError(f"SIM_SCENE={name!r}: not one of {sorted(NAMED)} and not an MJCF file")
+    return path.stem, path
 
 # Blocks are free bodies named b<number>; their geom is named b<number>_<label>.
 _BLOCK = re.compile(r"^b\d+$")
