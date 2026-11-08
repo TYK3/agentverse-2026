@@ -1,0 +1,9 @@
+#interior-panel { position: absolute; top: 4.2rem; left: 1rem; z-index: 12; width: min(350px, calc(100% - 2rem)); max-height: 42%; overflow: auto; background: #101e30ed; border: 1px solid #38536d; border-radius: 8px; padding: .7rem; font-size: .75rem; }
+#interior-panel summary { cursor: pointer; color: #e2e8f0; font-weight: 650; }
+#interior-panel p { margin: .5rem 0; color: #b8c8da; line-height: 1.4; }
+#interior-panel output { display: block; margin-top: .5rem; color: #dbeafe; }
+#interior-panel select { max-width: 100%; background: #15273b; color: #e2e8f0; margin-top: .5rem; }
+.interior-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+#interior-panel button { font-size: .75rem; padding: .3rem .5rem; cursor: pointer; }
+#interior-panel .interior-key span { color: #38bdf8; }
+#interior-casualties { list-style: none; padding: 0; display: grid; gap: .3rem; }
