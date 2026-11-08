@@ -88,6 +88,32 @@ const COLOR_HAZARD_AT_RISK = new THREE.Color(0xf59e0b); // Amber
 const COLOR_HAZARD_COLLAPSED = new THREE.Color(0xef4444); // Red
 const COLOR_HAZARD_STABLE = new THREE.Color(0x8a9ba8); // Stable = regular grey
 
+/** Metres the Responder stops short of a casualty (its body is 0.32 m long): beside them, not on them. */
+export const CASUALTY_STANDOFF_M = 0.35;
+
+/** Where the Responder stops on a route (scene metres, xy): the route end, unless that is within
+ *  `standoff` of a casualty, then the last point along the route that is `standoff` away from them. */
+export function stopBesideCasualty(route: [number, number][], casualties: [number, number][],
+  standoff = CASUALTY_STANDOFF_M): [number, number] {
+  const end = route[route.length - 1];
+  const dist = (a: [number, number], b: [number, number]): number => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const near = casualties.filter(c => dist(end, c) < standoff)
+    .sort((a, b) => dist(end, a) - dist(end, b))[0];
+  if (!near) return end;
+  for (let i = route.length - 1; i > 0; i--) {
+    const a = route[i - 1], b = route[i];
+    if (dist(a, near) < standoff) continue;
+    let lo = 0, hi = 1;  // dist(a) >= standoff > dist(b): find the crossing on a -> b
+    for (let k = 0; k < 30; k++) {
+      const mid = (lo + hi) / 2;
+      const p: [number, number] = [a[0] + (b[0] - a[0]) * mid, a[1] + (b[1] - a[1]) * mid];
+      if (dist(p, near) >= standoff) lo = mid; else hi = mid;
+    }
+    return [a[0] + (b[0] - a[0]) * lo, a[1] + (b[1] - a[1]) * lo];
+  }
+  return route[0];
+}
+
 export class MapViewer {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
@@ -313,7 +339,7 @@ export class MapViewer {
     this.scoutGroup.add(heading);
 
     // Scout label sprite
-    const scoutLabel = this.createLabelSprite('Scout Rover (pose)', '#38bdf8');
+    const scoutLabel = this.createLabelSprite('Scout (pose)', '#38bdf8');
     scoutLabel.position.set(0, 0, 0.22);
     this.scoutGroup.add(scoutLabel);
 
@@ -387,6 +413,7 @@ export class MapViewer {
     const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
     const sprite = new THREE.Sprite(material);
     sprite.scale.set(0.7, 0.23, 1);
+    sprite.userData.label = text;  // read by the browser tests
     return sprite;
   }
 
@@ -656,9 +683,11 @@ export class MapViewer {
     if (payload.route && this.routesMap.has(payload.route)) {
       const route = this.routesMap.get(payload.route)!;
       if (route.cells && route.cells.length > 0) {
-        const lastCell = route.cells[route.cells.length - 1];
         const res = this.cellResolution;
-        this.responderGroup.position.set((lastCell[0] + 0.5) * res, (lastCell[1] + 0.5) * res, 0);
+        const points = route.cells.map(c => [(c[0] + 0.5) * res, (c[1] + 0.5) * res] as [number, number]);
+        const casualties = [...this.casualtiesMap.values()].map(c => [c.pos[0], c.pos[1]] as [number, number]);
+        const [x, y] = stopBesideCasualty(points, casualties);
+        this.responderGroup.position.set(x, y, 0);
       }
     }
   }
@@ -1126,7 +1155,9 @@ export class MapViewer {
         [Math.round(-0.8 / res), Math.round(-1.2 / res), 0],
         [Math.round(-0.65 / res), Math.round(-0.85 / res), 0],
         [Math.round(-0.05 / res), Math.round(0.25 / res), 0],
-        [Math.round(0.0 / res), Math.round(0.8 / res), 0]
+        [Math.round(0.0 / res), Math.round(0.8 / res), 0],
+        [Math.round(0.6 / res), Math.round(0.95 / res), 0],
+        [Math.round(1.95 / res), Math.round(0.98 / res), 0]  // ends at casualty c1
       ],
       goal: 'deliver water to c1',
       model: 'local-astar'
