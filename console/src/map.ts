@@ -964,9 +964,31 @@ export class MapViewer {
   }
 
   /**
-   * Helper to simulate aftershock and visible re-plan on demand
+   * "Simulate re-plan" button (LIVE-UI): ask the hub's live sim for a real aftershock via
+   * POST /inject; world/change, route/verified and the new route/proposed then arrive over the bus.
+   * Only in ?fake=1 or when no hub/sim answers does it play the local b7 demo below.
    */
   public simulateAftershockAndReplan(): void {
+    if (new URLSearchParams(window.location.search).get('fake') === '1') {
+      this.playLocalReplanDemo();
+      return;
+    }
+    fetch('http://localhost:8000/inject', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'aftershock' })
+    }).then(response => {
+      if (response.ok) return;
+      if (response.status === 409) { console.warn('[map] an aftershock is already running'); return; }
+      throw new Error(`hub /inject answered ${response.status}`);
+    }).catch(error => {
+      console.warn('[map] no live sim on the hub, playing the local re-plan demo', error);
+      this.playLocalReplanDemo();
+    });
+  }
+
+  /** Local stand-in for the button: a scripted b7 aftershock and re-plan, no hub involved. */
+  private playLocalReplanDemo(): void {
     const res = this.cellResolution;
 
     // 1. Fire aftershock
