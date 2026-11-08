@@ -40,6 +40,8 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `status/link` | sim, planner or console offline toggle | planner, console | `{"online":false}` |
 | `status/budget` | planner | console | `{"device":"<open>","mem_mb":0,"model":"gemma-4-e2b","ms_per_step":0,"limit":{...}}` |
 | `say` | planner | voice, console (shown as text) | `{"to":"casualty"\|"operator","intent":"first_aid"\|"guide_exit"\|"reassure","text":"...","lang":"auto"}` |
+| `casualty/reply` | sim (persona answers a `say` to the casualty), voice (mic speech-to-text, later) | voice, console | `{"id":"c1","t":12.3,"text":"yes, my leg hurts","source":"sim"\|"mic"\|"typed","level":0.6}` (G3: what one casualty said back, in English; `level` 0..1 optional loudness) |
+| `casualty/contact` | voice | planner (supply choice, Y2), console, report | `{"id":"c1","t":40.1,"status":"talking"\|"done"\|"unresponsive"\|"stopped","turns":4,"max_turns":8,"facts":{"responsive":true,"hurt":["leg"],"bleeding":false},"injuries":["leg hurts, may be broken"],"receipts":["gem-..."]}` (G3: the bounded dialogue so far; `facts` values are true/false/null or lists of short strings; `receipts` are coord.gem call ids) |
 | `report/handover` | planner | console | Map, casualties with confidence, hazards, routes and re-plans, supplies delivered, human approvals |
 | `status/gemini` | hub | console | `{"mode":"off"\|"replay"\|"live","calls_last_hour":0,"stand_ins":["vision","tts"]}`, published every 2 s from `coord.gem.status()` |
 | `gemini/receipt` | hub from `coord.gem` | console, report | Completed call receipt (G1), shape below; browser read-only |
