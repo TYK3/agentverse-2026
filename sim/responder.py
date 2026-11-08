@@ -56,6 +56,11 @@ SLOTS = {"water": (-0.1, 0.0, 0.11), "first_aid_kit": (0.0, 0.0, 0.08), "radio":
          "thermal_blanket": (0.0, 0.0, 0.122), "splint": (0.0, 0.0, 0.137), "bandage": (0.1, 0.0, 0.156)}
 BLOCK_SLOT_Z = 0.18         # above the tallest supply (water top is 0.17 over the Responder centre); add the block's half height
 PLACE_AHEAD = 0.08          # place_supply sets the item down this far in front of the chassis
+# KIT-SPOTS (#262): later items go beside earlier ones, not on them. Spots ahead of the gripper, nearest
+# first: centre, then PLACE_SIDE and twice that to each side, then a second row PLACE_ROW further out.
+PLACE_SIDE = 0.10           # metres between spots across the Responder's heading
+PLACE_ROW = 0.12            # metres between the two rows of spots
+PLACE_GAP = 0.02            # metres kept clear between a set-down item and any supply already on the floor
 
 
 def cell_centre(cell, res=RES):
@@ -320,10 +325,41 @@ class Responder:
         self.d.eq_active[self._eq("carry_" + item)] = 0
         if tag.startswith("place_supply"):
             # Set it down on the floor just in front of the gripper (toward the casualty), upright and still.
-            fwd = np.array([math.cos(self.yaw), math.sin(self.yaw)])
-            x, y = self._put_down(item, self.pos[:2] + fwd * (HALF_LEN + PLACE_AHEAD))
+            x, y = self._put_down(item, self._free_spot(item))
             return self._decide("done", f"placed {item} at [{x:.2f}, {y:.2f}]", tag)
         return self._decide("done", f"released {item}", tag)
+
+    def _footprint(self, name):
+        """Radius (m) of body `name`'s footprint on the floor: a cylinder's radius, a box's half diagonal."""
+        geom = self.m.body_geomadr[self.m.body(name).id]
+        size = self.m.geom_size[geom]
+        if self.m.geom_type[geom] == mujoco.mjtGeom.mjGEOM_CYLINDER:
+            return float(size[0])
+        return float(math.hypot(size[0], size[1]))
+
+    def _free_spot(self, item):
+        """Where to set `item` down: the nearest spot ahead of the gripper clear of every supply already on the
+        floor (not held), so a later item never lands on an earlier one (KIT-SPOTS, #262). The first item goes
+        straight ahead, as before. If every spot is taken, straight ahead."""
+        fwd = np.array([math.cos(self.yaw), math.sin(self.yaw)])
+        side = np.array([-fwd[1], fwd[0]])
+        ahead = self.pos[:2] + fwd * (HALF_LEN + PLACE_AHEAD)
+        down = [(self.d.xpos[self.m.body(n).id][:2].copy(), self._footprint(n))
+                for n in SUPPLIES if n != item and not self.holding(n) and self._has_body(n)]
+        r = self._footprint(item)
+        for row in (0.0, PLACE_ROW):
+            for k in (0, 1, -1, 2, -2):
+                xy = ahead + fwd * row + side * (k * PLACE_SIDE)
+                if all(np.linalg.norm(xy - p) >= r + q + PLACE_GAP for p, q in down):
+                    return xy
+        return ahead
+
+    def _has_body(self, name):
+        try:
+            self.m.body(name)
+        except KeyError:
+            return False
+        return True
 
     def _put_down(self, name, xy):
         """Lower free body `name` onto the floor at xy (upright, at rest); the gripper's last move."""
