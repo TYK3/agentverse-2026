@@ -248,6 +248,8 @@ class RoutePlanner:
         self.map_cells: dict | None = None
         self.hazards: list[dict] = []
         self._route_number = 0
+        # Deliberately sticky for B1: every ray-hit cell stays occupied for the run, even a scout_chassis
+        # hit (the Scout moves on, so that mark goes stale). Clearing Scout marks is follow-up work.
         self.ray_blocked: set[Cell] = set()
         subscribe = getattr(bus, "subscribe", None)
         if callable(subscribe):
