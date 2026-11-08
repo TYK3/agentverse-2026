@@ -155,6 +155,9 @@ the next route's start; if that position is unobserved, routing holds for a
 re-look rather than returning to the old origin. A permit re-earned by fresh
 observation re-proposes the paused delivery from that current pose and repeats
 physics/confidence checks. It does not replay the original route's waypoints.
+Any later permit revocation also cancels pending navigation approval/dispatch
+and waits for the next map update to check a detour. A later exclusion must not
+leave the delivery waiting indefinitely for the original route to reopen.
 
 On the Scout's fine grid, each candidate move checks the swept forward chassis
 footprint against measured occupied squares, including the collision guard's

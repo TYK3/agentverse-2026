@@ -208,3 +208,38 @@ def test_a_new_unseen_pose_cannot_replan_from_the_old_safe_start():
         assert len(world.topics("responder/action")) == before
         assert world.loop.waiting_scan
     asyncio.run(scenario())
+
+
+def test_later_hazard_revocation_replans_on_a_fresh_map_without_spending_an_attempt():
+    async def scenario():
+        world = await World().start()
+        await world.bus.publish("map/casualties", [casualty()])
+        old = world.topics("route/proposed")[-1]
+        danger = old["cells"][len(old["cells"])//2]
+        await world.bus.publish("map/hazards", [{"cell": danger, "status": "at_risk", "estimate": True,
+                                                "why": "newly observed debris motion", "exclusion": True}])
+        await world.bus.publish("permit/route", {"route": old["id"], "granted": False, "t": 2,
+                                                "reason": "sensed exclusion", "evidence": []})
+        before = len(world.topics("responder/action"))
+        await world.bus.publish("map/cells", map_cells())
+        new = world.topics("route/proposed")[-1]
+        assert new["id"] != old["id"] and danger not in new["cells"]
+        assert len(world.topics("responder/action")) == before + 3
+        assert world.handoff.active == "c1" and world.handoff.attempts["c1"] == 1
+    asyncio.run(scenario())
+
+
+def test_permit_revocation_cancels_queued_approval_without_losing_the_delivery():
+    async def scenario():
+        world = await World().start()
+        world.loop.defer_approved_actions = True
+        await world.bus.publish("map/casualties", [casualty(confidence=.4)])
+        req = world.topics("gate/request")[-1]
+        await world.bus.publish("gate/answer", {"id": req["id"], "approved": True, "by": "operator"})
+        await world.bus.publish("permit/route", {"route": req["route"], "granted": False, "t": 2,
+                                                "reason": "new LiDAR hit", "evidence": []})
+        await asyncio.sleep(0)
+        assert world.topics("responder/action") == []
+        assert world.handoff.active == "c1" and world.handoff.attempts["c1"] == 1
+        assert world.loop.waiting_scan
+    asyncio.run(scenario())

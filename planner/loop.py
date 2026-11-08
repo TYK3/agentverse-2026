@@ -368,6 +368,8 @@ class Loop:
     async def execute(self, *, approved_kind=None, expected_route=None):
         if expected_route is not None and (not self.route or self.route["id"] != expected_route):
             return await self.log("execution check", "hold", "stale dispatch discarded; route changed")
+        if self.route and self.route["id"] in self.revoked_permits:
+            return await self.log("execution check", "waiting", "move permit revoked; dispatch waits for a checked re-plan")
         kind, why = self.execution_risk()
         if kind == "hold":
             self.state = IDLE
@@ -396,14 +398,23 @@ class Loop:
         rid = data["route"]
         if not data["granted"]:
             self.revoked_permits.add(rid)
+            if self.route and self.route["id"] == rid and self.mission_args:
+                await self.cancel_request("move permit revoked")
+                self.state, self.verified_route = IDLE, None
+                await self.wait_for_scan("move permit revoked by sensed change")
+                self.last_try = float("-inf")
+                await self.log(f"move permit for {rid} revoked", "waiting",
+                               "Responder held; next map update checks a detour with physics and navigation gates")
             return
         was_revoked = rid in self.revoked_permits
         self.revoked_permits.discard(rid)
-        if was_revoked and self.route and self.route["id"] == rid and self.state == EXECUTING:
+        if (was_revoked and self.route and self.route["id"] == rid
+                and (self.state == EXECUTING or self.state == IDLE and self.waiting_scan)):
             async def resume():
                 # Let the sim lift its hold first. A new route starts at the measured pose
                 # and repeats physics/confidence checks rather than replaying old waypoints.
-                if self.route and self.route["id"] == rid and self.state == EXECUTING and rid not in self.revoked_permits:
+                if (self.route and self.route["id"] == rid and rid not in self.revoked_permits
+                        and (self.state == EXECUTING or self.state == IDLE and self.waiting_scan)):
                     await self.propose(f"move permit for {rid} re-earned by fresh observation; resume delivery")
             task = asyncio.create_task(resume())
             self._gate_tasks.add(task)
