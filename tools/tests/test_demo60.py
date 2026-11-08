@@ -99,3 +99,15 @@ def test_real_run_writes_a_summary(tmp_path):
     import json
     s = json.loads(out.read_text())
     assert s["steps"]["scene loaded"]["ok"] and set(s["passed"]) | set(s["failed"]) == set(STEPS)
+
+
+def test_a_short_move_seen_only_in_responder_pose_counts():
+    events = [e for e in full_run() if e[1] != "_probe/pose"]
+    events += [(6.0, "responder/pose", {"t": 5.5, "pos": [0, 0, 0.05], "yaw": 0, "state": "moving", "route": "r1",
+                                        "carrying": []}),
+               (8.4, "responder/pose", {"t": 8.0, "pos": [0, 0, 0.05], "yaw": 0, "state": "frozen", "route": "r1",
+                                        "carrying": []}),
+               (10.2, "responder/pose", {"t": 9.8, "pos": [0, 0, 0.05], "yaw": 0, "state": "moving", "route": "r2",
+                                         "carrying": []})]
+    s = evaluate(sorted(events, key=lambda e: e[0]))
+    assert s["failed"] == []
