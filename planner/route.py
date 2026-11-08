@@ -12,6 +12,12 @@ NEIGHBOURS = tuple(
 )
 CLEARANCE_M = 0.15
 CLEARANCE_COST = 5.0
+# X1 predictive hazards: an at_risk cell is a predicted failure, not a wall. Entering one costs as much
+# as a 50 m detour, so any real detour wins; a route that still needs one goes to the human gate
+# (enter_at_risk). Cells near a predicted failure cost a little extra, so routes keep a margin.
+RISK_COST = 50.0
+RISK_MARGIN_M = 0.15
+RISK_MARGIN_COST = 5.0
 
 
 class Bus(Protocol):
@@ -36,13 +42,13 @@ def _distance(a: Cell, b: Cell, res: float) -> float:
     return res * (max(dx, dy) + (sqrt(2) - 1) * min(dx, dy))
 
 
-def _clearance_cells(occupied: set[Cell], res: float) -> set[Cell]:
-    radius = ceil(CLEARANCE_M / res)
+def _clearance_cells(occupied: set[Cell], res: float, metres: float = CLEARANCE_M) -> set[Cell]:
+    radius = ceil(metres / res)
     offsets = [
         (dx, dy)
         for dx in range(-radius, radius + 1)
         for dy in range(-radius, radius + 1)
-        if hypot(dx, dy) * res <= CLEARANCE_M + 1e-12
+        if hypot(dx, dy) * res <= metres + 1e-12
     ]
     return {(x + dx, y + dy, 0) for x, y, _ in occupied for dx, dy in offsets}
 
@@ -108,22 +114,29 @@ def find_route(map_cells: dict, hazards: list[dict], start: Cell, goal: Cell) ->
     """Find the least-cost safe route, or request a re-look at the frontier.
 
     Cost is step length in metres plus 5 per entered cell whose centre is
-    within 0.15 m of an occupied ground cell. Missing, inferred, unknown,
-    occupied, at-risk and collapsed cells are never traversed. The route
-    includes both start and goal. No Gemini call or physics claim is made.
+    within 0.15 m of an occupied ground cell, 50 per entered at-risk cell and
+    5 per cell within 0.15 m of one (X1: predicted failures are avoided before
+    the aftershock, and entering one goes to the human gate). Missing,
+    inferred, unknown, occupied and collapsed cells, and hazards marked
+    "blocked" (physics-rejected), are never traversed. The route includes
+    both start and goal. No Gemini call or physics claim is made.
     """
     start, goal = _cell(start), _cell(goal)
     res, records = _read_map(map_cells)
-    blocked = set()
+    blocked, impassable, risky = set(), set(), set()
     for hazard in hazards:
         cell = _cell(hazard["cell"])
         if hazard["status"] not in ("stable", "at_risk", "collapsed"):
             raise ValueError("invalid hazard status")
         if hazard["status"] != "stable":
-            blocked.add(cell)
+            blocked.add(cell)                     # never a re-look target
+        if hazard["status"] == "collapsed" or hazard.get("blocked") is True:
+            impassable.add(cell)                  # collapsed, or rejected by the physics check
+        elif hazard["status"] == "at_risk":
+            risky.add(cell)
     safe = {
         c for c, r in records.items()
-        if c[2] == 0 and r["state"] == "seen" and not r["occupied"] and c not in blocked
+        if c[2] == 0 and r["state"] == "seen" and not r["occupied"] and c not in impassable
     }
     failure = {"status": "no_verified_route", "needs": "re-look", "cells": []}
     if start not in safe or goal[2] != 0:
@@ -131,6 +144,7 @@ def find_route(map_cells: dict, hazards: list[dict], start: Cell, goal: Cell) ->
 
     occupied = {c for c, r in records.items() if c[2] == 0 and r["occupied"]}
     clearance = _clearance_cells(occupied, res)
+    margin = _clearance_cells(risky, res, RISK_MARGIN_M) - risky
     costs = {start: 0.0}
     parents: dict[Cell, Cell] = {}
     queue = [(_distance(start, goal, res), 0.0, start)]
@@ -146,7 +160,8 @@ def find_route(map_cells: dict, hazards: list[dict], start: Cell, goal: Cell) ->
                 path.append(parents[path[-1]])
             return {"status": "ok", "cells": [list(c) for c in reversed(path)], "cost": cost}
         for other, step in _neighbours(current, safe):
-            candidate_cost = cost + step * res + (CLEARANCE_COST if other in clearance else 0)
+            candidate_cost = (cost + step * res + (CLEARANCE_COST if other in clearance else 0)
+                              + (RISK_COST if other in risky else RISK_MARGIN_COST if other in margin else 0))
             if candidate_cost < costs.get(other, float("inf")):
                 costs[other] = candidate_cost
                 parents[other] = current
@@ -184,7 +199,7 @@ class RoutePlanner:
         self.hazards = data
 
     async def propose(
-        self, start: Cell, goal: Cell, *, goal_text: str = "deliver water to c1"
+        self, start: Cell, goal: Cell, *, goal_text: str = "deliver water to c1", publish: bool = True
     ) -> dict:
         if self.map_cells is None:
             return {"status": "no_verified_route", "needs": "re-look", "cells": []}
@@ -198,6 +213,7 @@ class RoutePlanner:
                 "goal": goal_text,
                 "model": "local-astar",
             }
-            await self.bus.publish("route/proposed", proposal)
+            if publish:
+                await self.bus.publish("route/proposed", proposal)
             return {**result, "proposal": proposal}
         return result

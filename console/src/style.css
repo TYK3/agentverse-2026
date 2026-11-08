@@ -55,6 +55,81 @@ body {
   display: block;
 }
 
+/* World Change / Re-plan Banner */
+.world-change-banner {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1.4rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.world-change-banner.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-20px);
+}
+
+.world-change-banner.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.aftershock-banner {
+  background: rgba(185, 28, 28, 0.92);
+  color: #fef2f2;
+  border: 2px solid #ef4444;
+  animation: pulse-danger 1.5s infinite;
+}
+
+.replan-banner {
+  background: rgba(30, 58, 138, 0.92);
+  color: #eff6ff;
+  border: 2px solid #3b82f6;
+  animation: pulse-replan 2s ease-out;
+}
+
+@keyframes pulse-danger {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6), 0 8px 24px rgba(0, 0, 0, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0), 0 8px 24px rgba(0, 0, 0, 0.6);
+  }
+}
+
+@keyframes pulse-replan {
+  0% {
+    transform: translateX(-50%) scale(0.95);
+  }
+  50% {
+    transform: translateX(-50%) scale(1.03);
+  }
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+.banner-icon {
+  font-size: 1.1rem;
+}
+
+.banner-text {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
 /* Map HUD Overlays */
 .map-hud-top {
   position: absolute;
@@ -143,6 +218,17 @@ body {
   border-color: #64748b;
 }
 
+.btn-highlight {
+  background: #1d4ed8;
+  color: #eff6ff;
+  border-color: #3b82f6;
+}
+
+.btn-highlight:hover {
+  background: #2563eb;
+  border-color: #60a5fa;
+}
+
 /* Legend HUD */
 .map-legend {
   position: absolute;
@@ -155,7 +241,7 @@ body {
   font-size: 0.72rem;
   color: #cbd5e1;
   backdrop-filter: blur(6px);
-  max-width: 280px;
+  max-width: 300px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   pointer-events: auto;
 }
@@ -203,6 +289,21 @@ body {
 
 .hazard-collapsed {
   background: #ef4444;
+}
+
+.route-active {
+  background: #2563eb;
+  border-radius: 4px;
+}
+
+.route-previous {
+  background: rgba(96, 165, 250, 0.25);
+  border: 1px dashed #60a5fa;
+}
+
+.cell-unstable {
+  background: #ef4444;
+  border: 1px solid #fca5a5;
 }
 
 .casualty {
@@ -297,3 +398,25 @@ button:hover {
     margin: 0.5rem;
   }
 }
+
+#top-bar{flex-wrap:wrap;gap:1rem}#budget-panel{font-size:.75rem;min-width:200px}progress{display:block;width:100%;height:.65rem;accent-color:#54a4ff;margin:.3rem 0}#budget-panel progress{display:inline-block;width:80px;margin:0 .5rem}.over-budget{color:#ff7c7c}.over-budget progress{accent-color:#ff5252}.pill,.badge{border:1px solid currentColor;border-radius:1rem;padding:.15rem .5rem;font-size:.75rem}.badge{display:inline-block;margin:.3rem;color:#ffce70}.online,.act{color:#79e0ad}.offline,.refer{color:#ff9696}.relook{color:#ffd27f}#reasoning-log{max-height:50vh;overflow-y:auto;padding-right:.5rem}#reasoning-log small{display:block;color:#a9b9cc}dialog{background:#172337;color:#e8f0fa;border:1px solid #52627b;border-radius:.7rem;padding:1.5rem;max-width:min(90vw,760px)}dialog::backdrop{background:#0009}#report-content{max-height:65vh;overflow:auto}#report-content pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;line-height:1.6}#reject{background:#984447}button:disabled{opacity:.5;cursor:default}#send-status{font-size:.75rem}#approval-error{color:#ff9696}
+
+/* Y7c Hardware Specs Styling */
+.btn-topbar { padding: 0.35rem 0.8rem; background: #1e293b; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 0.4rem; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
+.btn-topbar:hover { background: #0284c7; color: #ffffff; border-color: #38bdf8; }
+.hardware-dialog { max-width: min(92vw, 840px); width: 840px; background: #101a2b; border: 1px solid #334a6d; border-radius: 0.75rem; padding: 1.25rem 1.5rem; color: #e2e8f0; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7); }
+.hardware-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #233754; padding-bottom: 0.8rem; margin-bottom: 1rem; }
+.hardware-header h2 { margin: 0; font-size: 1.1rem; color: #93c5fd; }
+.btn-close { background: transparent; border: none; font-size: 1.5rem; line-height: 1; color: #94a3b8; cursor: pointer; padding: 0.2rem 0.5rem; border-radius: 0.3rem; }
+.btn-close:hover { background: #1e293b; color: #f8fafc; }
+.hardware-body { max-height: 70vh; overflow-y: auto; }
+.hardware-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; line-height: 1.45; }
+.hardware-table th, .hardware-table td { padding: 0.65rem 0.8rem; text-align: left; border-bottom: 1px solid #1c2b42; }
+.hardware-table th { background: #152238; color: #93c5fd; font-weight: 600; letter-spacing: 0.04em; position: sticky; top: 0; z-index: 2; }
+.hardware-table th:first-child { width: 22%; }
+.hardware-table th:nth-child(2) { width: 39%; }
+.hardware-table th:nth-child(3) { width: 39%; }
+.hw-prop { font-weight: 600; color: #cbd5e1; }
+.hw-scout { color: #7dd3fc; }
+.hw-responder { color: #fcd34d; }
+.badge-estimate { display: inline-block; font-size: 0.68rem; font-weight: 600; color: #f59e0b; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 0.25rem; padding: 0.1rem 0.35rem; margin-left: 0.35rem; vertical-align: middle; }

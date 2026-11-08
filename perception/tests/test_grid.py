@@ -74,7 +74,7 @@ def test_inference_fills_hidden_interior_only():
     for c in walls:
         g.hit(c)
     g.infer(walls)
-    assert g.cells[hidden] == {"state": "inferred", "occupied": True, "hits": 0}
+    assert g.cells[hidden] == {"state": "inferred", "occupied": True, "hits": 0, "passes": 0}
     assert g.state((5, 5, 0)) == g.state((5, 5, 2)) == "unknown"  # never infer across layers
 
     g = Grid()
@@ -128,7 +128,7 @@ def test_start_publishes_changes_then_snapshot(monkeypatch):
         return bus, grid
 
     bus, grid = asyncio.run(run())
-    assert {t for t, _ in bus.sent} <= {"map/cells", "scout/goto"}
+    assert {t for t, _ in bus.sent} <= {"map/cells", "scout/goto", "map/hazards"}
     sizes = [len(d["cells"]) for t, d in bus.sent if t == "map/cells"]
     assert sizes[0] == len(grid.cells)                            # the first tick sends every change
     assert len(grid.cells) in sizes[1:]                           # tick 10 is a full snapshot
@@ -136,3 +136,56 @@ def test_start_publishes_changes_then_snapshot(monkeypatch):
 
 def test_standin_replay_seen_count_rises():
     assert replay.main([str(replay.STANDIN)]) == 0
+
+
+def test_map_cells_is_flat_one_cell_per_column():
+    """Two layers at one (i, j): map/cells sends a single k=0 cell, blocked if any layer is occupied."""
+    g = Grid()
+    g.free((3, 4, 1))                 # LiDAR layer: free
+    g.hit((3, 4, 2))                  # a higher layer: occupied (an overhang)
+    g.free((5, 4, 1))
+    g.free((5, 4, 2))
+    msg = g.snapshot(0.0)
+    cells = {tuple(c["cell"]): (c["state"], c["occupied"]) for c in msg["cells"]}
+    assert cells == {(3, 4, 0): ("seen", True), (5, 4, 0): ("seen", False)}
+    g.forget([(3, 4, 2)])             # the overhang is gone: the column falls back to the free LiDAR cell
+    assert g.delta(1.0)["cells"] == [{"cell": [3, 4, 0], "state": "seen", "occupied": False}]
+    g.forget([(3, 4, 1)])
+    assert g.delta(2.0)["cells"] == [{"cell": [3, 4, 0], "state": "unknown", "occupied": False}]
+
+
+def test_flat_snapshot_is_routable_by_the_planner():
+    """The planner reads map/cells as k=0 only and rejects duplicate cells; a scanned room routes."""
+    from planner.route import find_route
+
+    g = Grid()
+    g.add_scan((0.0, 0.0, Z), sweep((0.0, 0.0)))
+    g.add_scan((0.0, 0.0, Z + 0.05), sweep((0.0, 0.0)))   # a second layer over the same columns
+    msg = g.snapshot(0.0)
+    assert len({tuple(c["cell"]) for c in msg["cells"]}) == len(msg["cells"])
+    assert {c["cell"][2] for c in msg["cells"]} == {0}
+    start, goal = (*cell_of((-0.5, -0.5, 0))[:2], 0), (*cell_of((0.5, 0.5, 0))[:2], 0)
+    route = find_route(msg, [], start, goal)
+    assert route["status"] == "ok", route
+
+
+def test_scan_diff_ignores_grazing_hits_next_to_old_walls_and_unseen_cells():
+    g = Grid()
+    for i in range(10):
+        for _ in range(3):
+            g.free((i, 0, 1))
+    g.hit((10, 0, 1))                                        # a wall face
+    g.begin_change(1.0)
+    for c in ((9, 0, 1), (9, 0, 1), (30, 0, 1), (30, 0, 1)):  # next to the wall; never seen before
+        g.hit(c)
+    assert g.appeared == {}
+    g.hit((4, 0, 1))
+    g.hit((4, 0, 1))
+    assert g.appeared == {(4, 0, 1): 1.0}
+    for _ in range(3):
+        g.free((10, 0, 1))
+    assert (10, 0, 1) in g.cleared and g.column(10, 0) == ("seen", False)
+    g.hit((10, 0, 1))
+    g.hit((10, 0, 1))
+    assert (10, 0, 1) not in g.cleared                      # it returns again: it did not move after all
+

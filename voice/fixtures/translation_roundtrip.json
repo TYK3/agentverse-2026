@@ -1,0 +1,27 @@
+{
+  "language": "tr",
+  "language_name": "Turkish",
+  "scenario": "AFTERSHOCK earthquake search-and-rescue communication",
+  "pairs": [
+    {
+      "english": "Help is on the way, stay calm.",
+      "translated": "Yardım yolda, sakin olun."
+    },
+    {
+      "english": "Can you hear me? Where does it hurt?",
+      "translated": "Beni duyabiliyor musunuz? Nereniz acıyor?"
+    },
+    {
+      "english": "Do not move your neck or back.",
+      "translated": "Boynunuzu veya sırtınızı hareket ettirmeyin."
+    },
+    {
+      "english": "I am trapped under the rubble, my leg is stuck.",
+      "translated": "Enkaz altındayım, bacağım sıkıştı."
+    },
+    {
+      "english": "Yes, I can hear you. Please hurry.",
+      "translated": "Evet, sizi duyabiliyorum. Lütfen acele edin."
+    }
+  ]
+}

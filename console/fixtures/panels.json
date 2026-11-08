@@ -1,0 +1,6 @@
+[
+  {"topic":"status/budget","data":{"device":"Demo edge device","model":"gemma-4-local","mem_mb":2400,"ms_per_step":120,"limit":{"mem_mb":2048,"ms_per_step":200}}},
+  {"topic":"status/gemini","data":{"mode":"off","calls_last_hour":0,"stand_ins":["planner","tts"]}},
+  {"topic":"gate/request","data":{"id":"demo-gate-2","kind":"emergency_call","summary":"Prepare emergency call for operator confirmation (demo only)","route":"r3"}},
+  {"topic":"report/handover","data":{"json":{"summary":"Fixture demonstration","hazards":[{"estimate":true}],"casualties":[{"vitals":{"simulated":true}}]},"markdown":"# Demo handover\nFixture data only.\n## Hazards\nSimulated estimate: unstable slab.\n## Casualties\nSimulated breathing rate: 14/min. No emergency call was made."}}
+]

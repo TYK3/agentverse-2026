@@ -1,0 +1,6 @@
+{
+  "to": "casualty",
+  "intent": "first_aid",
+  "text": "Check Breathing: Check for normal breathing: gently tilt the head back and look, listen, and feel for chest movement and breath for up to 10 seconds.",
+  "lang": "auto"
+}
