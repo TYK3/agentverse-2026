@@ -118,11 +118,14 @@ async def run(world, bus, rate_hz=10):
         await asyncio.sleep(max(0.0, dt - (time.monotonic() - started)))
 
 
+SCENE = "levels"    # scene/loaded label (coord/CONTRACT.md SCENE-B2); floor names are not scene names
+
+
 async def start(bus, loop=True):
-    """The multi-level scene on the bus: scene/loaded, scout/goto (3D), sensors/scout at 10 Hz."""
+    """The multi-level scene on the bus: scene/loaded "levels", scout/goto (3D), sensors/scout at 10 Hz."""
     world = LevelWorld(render=False)
     bus.subscribe("scout/goto", world.goto)
-    await bus.publish("scene/loaded", scene.scene_loaded(world.m, world.d))
+    await bus.publish("scene/loaded", scene.scene_loaded(world.m, world.d, scene=SCENE))
     if loop:
         world.task = asyncio.create_task(run(world, bus))
     return world
