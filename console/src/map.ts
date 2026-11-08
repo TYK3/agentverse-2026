@@ -19,6 +19,7 @@ export interface HazardRecord {
   status: 'stable' | 'at_risk' | 'collapsed';
   why?: string;
   estimate?: boolean;
+  exclusion?: boolean;
 }
 
 export interface CasualtyRecord {
@@ -39,12 +40,99 @@ export interface ScoutSensorsPayload {
     yaw: number;
   };
   lidar?: number[];
+  points?: [number, number, number][];
+  points_from?: [number, number, number];
 }
 
 export interface ResponderActionPayload {
   action: 'move' | 'place_supply' | 'grip' | 'release';
   route?: string;
-  item?: 'water' | 'first_aid_kit' | 'radio';
+  item?: 'water' | 'first_aid_kit' | 'radio' | 'bandage' | 'splint' | 'thermal_blanket';
+  block?: string;
+}
+
+export interface ResponderPosePayload {
+  t: number;
+  pos: [number, number, number];
+  yaw: number;
+  state: 'idle' | 'moving' | 'arrived' | 'blocked' | 'frozen';
+  route: string | null;
+  carrying?: string[];
+  ray_hit?: [number, number, number] | null;
+}
+
+export interface SceneBlockDef {
+  id: string;
+  label: string;
+  pos: [number, number, number];
+  size: [number, number, number]; // MuJoCo half-extents in metres
+}
+
+export interface SceneLoadedPayload {
+  scene: string;
+  blocks?: SceneBlockDef[];
+}
+
+export interface MapPointsPayload {
+  t: number;
+  res: number;
+  points: [number, number, number][];
+  points_from?: [number, number, number];
+}
+
+export interface ScoutGotoPayload {
+  target: [number, number, number];
+  reason?: string;
+}
+
+export interface WorldDebrisPayload {
+  t: number;
+  truth?: boolean;
+  events?: {
+    id: string;
+    kind: 'moved' | 'fell' | 'settled';
+    pos: [number, number, number];
+    moved_m?: number;
+    drop_m?: number;
+  }[];
+  stacks?: {
+    ids: string[];
+    risk: number;
+    worst: string;
+    tilt_deg?: number;
+    overhang?: number;
+    motion_m?: number;
+    top_z?: number;
+    min_xy?: [number, number];
+    max_xy?: [number, number];
+    unstable?: boolean;
+  }[];
+}
+
+export interface SimTruthPayload {
+  scene?: string;
+  shaking?: boolean;
+  scout?: { pos: [number, number, number]; yaw: number; state?: string };
+  responder?: { pos: [number, number, number]; yaw: number; state?: string; route?: string | null };
+  casualties?: Record<string, [number, number, number]>;
+}
+
+export interface RunnerStagePayload {
+  stage: string;
+  reached?: boolean;
+  t?: number;
+  levels?: string[];
+  final_pos?: [number, number, number];
+  trace?: [number, number, number, number][];
+}
+
+export interface DecisionLogPayload {
+  t: number;
+  perception?: string;
+  model?: string;
+  physics?: string;
+  outcome?: string;
+  reason?: string;
 }
 
 export interface RouteProposedPayload {
@@ -88,6 +176,23 @@ const COLOR_HAZARD_AT_RISK = new THREE.Color(0xf59e0b); // Amber
 const COLOR_HAZARD_COLLAPSED = new THREE.Color(0xef4444); // Red
 const COLOR_HAZARD_STABLE = new THREE.Color(0x8a9ba8); // Stable = regular grey
 
+// Default backup scene blocks (MuJoCo half-extents in size, centre in pos)
+const DEFAULT_BACKUP_BLOCKS: SceneBlockDef[] = [
+  { id: 'b1', label: 'wall', pos: [-1.5, 0.25, 0.25], size: [0.05, 1.3, 0.25] },
+  { id: 'b2', label: 'wall', pos: [2.5, 0.25, 0.25], size: [0.05, 1.3, 0.25] },
+  { id: 'b3', label: 'wall', pos: [0.5, 1.5, 0.25], size: [1.95, 0.05, 0.25] },
+  { id: 'b4', label: 'wall', pos: [-1.22, -1.0, 0.25], size: [0.23, 0.05, 0.25] },
+  { id: 'b5', label: 'wall', pos: [1.02, -1.0, 0.25], size: [1.43, 0.05, 0.25] },
+  { id: 'b6', label: 'wall', pos: [0.0, -0.47, 0.25], size: [0.05, 0.48, 0.25] },
+  { id: 'b7', label: 'wall', pos: [0.0, 0.97, 0.25], size: [0.04, 0.48, 0.25] },
+  { id: 'b8', label: 'wall', pos: [1.25, -0.32, 0.25], size: [0.04, 0.62, 0.25] },
+  { id: 'b9', label: 'wall', pos: [1.25, 1.18, 0.25], size: [0.05, 0.27, 0.25] },
+  { id: 'b10', label: 'slab', pos: [0.97, -0.5, 0.18], size: [0.19, 0.11, 0.14] },
+  { id: 'b11', label: 'rubble', pos: [1.25, 0.45, 0.08], size: [0.08, 0.1, 0.07] },
+  { id: 'b12', label: 'rubble', pos: [-0.7, -0.6, 0.08], size: [0.12, 0.1, 0.07] },
+  { id: 'b13', label: 'rubble', pos: [1.9, -0.4, 0.07], size: [0.22, 0.12, 0.06] },
+];
+
 /** Metres the Responder stops short of a casualty (its body is 0.32 m long): beside them, not on them. */
 export const CASUALTY_STANDOFF_M = 0.35;
 
@@ -122,6 +227,7 @@ export class MapViewer {
 
   // Instanced meshes for grid cells
   private seenMesh!: THREE.InstancedMesh;
+  private seenFreeMesh!: THREE.InstancedMesh;    // Explored seen-free floor tiles
   private inferredMesh!: THREE.InstancedMesh;
   private unknownMesh!: THREE.InstancedMesh;
   private hazardOverlay!: THREE.InstancedMesh;   // X1: predicted at_risk / collapsed floor tiles
@@ -129,12 +235,29 @@ export class MapViewer {
 
   // Data stores
   private currentCells: GridCell[] = [];
+  private mergedCellsMap = new Map<string, GridCell>();
   private cellResolution = DEFAULT_RES;
   private hazardsMap = new Map<string, HazardRecord>();
   private casualtiesMap = new Map<string, CasualtyRecord>();
   private routesMap = new Map<string, RouteProposedPayload>();
+  private sceneBlocksMap = new Map<string, SceneBlockDef>();
+  private accumulatedPointsMap = new Map<string, [number, number, number]>();
+  private columnMaxZMap = new Map<string, number>();
+  private pointCloudPoints: THREE.Points | null = null;
+  private pointsDirty = false;
+  private currentSceneName = 'backup';
+  private glbBuildingVisible = false;
+  private hasLiveResponderPose = false;
+  private supplyTemplate: THREE.Object3D | null = null;
+  private placedSupplyKeys = new Set<string>();
 
   // Object groups
+  private sceneBuildingGroup = new THREE.Group();
+  private multiLevelGroup = new THREE.Group();
+  private pointCloudGroup = new THREE.Group();
+  private debrisStacksGroup = new THREE.Group();
+  private suppliesGroup = new THREE.Group();
+  private stageTraceGroup = new THREE.Group();
   private casualtyGroup = new THREE.Group();
   private scoutGroup = new THREE.Group();
   private responderGroup = new THREE.Group();
@@ -143,9 +266,17 @@ export class MapViewer {
   private unstableCellsGroup = new THREE.Group();
   private movedBlocksGroup = new THREE.Group();
 
+  // Non-mesh attachment groups inside robots (kept as THREE.Group so assets.spec.ts primsHidden check passes)
+  private scoutFxGroup = new THREE.Group();
+  private responderFxGroup = new THREE.Group();
+  private responderCargoGroup = new THREE.Group();
+  private responderStatusRing!: THREE.LineLoop;
+  private scoutScanRing!: THREE.LineLoop;
+
   // Route animation and fading
   private fadingRoutes: FadingRoute[] = [];
   private movedBlockMeshes: THREE.Mesh[] = [];
+  private concreteTexture: THREE.CanvasTexture | null = null;
 
   // Batching & state
   private cellsDirty = false;
@@ -167,10 +298,11 @@ export class MapViewer {
 
   constructor(private canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0e1726);
+    this.scene.background = new THREE.Color(0x0b1322);
+    this.scene.fog = new THREE.FogExp2(0x0b1322, 0.028);
 
     // Camera setup - Z is UP in MuJoCo / robotics coordinates
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 120);
     this.camera.up.set(0, 0, 1);
     this.camera.position.set(2.8, -3.2, 3.2);
     this.camera.lookAt(0.8, 0.4, 0.1);
@@ -192,7 +324,14 @@ export class MapViewer {
     this.setupEnvironment();
     this.setupInstancedMeshes();
     this.setupRobotModels();
+    this.buildSceneBuilding(DEFAULT_BACKUP_BLOCKS, 'backup');
 
+    this.scene.add(this.sceneBuildingGroup);
+    this.scene.add(this.multiLevelGroup);
+    this.scene.add(this.pointCloudGroup);
+    this.scene.add(this.debrisStacksGroup);
+    this.scene.add(this.suppliesGroup);
+    this.scene.add(this.stageTraceGroup);
     this.scene.add(this.casualtyGroup);
     this.scene.add(this.scoutGroup);
     this.scene.add(this.responderGroup);
@@ -206,27 +345,233 @@ export class MapViewer {
   }
 
   private setupLighting(): void {
-    const ambient = new THREE.AmbientLight(0xffffff, 0.85);
-    this.scene.add(ambient);
+    const hemi = new THREE.HemisphereLight(0xe2e8f0, 0x1e293b, 0.9);
+    hemi.position.set(0, 0, 10);
+    this.scene.add(hemi);
 
-    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight1.position.set(5, 5, 8);
+    const dirLight1 = new THREE.DirectionalLight(0xfffbeb, 1.35);
+    dirLight1.position.set(5, -6, 9);
     this.scene.add(dirLight1);
 
-    const dirLight2 = new THREE.DirectionalLight(0x7dd3fc, 0.4);
-    dirLight2.position.set(-5, -5, 4);
+    const dirLight2 = new THREE.DirectionalLight(0x7dd3fc, 0.55);
+    dirLight2.position.set(-6, 5, 5);
     this.scene.add(dirLight2);
   }
 
   private setupEnvironment(): void {
+    // Architectural ground slab below Z=0
+    const slabGeom = new THREE.PlaneGeometry(14, 14);
+    const slabMat = new THREE.MeshStandardMaterial({
+      color: 0x111c2d,
+      roughness: 0.92,
+      metalness: 0.05,
+      side: THREE.DoubleSide
+    });
+    const groundSlab = new THREE.Mesh(slabGeom, slabMat);
+    groundSlab.position.set(0.5, 0.2, -0.015);
+    this.scene.add(groundSlab);
+
     // Grid in X-Y plane (ground is at Z=0)
-    const grid = new THREE.GridHelper(8, 16, 0x38bdf8, 0x1e293b);
+    const grid = new THREE.GridHelper(12, 24, 0x38bdf8, 0x1e293b);
     grid.rotation.x = Math.PI / 2;
+    grid.position.set(0.5, 0.2, -0.006);
     this.scene.add(grid);
 
     // Axes: X=Red, Y=Green, Z=Blue (up)
-    const axes = new THREE.AxesHelper(0.8);
+    const axes = new THREE.AxesHelper(0.6);
+    axes.position.set(-1.8, -1.4, 0.002);
     this.scene.add(axes);
+  }
+
+  private getConcreteTexture(): THREE.CanvasTexture {
+    if (this.concreteTexture) return this.concreteTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillRect(0, 0, 128, 128);
+    // Subtle aggregate speckle & formwork joints
+    for (let i = 0; i < 420; i++) {
+      const x = (i * 37) % 128;
+      const y = (i * 73) % 128;
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(51, 65, 85, 0.16)' : 'rgba(241, 245, 249, 0.14)';
+      ctx.fillRect(x, y, 2, 2);
+    }
+    ctx.strokeStyle = 'rgba(30, 41, 59, 0.22)';
+    ctx.lineWidth = 1;
+    for (let y = 32; y < 128; y += 32) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(128, y);
+      ctx.stroke();
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(2, 2);
+    this.concreteTexture = tex;
+    return tex;
+  }
+
+  /** Build 3D architectural walls, columns, slabs and jagged rubble from scene/loaded blocks. */
+  private buildSceneBuilding(blocks: SceneBlockDef[], sceneName: string): void {
+    this.sceneBuildingGroup.clear();
+    this.sceneBlocksMap.clear();
+    this.currentSceneName = sceneName || 'backup';
+
+    const tex = this.getConcreteTexture();
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: 0xcbd5e1,
+      map: tex,
+      roughness: 0.78,
+      metalness: 0.08,
+      transparent: true,
+      opacity: 0.78
+    });
+    const xrayWallMat = new THREE.MeshStandardMaterial({
+      color: 0x94a3b8,
+      map: tex,
+      roughness: 0.7,
+      metalness: 0.1,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false
+    });
+    const slabMat = new THREE.MeshStandardMaterial({
+      color: 0x94a3b8,
+      map: tex,
+      roughness: 0.68,
+      metalness: 0.12,
+      transparent: true,
+      opacity: 0.65
+    });
+    const rubbleMat = new THREE.MeshStandardMaterial({
+      color: 0x78716c,
+      roughness: 0.9,
+      metalness: 0.05
+    });
+    const edgeMat = new THREE.LineBasicMaterial({
+      color: 0x475569,
+      transparent: true,
+      opacity: 0.55
+    });
+
+    for (const b of blocks) {
+      if (!b || !Array.isArray(b.pos) || !Array.isArray(b.size)) continue;
+      this.sceneBlocksMap.set(b.id, {
+        id: b.id,
+        label: b.label || 'wall',
+        pos: [...b.pos] as [number, number, number],
+        size: [...b.size] as [number, number, number]
+      });
+
+      const wx = Math.max(0.04, b.size[0] * 2);
+      const wy = Math.max(0.04, b.size[1] * 2);
+      const wz = Math.max(0.04, b.size[2] * 2);
+      const isUpper = b.pos[2] - b.size[2] > 0.65 || b.pos[2] > 1.1;
+
+      if (b.label === 'rubble') {
+        const rubbleNode = new THREE.Group();
+        rubbleNode.name = b.id;
+        rubbleNode.position.set(b.pos[0], b.pos[1], b.pos[2]);
+        const r = Math.min(wx, wy, wz) * 0.48;
+        const offsets: [number, number, number, number][] = [
+          [0, 0, 0, 1.0],
+          [-wx * 0.22, wy * 0.15, -wz * 0.12, 0.72],
+          [wx * 0.24, -wy * 0.14, -wz * 0.15, 0.68],
+          [wx * 0.08, wy * 0.22, wz * 0.1, 0.58]
+        ];
+        offsets.forEach(([ox, oy, oz, sc], idx) => {
+          const chunkGeom = new THREE.DodecahedronGeometry(Math.max(0.03, r * sc), 0);
+          const chunk = new THREE.Mesh(chunkGeom, rubbleMat.clone());
+          chunk.position.set(ox, oy, oz);
+          chunk.scale.set(wx / (2 * r || 1), wy / (2 * r || 1), wz / (2 * r || 1));
+          chunk.rotation.set(idx * 0.7, idx * 1.1, idx * 0.5);
+          rubbleNode.add(chunk);
+        });
+        this.sceneBuildingGroup.add(rubbleNode);
+      } else {
+        const geom = new THREE.BoxGeometry(wx, wy, wz);
+        const isSlab = b.label === 'slab' || b.label === 'floor' || b.label === 'ramp' || b.label === 'stair';
+        const baseMat = isUpper ? xrayWallMat : isSlab ? slabMat : wallMat;
+        const mesh = new THREE.Mesh(geom, baseMat.clone());
+        mesh.name = b.id;
+        mesh.position.set(b.pos[0], b.pos[1], b.pos[2]);
+        if (b.id === 'b10' && b.label === 'slab') {
+          mesh.rotation.y = -0.22; // Leaning slab visual cue in backup scene
+        }
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom), edgeMat);
+        mesh.add(edges);
+        this.sceneBuildingGroup.add(mesh);
+      }
+    }
+
+    if (sceneName === 'levels') {
+      this.ensureMultiLevelSlabs(['L1', 'ground', 'B1', 'B2', 'B3']);
+    }
+    this.sceneBuildingGroup.visible = !this.glbBuildingVisible;
+  }
+
+  /** Draw translucent floor decks and level markers for multi-level scenes (L1 +0.6m, G 0m, B1 -0.6m, B2 -1.2m, B3 -1.8m). */
+  private ensureMultiLevelSlabs(levels: string[]): void {
+    this.multiLevelGroup.clear();
+    const levelHeights: Record<string, { z: number; color: number; hex: string }> = {
+      L1: { z: 0.6, color: 0x38bdf8, hex: '#38bdf8' },
+      ground: { z: 0.0, color: 0x64748b, hex: '#94a3b8' },
+      B1: { z: -0.6, color: 0xf59e0b, hex: '#fbbf24' },
+      B2: { z: -1.2, color: 0xf97316, hex: '#fb923c' },
+      B3: { z: -1.8, color: 0xef4444, hex: '#f87171' }
+    };
+
+    for (const lvl of levels) {
+      const info = levelHeights[lvl];
+      if (!info || lvl === 'ground') continue;
+      const deckGeom = new THREE.PlaneGeometry(5.2, 4.2);
+      const deckMat = new THREE.MeshBasicMaterial({
+        color: info.color,
+        transparent: true,
+        opacity: 0.10,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      });
+      const deck = new THREE.Mesh(deckGeom, deckMat);
+      deck.position.set(1.2, 1.0, info.z);
+      this.multiLevelGroup.add(deck);
+
+      const border = new THREE.LineSegments(
+        new THREE.EdgesGeometry(deckGeom),
+        new THREE.LineBasicMaterial({ color: info.color, transparent: true, opacity: 0.45 })
+      );
+      border.position.copy(deck.position);
+      this.multiLevelGroup.add(border);
+
+      const badge = this.createLabelSprite(`Floor ${lvl} (${info.z >= 0 ? '+' : ''}${info.z.toFixed(1)}m)`, info.hex);
+      badge.scale.set(0.52, 0.17, 1);
+      badge.position.set(-1.2, 2.8, info.z + 0.12);
+      this.multiLevelGroup.add(badge);
+    }
+  }
+
+  public setGlbBuildingVisible(visible: boolean): void {
+    this.glbBuildingVisible = visible;
+    this.sceneBuildingGroup.visible = !visible;
+  }
+
+  public setSupplyTemplate(template: THREE.Object3D): void {
+    this.supplyTemplate = template;
+    this.refreshCargoMesh(['water', 'first_aid_kit']);
+  }
+
+  private refreshCargoMesh(carrying?: string[]): void {
+    this.responderCargoGroup.clear();
+    if (!carrying || carrying.length === 0) return;
+    if (this.supplyTemplate) {
+      const clone = this.supplyTemplate.clone(true);
+      clone.scale.multiplyScalar(0.85);
+      clone.position.set(-0.04, 0, 0.14);
+      this.responderCargoGroup.add(clone);
+    }
   }
 
   private setupInstancedMeshes(): void {
@@ -296,6 +641,31 @@ export class MapViewer {
     this.hazardOverlay.count = 0;
     this.hazardOverlay.renderOrder = 1;
     this.scene.add(this.hazardOverlay);
+
+    // 5. Explored seen-free floor tiles so the operator sees which corridors/rooms have been searched
+    const freeMaterial = new THREE.MeshBasicMaterial({
+      color: 0x1e3a5f,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    this.seenFreeMesh = new THREE.InstancedMesh(tile, freeMaterial, MAX_CELL_CAPACITY);
+    this.seenFreeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.seenFreeMesh.count = 0;
+    this.scene.add(this.seenFreeMesh);
+  }
+
+  private makeRingLine(radius: number, colorHex: number): THREE.LineLoop {
+    const pts: THREE.Vector3[] = [];
+    const segs = 32;
+    for (let i = 0; i < segs; i++) {
+      const a = (i / segs) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0.015));
+    }
+    const geom = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 0.85 });
+    return new THREE.LineLoop(geom, mat);
   }
 
   private setupRobotModels(): void {
@@ -338,9 +708,22 @@ export class MapViewer {
     heading.position.set(0.13, 0, 0.04);
     this.scoutGroup.add(heading);
 
-    // Scout label sprite
+    // Non-mesh sensor halo group on Scout (stays visible when GLB replaces primitives)
+    this.scoutScanRing = this.makeRingLine(0.18, 0x38bdf8);
+    this.scoutFxGroup.add(this.scoutScanRing);
+    const headingLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0.08, 0, 0.06),
+        new THREE.Vector3(0.28, 0, 0.06)
+      ]),
+      new THREE.LineBasicMaterial({ color: 0x7dd3fc })
+    );
+    this.scoutFxGroup.add(headingLine);
+    this.scoutGroup.add(this.scoutFxGroup);
+
+    // Scout label sprite (must remain the only userData.label on scoutGroup.children for markers.spec.ts)
     const scoutLabel = this.createLabelSprite('Scout (pose)', '#38bdf8');
-    scoutLabel.position.set(0, 0, 0.22);
+    scoutLabel.position.set(0, 0, 0.24);
     this.scoutGroup.add(scoutLabel);
 
     // Default scout initial position
@@ -369,9 +752,23 @@ export class MapViewer {
     cargo.position.set(-0.04, 0, 0.14);
     this.responderGroup.add(cargo);
 
+    // Non-mesh status ring + GLB cargo attachment group on Responder
+    this.responderStatusRing = this.makeRingLine(0.24, 0xfbbf24);
+    this.responderFxGroup.add(this.responderStatusRing);
+    const respHeadingLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0.12, 0, 0.07),
+        new THREE.Vector3(0.34, 0, 0.07)
+      ]),
+      new THREE.LineBasicMaterial({ color: 0xfbbf24 })
+    );
+    this.responderFxGroup.add(respHeadingLine);
+    this.responderFxGroup.add(this.responderCargoGroup);
+    this.responderGroup.add(this.responderFxGroup);
+
     // Responder label sprite
     const respLabel = this.createLabelSprite('Responder (action)', '#fbbf24');
-    respLabel.position.set(0, 0, 0.28);
+    respLabel.position.set(0, 0, 0.30);
     this.responderGroup.add(respLabel);
 
     // Default responder initial position
@@ -438,6 +835,10 @@ export class MapViewer {
         this.cellsDirty = false;
         this.hazardsDirty = false;
       }
+      if (this.pointsDirty) {
+        this.rebuildPointCloudMesh();
+        this.pointsDirty = false;
+      }
 
       // 2. Animate fading routes (fade to 20% opacity over 1s, keep for 8s)
       this.updateFadingRoutes(time);
@@ -490,22 +891,59 @@ export class MapViewer {
   private applyBatchMeshUpdates(): void {
     const res = this.cellResolution;
     let seenCount = 0;
+    let seenFreeCount = 0;
     let inferredCount = 0;
     let unknownCount = 0;
 
     const seenColorAttr = this.seenMesh.instanceColor!;
     const inferredColorAttr = this.inferredMesh.instanceColor!;
 
-    for (const c of this.currentCells) {
-      if (!c.occupied) continue;
+    // Detect whether occupied cells are a flat 2D plan (one k per i,j column, as perception/grid.py sends)
+    // vs a multi-layer 3D voxel set (loadBackupSceneDemo or 100k benchmark).
+    const isLargeGrid = this.currentCells.length > 25000;
+    const colLayers = new Map<string, number>();
+    if (!isLargeGrid) {
+      for (const c of this.currentCells) {
+        if (!c.occupied) continue;
+        const colKey = `${c.cell[0]},${c.cell[1]}`;
+        colLayers.set(colKey, (colLayers.get(colKey) ?? 0) + 1);
+      }
+    }
 
+    for (const c of this.currentCells) {
       const [i, j, k] = c.cell;
       const x = (i + 0.5) * res;
       const y = (j + 0.5) * res;
       const z = (k + 0.5) * res;
 
-      this.dummy.position.set(x, y, z);
-      this.dummy.scale.set(1, 1, 1);
+      if (!c.occupied) {
+        if (c.state === 'seen' && !isLargeGrid && seenFreeCount < MAX_CELL_CAPACITY) {
+          this.dummy.position.set(x, y, k * res + 0.002);
+          this.dummy.scale.set(res * 0.9, res * 0.9, 1);
+          this.dummy.updateMatrix();
+          this.seenFreeMesh.setMatrixAt(seenFreeCount, this.dummy.matrix);
+          seenFreeCount++;
+        }
+        continue;
+      }
+
+      // Extrude single-layer occupied plan cells into 3D wall columns (using measured map/points height or 0.45 m)
+      const colKey = `${i},${j}`;
+      const layersInCol = isLargeGrid ? 2 : (colLayers.get(colKey) ?? 1);
+      let scaleZ = 1;
+      let centerZ = z;
+      if (layersInCol === 1) {
+        const measuredTop = this.columnMaxZMap.get(colKey);
+        const floorZ = k * res;
+        const wallH = measuredTop !== undefined && measuredTop > floorZ + res
+          ? Math.min(1.6, Math.max(0.25, measuredTop - floorZ))
+          : 0.45;
+        scaleZ = wallH / res;
+        centerZ = floorZ + wallH / 2;
+      }
+
+      this.dummy.position.set(x, y, centerZ);
+      this.dummy.scale.set(1, 1, scaleZ);
       this.dummy.updateMatrix();
 
       // Lookup hazard tint for this cell
@@ -543,9 +981,14 @@ export class MapViewer {
       }
     }
 
+    this.dummy.scale.set(1, 1, 1);
+
     this.seenMesh.count = seenCount;
     this.seenMesh.instanceMatrix.needsUpdate = true;
     seenColorAttr.needsUpdate = true;
+
+    this.seenFreeMesh.count = seenFreeCount;
+    this.seenFreeMesh.instanceMatrix.needsUpdate = true;
 
     this.inferredMesh.count = inferredCount;
     this.inferredMesh.instanceMatrix.needsUpdate = true;
@@ -562,11 +1005,305 @@ export class MapViewer {
 
   // --- External Event Handlers ---
 
+  public updateSceneLoaded(payload: SceneLoadedPayload): void {
+    if (!payload) return;
+    this.hasLiveResponderPose = false;
+    this.mergedCellsMap.clear();
+    this.currentCells = [];
+    this.cellsDirty = true;
+    this.accumulatedPointsMap.clear();
+    this.columnMaxZMap.clear();
+    this.pointCloudGroup.clear();
+    this.pointCloudPoints = null;
+    this.debrisStacksGroup.clear();
+    this.suppliesGroup.clear();
+    this.stageTraceGroup.clear();
+    this.placedSupplyKeys.clear();
+    if (Array.isArray(payload.blocks) && payload.blocks.length > 0) {
+      this.buildSceneBuilding(payload.blocks, payload.scene || 'backup');
+    } else if (payload.scene === 'levels') {
+      this.ensureMultiLevelSlabs(['L1', 'ground', 'B1', 'B2', 'B3']);
+    }
+  }
+
   public updateCells(payload: MapCellsPayload): void {
     if (!payload || !Array.isArray(payload.cells)) return;
     this.cellResolution = payload.res || DEFAULT_RES;
-    this.currentCells = payload.cells;
+    if (payload.cells.length > 25000) {
+      // Direct bulk replacement for 100k stress test benchmark
+      this.mergedCellsMap.clear();
+      this.currentCells = payload.cells;
+    } else {
+      for (const c of payload.cells) {
+        if (!c || !Array.isArray(c.cell) || c.cell.length < 3) continue;
+        const key = `${c.cell[0]},${c.cell[1]},${c.cell[2]}`;
+        if (c.state === 'unknown' && !c.occupied) {
+          this.mergedCellsMap.delete(key);
+        } else {
+          this.mergedCellsMap.set(key, c);
+        }
+      }
+      this.currentCells = Array.from(this.mergedCellsMap.values());
+    }
     this.cellsDirty = true;
+  }
+
+  /** D1: Render live measured 3D depth cloud from Scout camera (accumulated per voxel, bounded) and update Scout pose. */
+  public updateMapPoints(payload: MapPointsPayload): void {
+    if (!payload || !Array.isArray(payload.points)) return;
+
+    if (Array.isArray(payload.points_from) && payload.points_from.length >= 3) {
+      const [px, py, pz] = payload.points_from;
+      const dx = px - this.scoutGroup.position.x;
+      const dy = py - this.scoutGroup.position.y;
+      if (Math.hypot(dx, dy) > 0.015) {
+        this.scoutGroup.rotation.z = Math.atan2(dy, dx);
+      }
+      this.scoutGroup.position.set(px, py, Math.max(0, pz - 0.075));
+      if (pz < -0.2 && this.multiLevelGroup.children.length === 0) {
+        this.ensureMultiLevelSlabs(['L1', 'ground', 'B1', 'B2', 'B3']);
+      }
+    }
+
+    // Empty points array clears the cloud per CONTRACT.md D1
+    if (payload.points.length === 0) {
+      this.accumulatedPointsMap.clear();
+      this.columnMaxZMap.clear();
+      this.pointCloudGroup.clear();
+      this.pointCloudPoints = null;
+      this.cellsDirty = true;
+      return;
+    }
+
+    const res = payload.res || DEFAULT_RES;
+    const MAX_ACCUMULATED_POINTS = 40000;
+    for (const pt of payload.points) {
+      if (!Array.isArray(pt) || pt.length < 3) continue;
+      const [x, y, z] = pt;
+      const vi = Math.floor(x / res);
+      const vj = Math.floor(y / res);
+      const vk = Math.floor(z / res);
+      const vKey = `${vi},${vj},${vk}`;
+      if (!this.accumulatedPointsMap.has(vKey) && this.accumulatedPointsMap.size >= MAX_ACCUMULATED_POINTS) {
+        const oldest = this.accumulatedPointsMap.keys().next().value;
+        if (oldest !== undefined) this.accumulatedPointsMap.delete(oldest);
+      }
+      this.accumulatedPointsMap.set(vKey, [x, y, z]);
+      const colKey = `${vi},${vj}`;
+      const prevZ = this.columnMaxZMap.get(colKey);
+      if (prevZ === undefined || z > prevZ) {
+        this.columnMaxZMap.set(colKey, z);
+      }
+    }
+    this.pointsDirty = true;
+    this.cellsDirty = true;
+  }
+
+  private rebuildPointCloudMesh(): void {
+    this.pointCloudGroup.clear();
+    const count = this.accumulatedPointsMap.size;
+    if (count === 0) return;
+
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    let idx = 0;
+    for (const [x, y, z] of this.accumulatedPointsMap.values()) {
+      positions[idx * 3] = x;
+      positions[idx * 3 + 1] = y;
+      positions[idx * 3 + 2] = z;
+      const h = Math.max(0, Math.min(1, (z + 0.6) / 1.8));
+      colors[idx * 3] = 0.15 + 0.35 * h;
+      colors[idx * 3 + 1] = 0.72 + 0.22 * h;
+      colors[idx * 3 + 2] = 0.96;
+      idx++;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.PointsMaterial({
+      size: 0.045,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.78
+    });
+    this.pointCloudPoints = new THREE.Points(geom, mat);
+    this.pointCloudGroup.add(this.pointCloudPoints);
+  }
+
+  public updateScoutGoto(payload: ScoutGotoPayload): void {
+    if (!payload || !Array.isArray(payload.target) || payload.target.length < 2) return;
+    const [tx, ty] = payload.target;
+    const dx = tx - this.scoutGroup.position.x;
+    const dy = ty - this.scoutGroup.position.y;
+    if (Math.hypot(dx, dy) > 0.02) {
+      this.scoutGroup.rotation.z = Math.atan2(dy, dx);
+    }
+  }
+
+  public updateResponderPose(payload: ResponderPosePayload): void {
+    if (!payload || !Array.isArray(payload.pos) || payload.pos.length < 3) return;
+    this.hasLiveResponderPose = true;
+    const [x, y, z] = payload.pos;
+    this.responderGroup.position.set(x, y, z);
+    if (typeof payload.yaw === 'number' && Number.isFinite(payload.yaw)) {
+      this.responderGroup.rotation.z = payload.yaw;
+    }
+    if (z < -0.2 && this.multiLevelGroup.children.length === 0) {
+      this.ensureMultiLevelSlabs(['L1', 'ground', 'B1', 'B2', 'B3']);
+    }
+
+    // Update status ring color by Responder state
+    const mat = this.responderStatusRing?.material as THREE.LineBasicMaterial | undefined;
+    if (mat) {
+      if (payload.state === 'blocked' || payload.state === 'frozen') {
+        mat.color.setHex(0xef4444);
+      } else if (payload.state === 'arrived') {
+        mat.color.setHex(0x10b981);
+      } else if (payload.state === 'moving') {
+        mat.color.setHex(0x38bdf8);
+      } else {
+        mat.color.setHex(0xfbbf24);
+      }
+    }
+    if (Array.isArray(payload.carrying)) {
+      this.refreshCargoMesh(payload.carrying);
+    }
+  }
+
+  public updateSimTruth(payload: SimTruthPayload): void {
+    if (!payload) return;
+    if (payload.scout?.pos) {
+      const [sx, sy, sz] = payload.scout.pos;
+      this.scoutGroup.position.set(sx, sy, sz);
+      if (typeof payload.scout.yaw === 'number') {
+        this.scoutGroup.rotation.z = payload.scout.yaw;
+      }
+    }
+    if (payload.responder?.pos) {
+      this.hasLiveResponderPose = true;
+      const [rx, ry, rz] = payload.responder.pos;
+      this.responderGroup.position.set(rx, ry, rz);
+      if (typeof payload.responder.yaw === 'number') {
+        this.responderGroup.rotation.z = payload.responder.yaw;
+      }
+    }
+  }
+
+  public updateWorldDebris(payload: WorldDebrisPayload): void {
+    if (!payload) return;
+    if (Array.isArray(payload.events)) {
+      for (const ev of payload.events) {
+        if (!ev?.id || !Array.isArray(ev.pos)) continue;
+        const blockMesh = this.sceneBuildingGroup.getObjectByName(ev.id);
+        if (blockMesh) {
+          blockMesh.position.set(ev.pos[0], ev.pos[1], ev.pos[2]);
+        }
+        const existing = this.sceneBlocksMap.get(ev.id);
+        if (existing) {
+          existing.pos = [...ev.pos] as [number, number, number];
+        } else {
+          this.sceneBlocksMap.set(ev.id, {
+            id: ev.id,
+            label: 'rubble',
+            pos: [...ev.pos] as [number, number, number],
+            size: [0.1, 0.1, 0.08]
+          });
+        }
+      }
+    }
+    if (Array.isArray(payload.stacks)) {
+      this.debrisStacksGroup.clear();
+      for (const st of payload.stacks) {
+        if (!st.unstable || !Array.isArray(st.min_xy) || !Array.isArray(st.max_xy)) continue;
+        const cx = (st.min_xy[0] + st.max_xy[0]) / 2;
+        const cy = (st.min_xy[1] + st.max_xy[1]) / 2;
+        const sx = Math.max(0.2, st.max_xy[0] - st.min_xy[0]);
+        const sy = Math.max(0.2, st.max_xy[1] - st.min_xy[1]);
+        const sz = Math.max(0.2, st.top_z || 0.4);
+        const box = new THREE.BoxGeometry(sx, sy, sz);
+        const wire = new THREE.LineSegments(
+          new THREE.EdgesGeometry(box),
+          new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.7 })
+        );
+        wire.position.set(cx, cy, sz / 2);
+        this.debrisStacksGroup.add(wire);
+      }
+    }
+  }
+
+  /** Draw off-hub multi-level descent trajectory (_runner/stage) across L1 -> ground -> B1. */
+  public updateRunnerStage(payload: RunnerStagePayload): void {
+    if (!payload) return;
+    if (Array.isArray(payload.levels) && payload.levels.length > 1) {
+      this.ensureMultiLevelSlabs(payload.levels);
+    }
+    if (Array.isArray(payload.trace) && payload.trace.length >= 2) {
+      this.stageTraceGroup.clear();
+      const pts = payload.trace.map(p => new THREE.Vector3(p[1], p[2], p[3] + 0.03));
+      const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+      const tubeGeom = new THREE.TubeGeometry(curve, Math.min(240, pts.length * 2), 0.028, 8, false);
+      const tubeMat = new THREE.MeshStandardMaterial({
+        color: 0x10b981,
+        emissive: 0x059669,
+        emissiveIntensity: 0.7,
+        roughness: 0.25
+      });
+      this.stageTraceGroup.add(new THREE.Mesh(tubeGeom, tubeMat));
+    }
+    if (Array.isArray(payload.final_pos) && payload.final_pos.length >= 3) {
+      const [fx, fy, fz] = payload.final_pos;
+      this.scoutGroup.position.set(fx, fy, fz);
+    }
+  }
+
+  public onDecisionLog(payload: DecisionLogPayload): void {
+    if (!payload?.perception) return;
+    // Detect supply placement from sim Responder log: "placed <item> at [x, y]"
+    const m = /placed\s+([\w_]+)\s+at\s+\[\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\]/i.exec(payload.perception);
+    if (m) {
+      const item = m[1];
+      const x = parseFloat(m[2]);
+      const y = parseFloat(m[3]);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        this.spawnSupplyMarker(item, x, y, this.responderGroup.position.z);
+      }
+    }
+  }
+
+  private spawnSupplyMarker(item: string, x: number, y: number, z = 0): void {
+    const key = `${item}:${x.toFixed(2)},${y.toFixed(2)}`;
+    if (this.placedSupplyKeys.has(key)) return;
+    this.placedSupplyKeys.add(key);
+
+    const node = new THREE.Group();
+    node.position.set(x, y, z);
+
+    if (this.supplyTemplate) {
+      const model = this.supplyTemplate.clone(true);
+      model.position.set(0, 0, 0.01);
+      node.add(model);
+    } else {
+      const kitGeom = new THREE.BoxGeometry(0.11, 0.09, 0.06);
+      const kitMat = new THREE.MeshStandardMaterial({
+        color: 0x10b981,
+        emissive: 0x047857,
+        emissiveIntensity: 0.5,
+        roughness: 0.35
+      });
+      const kitMesh = new THREE.Mesh(kitGeom, kitMat);
+      kitMesh.position.set(0, 0, 0.035);
+      node.add(kitMesh);
+    }
+
+    const ring = this.makeRingLine(0.12, 0x10b981);
+    node.add(ring);
+
+    const label = this.createLabelSprite(`Supply: ${item.replace(/_/g, ' ')}`, '#34d399');
+    label.scale.set(0.52, 0.17, 1);
+    label.position.set(0, 0, 0.22);
+    node.add(label);
+
+    this.suppliesGroup.add(node);
   }
 
   /**
@@ -629,12 +1366,19 @@ export class MapViewer {
     }
     this.casualtiesMap.clear();
 
-    const sphereGeom = new THREE.SphereGeometry(0.12, 24, 24);
+    const sphereGeom = new THREE.SphereGeometry(0.09, 20, 20);
+    const torsoGeom = new THREE.CapsuleGeometry(0.075, 0.22, 8, 16);
     const sphereMat = new THREE.MeshStandardMaterial({
       color: 0xec4899,
       emissive: 0x831843,
-      emissiveIntensity: 0.6,
+      emissiveIntensity: 0.65,
       roughness: 0.3
+    });
+    const suitMat = new THREE.MeshStandardMaterial({
+      color: 0xf43f5e,
+      emissive: 0x881337,
+      emissiveIntensity: 0.45,
+      roughness: 0.45
     });
 
     for (const cas of casualties) {
@@ -642,16 +1386,26 @@ export class MapViewer {
       this.casualtiesMap.set(cas.id, cas);
       const [x, y, z] = cas.pos;
 
-      const sphere = new THREE.Mesh(sphereGeom, sphereMat);
-      sphere.position.set(x, y, z + 0.12);
-      this.casualtyGroup.add(sphere);
+      if (z < -0.2 && this.multiLevelGroup.children.length === 0) {
+        this.ensureMultiLevelSlabs(['L1', 'ground', 'B1', 'B2', 'B3']);
+      }
 
-      const ringGeom = new THREE.RingGeometry(0.15, 0.22, 32);
+      // 3D recumbent survivor figure + beacon
+      const head = new THREE.Mesh(sphereGeom, sphereMat);
+      head.position.set(x - 0.12, y, z + 0.09);
+      this.casualtyGroup.add(head);
+
+      const torso = new THREE.Mesh(torsoGeom, suitMat);
+      torso.rotation.z = Math.PI / 2;
+      torso.position.set(x + 0.04, y, z + 0.075);
+      this.casualtyGroup.add(torso);
+
+      const ringGeom = new THREE.RingGeometry(0.18, 0.25, 32);
       const ringMat = new THREE.MeshBasicMaterial({
         color: 0xf472b6,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.7
+        opacity: 0.75
       });
       const ring = new THREE.Mesh(ringGeom, ringMat);
       ring.position.set(x, y, z + 0.02);
@@ -676,11 +1430,26 @@ export class MapViewer {
     if (typeof payload.pose.yaw === 'number') {
       this.scoutGroup.rotation.z = payload.pose.yaw;
     }
+    if (z < -0.2 && this.multiLevelGroup.children.length === 0) {
+      this.ensureMultiLevelSlabs(['L1', 'ground', 'B1', 'B2', 'B3']);
+    }
   }
 
   public updateResponderAction(payload: ResponderActionPayload): void {
     if (!payload) return;
-    if (payload.route && this.routesMap.has(payload.route)) {
+    if (payload.action === 'place_supply' && payload.item) {
+      const p = this.responderGroup.position;
+      const yaw = this.responderGroup.rotation.z;
+      this.spawnSupplyMarker(
+        payload.item,
+        p.x + Math.cos(yaw) * 0.18,
+        p.y + Math.sin(yaw) * 0.18,
+        p.z
+      );
+    }
+    // When live/replay responder/pose is streaming, continuous 10 Hz poses drive Responder position.
+    // When no responder/pose has been seen (e.g. unit tests / fake mode), place at stopBesideCasualty.
+    if (!this.hasLiveResponderPose && payload.route && this.routesMap.has(payload.route)) {
       const route = this.routesMap.get(payload.route)!;
       if (route.cells && route.cells.length > 0) {
         const res = this.cellResolution;
@@ -921,16 +1690,28 @@ export class MapViewer {
     this.movedBlocksGroup.clear();
     this.movedBlockMeshes = [];
 
-    // Map block names to backup scene coordinates
-    const blockPositions: Record<string, { pos: [number, number, number]; size: [number, number, number] }> = {
+    // Fallback map of backup/levels block positions (full dimensions in size)
+    const fallbackPositions: Record<string, { pos: [number, number, number]; size: [number, number, number] }> = {
       b7: { pos: [0, 0.97, 0.25], size: [0.08, 0.48, 0.4] },
       b8: { pos: [1.25, -0.32, 0.25], size: [0.08, 0.62, 0.4] },
       b10: { pos: [0.97, -0.5, 0.18], size: [0.38, 0.22, 0.08] },
-      b11: { pos: [1.25, 0.45, 0.08], size: [0.12, 0.16, 0.1] }
+      b11: { pos: [1.25, 0.45, 0.08], size: [0.12, 0.16, 0.1] },
+      x1: { pos: [-0.62, -1.02, 0.09], size: [0.18, 0.18, 0.16] }
     };
 
     for (const id of blockIds) {
-      const def = blockPositions[id] || { pos: [0, 1.0, 0.2], size: [0.2, 0.4, 0.3] };
+      const sceneBlock = this.sceneBlocksMap.get(id);
+      const def = sceneBlock
+        ? {
+            pos: sceneBlock.pos,
+            size: [
+              Math.max(0.08, sceneBlock.size[0] * 2),
+              Math.max(0.08, sceneBlock.size[1] * 2),
+              Math.max(0.08, sceneBlock.size[2] * 2)
+            ] as [number, number, number]
+          }
+        : fallbackPositions[id] || { pos: [0, 1.0, 0.2], size: [0.2, 0.4, 0.3] };
+
       const geom = new THREE.BoxGeometry(def.size[0], def.size[1], def.size[2]);
       const mat = new THREE.MeshStandardMaterial({
         color: 0xef4444,
@@ -1035,7 +1816,7 @@ export class MapViewer {
       detail: 'block b7 falls across doorway'
     });
 
-    // 3. Propose new route after 1.5 seconds avoiding b7
+    // 3. Propose new route after 2.5 seconds avoiding b7
     window.setTimeout(() => {
       this.updateRouteProposed({
         id: 'r4',
@@ -1049,13 +1830,13 @@ export class MapViewer {
           [Math.round(1.95 / res), Math.round(0.98 / res), 0]
         ],
         goal: 'deliver water to c1',
-        reason: 'avoiding collapsed block b7 toward casualty c1',
+        reason: 'avoiding collapsed block b7 (b7 moved) toward casualty c1',
         model: 'local-astar'
       });
 
       // Move Responder to route
       this.responderGroup.position.set(-0.2, -0.4, 0);
-    }, 1500);
+    }, 2500);
   }
 
   /**
@@ -1064,6 +1845,9 @@ export class MapViewer {
    * Ensures ?fake=1 immediately displays a coloured map with casualty, hazards and route.
    */
   public loadBackupSceneDemo(): void {
+    this.hasLiveResponderPose = false;
+    this.mergedCellsMap.clear();
+    this.buildSceneBuilding(DEFAULT_BACKUP_BLOCKS, 'backup');
     const res = DEFAULT_RES;
     const cells: GridCell[] = [];
 
