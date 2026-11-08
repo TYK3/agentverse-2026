@@ -169,8 +169,9 @@ class Grid:
         return self._message(t, self.changed)
 
     def snapshot(self, t):
-        """map/cells with every cell observed so far: it replaces the whole map."""
-        return self._message(t, self.cells)
+        """map/cells with every cell observed so far (after a change, only cells measured or forgotten since)."""
+        keys = self.cells if self.before is None else (set(self.after) | {c for c in self.changed if c not in self.cells})
+        return self._message(t, keys)
 
     def column(self, i, j):
         """(state, occupied) of the plan-view cell (i, j), flattened over every layer the map holds.
