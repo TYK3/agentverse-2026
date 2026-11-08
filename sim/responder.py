@@ -220,6 +220,17 @@ class Responder:
     def on_action(self, msg):
         """Run a responder/action now, or queue it behind the current move (the planner sends a whole
         move -> grip -> place_supply -> release sequence at once and there is no completion message)."""
+        # A re-plan supersedes the old mission, rather than waiting behind its move.
+        # Validate it first: a refused replacement must leave the current move intact.
+        if (msg.get("action") == "move" and msg.get("route") != self.route
+                and (self.state == "moving" or self.queue)):
+            old_route, dropped = self.route, len(self.queue)
+            result = self._run(msg)
+            if result["outcome"] != "refused":
+                self.queue = []
+                self._decide("replaced", f"route {old_route} replaced by {self.route}; "
+                                         f"dropped {dropped} obsolete queued action(s)")
+            return result
         if self.state == "moving" or self.queue:
             self.queue.append(dict(msg))
             return self._decide("queued", f"{msg.get('action')} {msg.get('item')} waits for the current move "
@@ -241,6 +252,8 @@ class Responder:
             out = self.move(route)
             if out["outcome"] == "refused":
                 self.failed_routes.add(route)
+            else:
+                self.failed_routes.discard(route)
             return out
         if route in self.failed_routes:
             # Never place or drop a supply where the Responder did not drive (its move was refused).
