@@ -19,6 +19,7 @@ async def run(world, bus, rate_hz=RATE_HZ):
         started = time.monotonic()
         world.responder.step(dt)      # the Responder (T06) moves on the same tick as the physics
         events = world.tick(dt)
+        events.append(("responder/pose", world.responder.pose_message(world.t)))   # E2: its real pose, 10 Hz
         if getattr(world, "relay", None) is not None:  # L3: move the radio, drop crumbs, re-route
             events += world.relay.step(world.t, world.pos)
             world.hw.source.transport.flush()
