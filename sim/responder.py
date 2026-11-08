@@ -50,6 +50,7 @@ MAX_RISE = 0.6              # max floor change per metre driven (as sim/levels.p
 STEP_SLACK = 0.004          # metres of floor change always allowed per step (ramp seams, float noise)
 ARRIVE = 0.005              # metres
 SKIP_NEAR = RES             # a route's leading waypoints closer than this are skipped, not turned to (B4-WALL-STOP)
+SCOUT_WAIT_S = 10.0         # the Scout in the way: wait this long for it to move before calling it a block
 REACH = 0.45                # a supply or block further than this from the Responder centre cannot be gripped
 LIGHT_KG = 2.0              # blocks at or above this mass are too heavy to clear
 ARM_PAYLOAD_KG = 0.5        # found material carried to a casualty: the real arm's rated payload (docs/hardware.md)
@@ -115,6 +116,7 @@ class Responder:
         # nothing, so the chassis can drive up to them, and the Responder is delivering to them. Only
         # those: x1_rubble and the Scout are non-colliding too, and must still stop it.
         self.passable = {geom for _, geom, _ in casualties(m)}
+        self.wait_since = None     # sim time the Scout first stood in the way of this move (cause 3)
         self.floor_z = float(self.pos[2]) - RIDE_Z   # floor under the chassis; follows ramps (levels.xml)
         self.pitch = 0.0           # nose-down tilt in radians, from the floor under the front and back
 
@@ -327,6 +329,7 @@ class Responder:
         the first straight run is shifted sideways onto the pose (less than a cell, inside the planned
         corridor) and driven parallel to the route; the turn at its end takes the offset up.
         """
+        self.wait_since = None                       # a new move waits for the Scout afresh
         path = [cell_centre(c) for c in cells]
         here = self.pos[:2]
         if len(path) < 2 or float(np.linalg.norm(path[0] - here)) >= SKIP_NEAR:
@@ -514,6 +517,22 @@ class Responder:
             start += dist + 1e-4
         return None, None
 
+    def _wait_for_scout(self):
+        """True while the Scout blocks the way and has done so for under SCOUT_WAIT_S: the Responder
+        holds its pose and its queue and tries again next step (SUPPLY-RAY-R1R3 cause 3).
+
+        The Scout moves on by itself, so a "blocked" here only made the planner re-plan every few seconds,
+        and the handoff sent the Scout to the Responder's spot again. Anything else still blocks at once;
+        a Scout that stays longer than SCOUT_WAIT_S is reported as a block, as before."""
+        if self.last_hit is None or not self.last_hit[1].startswith("scout"):
+            return False
+        now = float(self.clock())
+        if self.wait_since is None:
+            self.wait_since = now
+            self._decide("waiting", f"the Scout is in the way on route {self.route}; waiting up to "
+                                    f"{SCOUT_WAIT_S:g} s for it to move")
+        return now - self.wait_since < SCOUT_WAIT_S
+
     def _hit_cell(self, xy):
         """Grid cell of a scene-frame (x, y), as perception's map: floor(pos / RES); k from the current route."""
         cells = self.routes.get(self.route) or []
@@ -571,6 +590,9 @@ class Responder:
             heading = math.atan2(delta[1], delta[0])
             step = min(budget, dist)
             if not self.free_ahead(heading, step):
+                if self._wait_for_scout():
+                    self._set_pose(self.pos[:2], heading)
+                    return
                 self._report_hit()
                 self._set_pose(self.pos[:2], heading)
                 dropped = len(self.queue)
@@ -578,6 +600,7 @@ class Responder:
                 self._decide("blocked", f"collision ray: block ahead on route {self.route}, stopped"
                                         + (f", dropped {dropped} queued action(s)" if dropped else ""))
                 return
+            self.wait_since = None
             self._set_pose(self.pos[:2] + delta / dist * step, heading)
             budget -= step
         if not self.path:
