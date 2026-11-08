@@ -18,7 +18,11 @@ Messages (coord/CONTRACT.md):
 - in  `world/change`     freeze in place, drop the current move and the queue (wait for a new responder/action)
 - in  `permit/route`     L1: granted false stops a move on that route at once and refuses new moves on it
                          until a granted true arrives (routes with no permit message behave as before)
-- out `log/decision`     every action's outcome; refusals say outcome "refused" and why
+- out `log/decision`     every action's outcome; refusals say outcome "refused" and why. When the collision
+                         ray stops a move, a `ray_hit` record comes first (just before "blocked"): perception
+                         "responder ray hit at [x, y], cell [i, j, k]", reason "robot responder route <id> hit
+                         <geom> at [x, y] cell [i, j, k]" (the nearest ray hit, scene frame; cell = floor(pos / RES),
+                         k from the route), so the planner can mark the blocked cell
 
 Clearing debris is `grip_block(block_id)` / `release_block(block_id)`, reached from responder/action's
 optional `block` (Y2). Two mass limits: a block slid aside to clear a route may be up to LIGHT_KG; a block
@@ -98,6 +102,7 @@ class Responder:
         self.queue = []            # responder/action messages waiting for the current move to finish
         self.failed_routes = set()  # routes whose move was refused: their other actions are refused too
         self.log = []              # every log/decision this Responder published
+        self.last_hit = None       # nearest blocking ray hit of the last free_ahead: (x, y), geom name
         self.floor_z = float(self.pos[2]) - RIDE_Z   # floor under the chassis; follows ramps (levels.xml)
         self.pitch = 0.0           # nose-down tilt in radians, from the floor under the front and back
 
@@ -220,6 +225,17 @@ class Responder:
     def on_action(self, msg):
         """Run a responder/action now, or queue it behind the current move (the planner sends a whole
         move -> grip -> place_supply -> release sequence at once and there is no completion message)."""
+        # A re-plan supersedes the old mission, rather than waiting behind its move.
+        # Validate it first: a refused replacement must leave the current move intact.
+        if (msg.get("action") == "move" and msg.get("route") != self.route
+                and (self.state == "moving" or self.queue)):
+            old_route, dropped = self.route, len(self.queue)
+            result = self._run(msg)
+            if result["outcome"] != "refused":
+                self.queue = []
+                self._decide("replaced", f"route {old_route} replaced by {self.route}; "
+                                         f"dropped {dropped} obsolete queued action(s)")
+            return result
         if self.state == "moving" or self.queue:
             self.queue.append(dict(msg))
             return self._decide("queued", f"{msg.get('action')} {msg.get('item')} waits for the current move "
@@ -241,6 +257,8 @@ class Responder:
             out = self.move(route)
             if out["outcome"] == "refused":
                 self.failed_routes.add(route)
+            else:
+                self.failed_routes.discard(route)
             return out
         if route in self.failed_routes:
             # Never place or drop a supply where the Responder did not drive (its move was refused).
@@ -386,13 +404,48 @@ class Responder:
         up = np.cross(fwd, side)
         need = HALF_LEN + GAP + step
         geomid = np.zeros(1, dtype=np.int32)
+        nearest = None
         for z in RAY_HEIGHTS:
             for offset in (0.0, HALF_WIDTH, -HALF_WIDTH):
                 origin = np.array([*self.pos[:2], self.floor_z + RIDE_Z]) + up * (z - RIDE_Z) + side * offset
                 dist = mujoco.mj_ray(self.m, self.d, origin, fwd, None, 1, self.body, geomid)
                 if 0 <= dist < need and not self._carried_geom(int(geomid[0])):
-                    return False
-        return True
+                    if nearest is None or dist < nearest[0]:
+                        nearest = (dist, origin + fwd * dist, int(geomid[0]))
+        if nearest is None:
+            self.last_hit = None
+            return True
+        _, point, geom = nearest
+        self.last_hit = ((float(point[0]), float(point[1])),
+                         mujoco.mj_id2name(self.m, mujoco.mjtObj.mjOBJ_GEOM, geom) or f"geom{geom}")
+        return False
+
+    def _hit_cell(self, xy):
+        """Grid cell of a scene-frame (x, y), as perception's map: floor(pos / RES); k from the current route."""
+        cells = self.routes.get(self.route) or []
+        k = 0
+        if cells:
+            near = min(cells, key=lambda c: float(np.linalg.norm(cell_centre(c) - np.asarray(xy))))
+            k = int(near[2]) if len(near) > 2 else 0
+        return [math.floor(xy[0] / RES), math.floor(xy[1] / RES), k]
+
+    def _report_hit(self):
+        """Publish where the collision ray hit (log/decision outcome "ray_hit"), before the "blocked" record."""
+        if self.last_hit is None:
+            return None
+        (hx, hy), geom = self.last_hit
+        i, j, k = self._hit_cell((hx, hy))
+        data = {
+            "t": round(max(0.0, float(self.clock())), 2),
+            "perception": f"responder ray hit at [{hx:.3f}, {hy:.3f}], cell [{i}, {j}, {k}]",
+            "model": "sim",
+            "physics": "mujoco",
+            "outcome": "ray_hit",
+            "reason": f"robot responder route {self.route} hit {geom} at [{hx:.3f}, {hy:.3f}] cell [{i}, {j}, {k}]",
+        }
+        self.log.append(data)
+        self.publish("log/decision", data)
+        return data
 
     def _carried_geom(self, geom):
         """Geoms the Responder itself carries never block it."""
@@ -421,6 +474,7 @@ class Responder:
             heading = math.atan2(delta[1], delta[0])
             step = min(budget, dist)
             if not self.free_ahead(heading, step):
+                self._report_hit()
                 self._set_pose(self.pos[:2], heading)
                 dropped = len(self.queue)
                 self.path, self.queue, self.state = [], [], "blocked"
