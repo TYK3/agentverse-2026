@@ -101,18 +101,6 @@ def relook_before_moving_on(records, index):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "no relook before the next plan inside tools.run_b2.STOP_WINDOW: "
-        "record 52 pose state blocked t=20.0 (plan 53), "
-        "record 173 pose state blocked t=74.0 (plan 174), "
-        "record 366 pose state blocked t=146.0 (plan 367), "
-        "record 413 pose state blocked t=167.0 (plan 414), "
-        "record 435 mapped source refused t=173.7 (plan 436)"
-    ),
-)
 def test_every_hit_has_a_relook_before_the_scout_moves_on(tmp_path, monkeypatch):
     pytest.importorskip("mujoco")
     monkeypatch.setenv("GEMINI_MODE", "off")
