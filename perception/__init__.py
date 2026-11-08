@@ -55,6 +55,7 @@ async def start(bus):
             await bus.publish(topic, payload)
 
     bus.subscribe("sensors/scout", listen)
+    bus.subscribe("scout/goto", lambda d: listener.on_goto(d, now()))   # yield to permit re-looks
     hazards = Hazards(grid, Cloud(grid.res))
     bus.subscribe("sensors/scout", hazards.on_sensors)
     _inspect(bus, now)          # G2: ER points, kept only where the depth points ground them

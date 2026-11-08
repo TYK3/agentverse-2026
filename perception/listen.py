@@ -33,6 +33,10 @@ MIN_CROSS = math.radians(15.0)   # shallower crossings amplify bearing noise; tr
 BEARING_SIGMA = math.radians(5.0)  # 1-sigma bearing noise of a tap (ReSpeaker DOA, docs/hardware.md)
 RETRY_S = 30.0         # after a dialogue with no fix, wait this long before calling again
 RETRY_FOUND_S = 120.0  # after a fix: the Scout gets on with mapping
+YIELD_S = 20.0         # another scout/goto (permit re-look, planner look, G2) keeps the Scout this long (explore.HOLD)
+WAIT_MAX_S = 30.0      # waiting to move to the 2nd spot longer than this: end with what the first spot heard
+OWN = "listen again"   # reason prefix of this module's own scout/goto
+REACHED_M = 0.15       # within this of the other goto's target, the Scout is free again
 CLEARANCE = 0.15       # a listening spot needs this much seen free space around it
 
 CALL = "Hello? Is anyone there? If you can hear me, tap three times on something hard."
@@ -71,7 +75,7 @@ def uncertainty(p, q, x, crossing):
 class Listener:
     def __init__(self, grid=None) -> None:
         self.grid = grid
-        self.state = "idle"     # idle | listening | moving
+        self.state = "idle"     # idle | listening | waiting | moving
         self.rays: list[tuple[tuple[float, float], float]] = []   # (xy, scene bearing) per spot
         self.samples: list[float] = []
         self.until = 0.0
@@ -81,10 +85,27 @@ class Listener:
         self.log: list[str] = []
         self.ended = -math.inf
         self.pose = None
+        self.busy = None        # (target xy, until) of another module's scout/goto the Scout is serving
+        self.wait_until = 0.0
 
     @property
     def active(self) -> bool:
-        return self.state in ("listening", "moving")
+        return self.state in ("listening", "waiting", "moving")
+
+    def on_goto(self, data: dict[str, Any], t: float) -> None:
+        """Another module's scout/goto (e.g. a permit re-look) has the Scout: the 2nd-spot move waits
+        for it instead of overriding it (#52: a permit was never re-earned because this move won)."""
+        if not str(data.get("reason", "")).startswith(OWN):
+            self.busy = ((data["target"][0], data["target"][1]), t + YIELD_S)
+
+    def _scout_busy(self, t: float) -> bool:
+        if self.busy is None:
+            return False
+        (x, y), until = self.busy
+        if t >= until or (self.pose and math.dist(self.pose[0][:2], (x, y)) < REACHED_M):
+            self.busy = None
+            return False
+        return True
 
     def on_sensors(self, data: dict[str, Any], t: float) -> list[tuple[str, dict]]:
         pose = data["pose"]
@@ -101,6 +122,12 @@ class Listener:
                 self.samples.append(wrap(pose["yaw"] + math.radians(ac["bearing"])))
             if t >= self.until:
                 out += self._heard(t)
+        elif self.state == "waiting":
+            if not self._scout_busy(t):
+                out += self._move(t)
+            elif t >= self.wait_until:
+                self.log.append(f"{t:.1f}s Scout still busy elsewhere after {WAIT_MAX_S:.0f} s: no 2nd spot")
+                out += self._end(t, FOUND if self.rays else NO_TAP)
         elif self.state == "moving":
             motion = (data.get("motion") or {}).get("state")
             if motion in ("arrived", "blocked") or t >= self.until:
@@ -131,6 +158,10 @@ class Listener:
                 return self._end(t, FOUND)
         if self.tried_spots >= 2:
             return self._end(t, FOUND if self.rays else NO_TAP)
+        if self._scout_busy(t):
+            self.state, self.wait_until = "waiting", t + WAIT_MAX_S
+            self.log.append(f"{t:.1f}s 2nd spot waits: the Scout is serving another scout/goto")
+            return []
         return self._move(t)
 
     def _move(self, t):
