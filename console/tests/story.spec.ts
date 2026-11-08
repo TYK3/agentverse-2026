@@ -87,6 +87,17 @@ test('DEMO-FLOW: in the browser, ?run= replays a recording through the strip and
   await expect(card).toBeHidden();
 });
 
+test('STAGE-RING: a replay ends on the Report stage with a tick, and the strip stays hidden', async ({ page }) => {
+  const jsonl = RUN.map(([topic, data], i) => JSON.stringify({ t: i * 0.05, topic, data })).join('\n');
+  await page.route('**/runs/stage-test.jsonl', route => route.fulfill({ status: 200, body: jsonl, contentType: 'text/plain' }));
+  await page.goto('/?run=/runs/stage-test.jsonl&speed=4');
+  const ring = page.locator('#story .stage-ring');
+  await expect(ring).toBeVisible();
+  await expect(page.locator('#story .story-strip')).toBeHidden();
+  await expect(ring.locator('.ring-stage')).toHaveText('Report', { timeout: 15000 });
+  await expect(ring.locator('.ring-wrap')).toHaveClass(/is-ticked/);
+});
+
 test('DEMO-FLOW: live mode shows LIVE and the follow toggle', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#story .story-badge')).toHaveText('LIVE');

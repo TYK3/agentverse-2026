@@ -373,12 +373,44 @@ body::before {
 .permit-reason { color: var(--text); }
 #reasoning-log small { color: var(--muted); }
 
-/* Tight strip (only when all names do not fit): steps fold to their number,
-   except the current step and any step waiting on the operator. Hovering or
-   focusing a step opens its name with an animation; the steps after it slide
-   right, so the pointer stays on the step it opened. */
-.story-label { max-width: 14rem; transition: max-width 260ms cubic-bezier(0.16, 1, 0.3, 1); }
-.story-strip.is-tight .story-phase:not(.story-current):not([data-state="waiting"]):not([data-state="held"]) .story-label { max-width: 0; }
-.story-strip.is-tight .story-phase:not(.story-current):not([data-state="waiting"]):not([data-state="held"]):hover .story-label { max-width: 14rem; }
-.story-strip.is-tight .story-phase:hover { flex-shrink: 0; }
-@media (prefers-reduced-motion: reduce) { .story-label { transition: none; } }
+/* ---------- Stage ring (replaces the visible 10-step strip) ----------
+   The strip stays in the DOM for story.ts and its tests, but only the current
+   stage and a thin loading ring are shown next to the LIVE badge. */
+#story .story-strip { display: none; }
+@property --p { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+.stage-ring { display: flex; flex: 1; align-items: center; gap: 0.7rem; min-width: 0; }
+.ring-wrap { display: block; position: relative; flex: none; width: 26px; height: 26px; }
+.ring {
+  --c: var(--accent);
+  display: block; width: 26px; height: 26px; border-radius: 50%;
+  background: conic-gradient(var(--c) var(--p, 0%), var(--border) 0);
+  -webkit-mask: radial-gradient(circle, transparent 10.5px, #000 11px);
+          mask: radial-gradient(circle, transparent 10.5px, #000 11px);
+  transition: --p 0.4s;
+}
+.ring-wrap::after {
+  /* the loading sweep: a short bright arc circling slowly while the stage runs */
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(rgba(255, 255, 255, 0.85) 0 8%, transparent 8%);
+  -webkit-mask: radial-gradient(circle, transparent 10.5px, #000 11px);
+          mask: radial-gradient(circle, transparent 10.5px, #000 11px);
+  animation: ring-spin 3s linear infinite;
+}
+@keyframes ring-spin { to { transform: rotate(1turn); } }
+.stage-ring.is-waiting .ring { --c: var(--warn); }
+.stage-ring.is-waiting .ring-wrap::after,
+.stage-ring.is-idle .ring-wrap::after,
+.ring-wrap.is-ticked::after,
+.ring-wrap.is-filling::after { display: none; }
+.ring-stage { font-family: var(--pixel-font); font-size: 0.7rem; color: var(--accent-soft); text-transform: uppercase; white-space: nowrap; }
+.stage-ring.is-waiting .ring-stage { color: var(--warn); }
+.stage-ring.is-idle .ring-stage { color: var(--muted); }
+.tick { position: absolute; inset: 0; width: 26px; height: 26px; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: square; stroke-dasharray: 18; stroke-dashoffset: 18; opacity: 0; transition: stroke-dashoffset 450ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms; }
+.ring-wrap.is-ticked .tick { stroke-dashoffset: 0; opacity: 1; }
+.ring-wrap, .ring-stage { transition: opacity 280ms ease, transform 280ms cubic-bezier(0.16, 1, 0.3, 1); }
+.stage-ring.is-leaving .ring-wrap, .stage-ring.is-leaving .ring-stage { opacity: 0; transform: translateY(-6px); }
+.stage-ring.is-entering .ring-wrap, .stage-ring.is-entering .ring-stage { opacity: 0; transform: translateY(6px); transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ring-wrap::after { animation: none; }
+  .tick, .ring, .ring-wrap, .ring-stage { transition: none; }
+}
