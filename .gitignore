@@ -11,3 +11,7 @@ __pycache__/
 .claude/worktrees/
 # Gemini answers cached by coord/gem.py (replay mode)
 .gem_cache/
+
+# T24 raw trajectories; the compressed measured dataset is committed separately.
+eval/traces/
+eval/stand-in/traces/
