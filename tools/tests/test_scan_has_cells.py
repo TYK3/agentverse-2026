@@ -78,7 +78,7 @@ def test_every_real_scan_has_cells_at_its_own_level(recording):
     _, records, scans = recording
     assert_scans_have_cells(records, scans)
     assert len(scans) > 500
-    assert any(s["ramp"] for s in scans) and any(not s["ramp"] for s in scans)   # ramp sweeps count too
+    assert any(s["ramp"] for s in scans) and any(not s["ramp"] for s in scans)   # partial (slope) sweeps too
     assert min(len(s["cells"]) for s in scans) >= 10
 
 
