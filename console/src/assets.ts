@@ -1,4 +1,5 @@
-// A1: free 3D assets for the demo (built by sim/assets/build_glb.py, credits in public/models/CREDITS.json).
+// A1 + CONSOLE-3D: free 3D assets for the demo (built by sim/assets/build_glb.py, credits in public/models/CREDITS.json)
+// and live/replay bus wiring for the 3D building, robots, depth cloud, debris and supply drops.
 //
 // - robots.glb (small) loads at idle time in every scene. aftershock.glb (the tower) and the HDRI load only
 //   the first time the tower is shown: parsing them costs seconds in software GL, and other scenes never
@@ -7,8 +8,8 @@
 // - The Scout and Responder primitives are swapped for the Go1 and Rover models, scaled to the
 //   footprint the console already draws, so poses, labels and tests are unchanged.
 // - The tower model (blocks b1..b27 by scene/loaded id, basements, stair/lift core) is shown only when
-//   the sim says the scene is the tower, or with ?building=1 (?building=0 hides it). It is the scene the
-//   simulator runs, not what perception has mapped; casualties are not in it.
+//   the sim says the scene is the tower, or with ?building=1 (?building=0 hides it), or via the 3D toggle.
+//   For backup, building and levels scenes, MapViewer renders the 3D building directly from scene/loaded.blocks.
 // - Above the ground storey the tower is a faint x-ray, so what happens inside stays visible.
 // - On world/change, moved blocks fade to a red ghost: where they are now is for the next scan to say.
 // - A small credits card lists every asset, its author and licence.
@@ -17,7 +18,17 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { on } from './bus';
-import type { MapViewer } from './map';
+import type {
+  MapViewer,
+  SceneLoadedPayload,
+  ResponderPosePayload,
+  MapPointsPayload,
+  ScoutGotoPayload,
+  WorldDebrisPayload,
+  SimTruthPayload,
+  RunnerStagePayload,
+  DecisionLogPayload
+} from './map';
 
 export interface Credit { asset: string; author: string; source: string; licence: string; used_for: string }
 
@@ -47,11 +58,27 @@ function buildingParam(): boolean | null {
 function swapInto(group: THREE.Object3D | undefined, model: THREE.Object3D | undefined): void {
   if (!group || !model) return;
   const prims = group.children.filter(c => (c as THREE.Mesh).isMesh);
+  if (prims.length === 0) return;
+
+  // Measure primitive footprint in unrotated local coordinates so an already-turned robot never skews scale
+  const savedPos = group.position.clone();
+  const savedRot = group.rotation.clone();
+  group.position.set(0, 0, 0);
+  group.rotation.set(0, 0, 0);
+  group.updateMatrixWorld(true);
+
   const box = new THREE.Box3();
   prims.forEach(p => box.expandByObject(p));
+
+  group.position.copy(savedPos);
+  group.rotation.copy(savedRot);
+  group.updateMatrixWorld(true);
+
   if (box.isEmpty()) return;
   const want = box.getSize(new THREE.Vector3());
+  model.updateMatrixWorld(true);
   const have = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
+  if (have.x <= 0 || have.y <= 0) return;
   const s = Math.min(want.x / have.x, want.y / have.y);
   model.scale.setScalar(s);
   model.position.set(0, 0, 0);
@@ -98,7 +125,7 @@ function cheapen(mesh: THREE.Mesh): void {
   mesh.material = cheap.get(mat)!;
 }
 
-function creditsCard(credits: Credit[]): HTMLElement {
+function creditsCard(credits: Credit[], onToggleTower: () => void, isTowerVisible: () => boolean): HTMLElement {
   const card = document.createElement('details');
   card.id = 'asset-credits';
   card.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:30;max-width:340px;font:12px/1.4 system-ui,sans-serif;' +
@@ -107,6 +134,20 @@ function creditsCard(credits: Credit[]): HTMLElement {
   summary.textContent = '3D asset credits';
   summary.style.cssText = 'cursor:pointer;font-weight:600';
   card.appendChild(summary);
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.id = 'btn-toggle-tower-glb';
+  toggleBtn.textContent = isTowerVisible() ? 'Tower GLB mesh: ON' : 'Tower GLB mesh: auto / toggle';
+  toggleBtn.style.cssText = 'margin:6px 0 4px;padding:3px 8px;font:11px/1.3 system-ui,sans-serif;cursor:pointer;' +
+    'background:#1e293b;color:#7dd3fc;border:1px solid #38bdf8;border-radius:5px;display:block;width:100%';
+  toggleBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    onToggleTower();
+    toggleBtn.textContent = isTowerVisible() ? 'Tower GLB mesh: ON' : 'Tower GLB mesh: OFF (scene blocks)';
+  });
+  card.appendChild(toggleBtn);
+
   const list = document.createElement('ul');
   list.style.cssText = 'margin:6px 0 2px;padding-left:16px';
   for (const c of credits) {
@@ -139,7 +180,7 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
   };
   (window as unknown as { aftershockAssets: DemoAssets }).aftershockAssets = state;
 
-  const forced = buildingParam();
+  let forced = buildingParam();
   let towerScene = false;
   let building: THREE.Object3D | undefined;
   let annex: THREE.Object3D | undefined;
@@ -151,8 +192,14 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     state.buildingVisible = !!building && show;
     if (building) building.visible = show;
     if (annex) annex.visible = show;
+    viewer.setGlbBuildingVisible?.(state.buildingVisible);
   };
-  state.showBuilding = (show: boolean) => { towerScene = show; if (forced ?? towerScene) loadTower(); apply(); };
+  state.showBuilding = (show: boolean) => {
+    towerScene = show;
+    if (forced !== null && forced !== show) forced = show;
+    if (forced ?? towerScene) loadTower();
+    apply();
+  };
   const clearMoved = () => {
     pendingMoved.clear();
     state.movedBlocks = [];
@@ -176,10 +223,38 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
 
   // Block ids are per scene (the backup scene's b7 is not the tower's b7): a new scene clears the ghosts,
   // and a world/change only marks tower blocks while the tower is the scene shown.
-  on('scene/loaded', data => { clearMoved(); state.showBuilding((data as { scene?: string })?.scene === 'tower'); });
+  on('scene/loaded', data => {
+    clearMoved();
+    const payload = data as SceneLoadedPayload;
+    viewer.updateSceneLoaded?.(payload);
+    state.showBuilding(payload?.scene === 'tower');
+  });
   on('world/change', data => {
     state.worldChanges += 1;
     if (forced ?? towerScene) state.markMoved((data as { moved_blocks?: string[] })?.moved_blocks ?? []);
+  });
+
+  // Wire continuous 3D robot poses, live point clouds, debris and multi-level stage traces to MapViewer
+  on('responder/pose', data => {
+    viewer.updateResponderPose?.(data as ResponderPosePayload);
+  });
+  on('map/points', data => {
+    viewer.updateMapPoints?.(data as MapPointsPayload);
+  });
+  on('scout/goto', data => {
+    viewer.updateScoutGoto?.(data as ScoutGotoPayload);
+  });
+  on('world/debris', data => {
+    viewer.updateWorldDebris?.(data as WorldDebrisPayload);
+  });
+  on('sim/truth', data => {
+    viewer.updateSimTruth?.(data as SimTruthPayload);
+  });
+  on('_runner/stage', data => {
+    viewer.updateRunnerStage?.(data as RunnerStagePayload);
+  });
+  on('log/decision', data => {
+    viewer.onDecisionLog?.(data as DecisionLogPayload);
   });
 
   const software = softwareGl(viewer.renderer);
@@ -221,7 +296,17 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     .then(r => (r.ok ? r.json() : []))
     .then((credits: Credit[]) => {
       state.credits = credits;
-      if (credits.length) document.body.appendChild(creditsCard(credits));
+      if (credits.length) {
+        const existing = document.getElementById('asset-credits');
+        if (existing) existing.remove();
+        document.body.appendChild(
+          creditsCard(
+            credits,
+            () => state.showBuilding(!state.buildingVisible),
+            () => state.buildingVisible
+          )
+        );
+      }
     })
     .catch(() => {});
 
@@ -237,9 +322,13 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     const root = gltf.scene;                 // exported in the scene frame (z up): no rotation needed
     const scout = root.getObjectByName('scout');
     const responder = root.getObjectByName('responder');
+    const kit = root.getObjectByName('first_aid_kit');
     swapInto(internals.scoutGroup, scout);
     swapInto(internals.responderGroup, responder);
-    lit.push(...[scout, responder].filter((o): o is THREE.Object3D => !!o));
+    if (kit) {
+      viewer.setSupplyTemplate?.(kit);
+    }
+    lit.push(...[scout, responder, kit].filter((o): o is THREE.Object3D => !!o));
     light();
     state.robotsLoaded = true;
   }, undefined, fail('robot models')), { timeout: 2000 });
