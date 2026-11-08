@@ -4,7 +4,7 @@ On levels.xml the Responder drives east down ramp_r2 (L1 -> ground) with its col
 ramp's full slope. At (2.775, 2.075) the B1 rescue route jogs 45 degrees north-east; along that heading
 the ramp drops less steeply, so a ray still tilted for the old heading dives into ramp_r2 itself and the
 Responder stopped "blocked" there with every supply still carried. The rays must tilt along the heading
-they are cast on. Strict xfail until RAMP-RAY-FIX (Anthony's Claude-1, sim/responder.py) lands; then drop
+they are cast on. Strict xfail until RAMP-RAY-FIX (sim/responder.py) lands; then drop
 the marks. The drive test also needs the Responder to leave the ramp at its foot (x 3.5), where on main a
 nose-down ray meets the ground floor and stops it even on a straight run.
 """
