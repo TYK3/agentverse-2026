@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 
 // BLENDER-LOOK: Blender robot and tower models, lighting, dust, robots following live poses.
 
-type Look = { lite: boolean; robotsLoaded: boolean; towerLoaded: boolean; towerVisible: boolean; error?: string; dust: number; responderPoses: number; enabled: boolean };
+type Look = { lite: boolean; robots: string; robotsLoaded: boolean; towerLoaded: boolean; towerVisible: boolean; error?: string; dust: number; responderPoses: number; enabled: boolean };
 type Bus = { dispatchBusMessage(topic: string, data: unknown): void };
 
 /** Robots loaded and the fixture replay done (it sends its own sensors/scout and responder/pose). */
@@ -58,6 +58,35 @@ test('robot models load at their true envelopes, Z up, standing on the floor', a
   expect(resp.size[1]).toBeCloseTo(0.44, 2);
   expect(resp.size[2]).toBeCloseTo(0.75, 2);
   expect(resp.min[2]).toBeCloseTo(0, 2);                     // origin 0.05 m (chassis centre) -> wheels on z = 0
+});
+
+test('with no query params the Blender robots are the default, over the A1 robots.glb', async ({ page }) => {
+  await page.goto('/');
+  type Assets = { robotsLoaded: boolean };
+  // both robot sets loaded (A1's assets.ts swaps robots.glb into the map's groups at idle time)
+  await expect.poll(async () => (await look(page)).robotsLoaded, { timeout: 20000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { aftershockAssets?: Assets }).aftershockAssets?.robotsLoaded ?? false), { timeout: 20000 }).toBe(true);
+  const s = await look(page);
+  expect(s.enabled).toBe(true);
+  expect(s.robots).toBe('blender');
+  expect(s.error).toBeUndefined();
+  await expect.poll(() => page.evaluate(() => {
+    const m = (window as unknown as { aftershockMap: { scene: any; scoutGroup: any; responderGroup: any } }).aftershockMap;
+    const shown = (n: string) => { const o = m.scene.getObjectByName(n); return !!o && o.visible && !!o.parent; };
+    // nothing in the map's robot groups draws except label sprites: no primitives, no A1 'scout' / 'responder'
+    let groupMeshes = 0;
+    for (const g of [m.scoutGroup, m.responderGroup]) {
+      for (const c of g.children) {
+        if (c.isSprite || !c.visible) continue;
+        let mesh = false;
+        c.traverse((o: any) => { if (o.isMesh) mesh = true; });
+        if (mesh) groupMeshes += 1;
+      }
+    }
+    return { scout: shown('look-scout'), responder: shown('look-responder'), groupMeshes };
+  }), { timeout: 15000 }).toEqual({ scout: true, responder: true, groupMeshes: 0 });
+  await page.goto('about:blank');
 });
 
 test('the Scout follows live poses and eases between samples; a long jump is drawn as a jump', async ({ page }) => {
@@ -138,6 +167,7 @@ test('?look=0 turns the look off', async ({ page }) => {
   await page.waitForTimeout(1500);
   const s = await look(page);
   expect(s.enabled).toBe(false);
+  expect(s.robots).toBe('none');
   expect(s.robotsLoaded).toBe(false);
 });
 
@@ -147,6 +177,7 @@ test('?robots=a1 keeps the A1 robots; ?look=full forces lights and dust even in 
   const s = await look(page);
   expect(s.enabled).toBe(true);
   expect(s.lite).toBe(false);
+  expect(s.robots).toBe('a1');
   expect(s.robotsLoaded).toBe(false);
   expect(s.dust).toBe(700);
   const lights = await page.evaluate(() => {

@@ -11,8 +11,10 @@
 //   away. It is the scene the simulator runs (and, below ground, a proposal), not what perception mapped.
 // - PBR lighting (hemisphere + warm key + two amber emergency lamps; headlight beams are additive cones), exponential fog and a
 //   slow drift of dust (static under prefers-reduced-motion).
-// - The Blender robots replace whatever the map groups draw for the robots (primitives, or the A1 robots.glb
-//   from assets.ts); ?robots=a1 keeps the A1 robots and still applies the rest of the look.
+// - The Blender robots are the console's default robots (Young, 8 Nov 03:58): they replace whatever the map
+//   groups draw for the robots (primitives, or the A1 robots.glb from assets.ts, whichever loads first; the
+//   group's meshes are hidden every frame). Until they load, or if they fail to, the map's own robots show.
+//   ?robots=a1 is the opt-in for the A1 robots (#152) and still applies the rest of the look.
 // - In software WebGL (no GPU, e.g. CI) the look is "lite": the robots and fog only, no extra lights and no
 //   drifting dust, so the console's own frame rate (and the fixture replay) is not starved. ?look=full forces
 //   the full look anyway (screenshots on a CPU box).
@@ -28,6 +30,7 @@ import type { MapViewer } from './map';
 export interface LookState {
   enabled: boolean;
   lite: boolean;                 // software GL: robots and fog only
+  robots: 'blender' | 'a1' | 'none';   // which robot models the console draws ('none': look off, map's own)
   robotsLoaded: boolean;
   towerLoaded: boolean;
   towerVisible: boolean;
@@ -117,9 +120,11 @@ function kelvin(k: number): THREE.Color {
 
 export function setupLook(viewer: MapViewer): LookState {
   const param = lookParam();
+  const enabled = param !== '0';
   const state: LookState = {
-    enabled: param !== '0',
+    enabled,
     lite: false,
+    robots: !enabled ? 'none' : new URLSearchParams(window.location.search).get('robots') === 'a1' ? 'a1' : 'blender',
     robotsLoaded: false,
     towerLoaded: false,
     towerVisible: false,
@@ -225,7 +230,7 @@ export function setupLook(viewer: MapViewer): LookState {
 
   const idle = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void })
     .requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 300));
-  const keepA1Robots = new URLSearchParams(window.location.search).get('robots') === 'a1';
+  const keepA1Robots = state.robots === 'a1';
   // In software GL, parsing the models and compiling their shaders takes seconds of CPU: wait until the page has
   // settled (the first bus messages and fixture replay are in) before starting.
   const later = (cb: () => void) => (state.lite ? window.setTimeout(() => idle(cb, { timeout: 1500 }), LITE_DELAY_MS)
