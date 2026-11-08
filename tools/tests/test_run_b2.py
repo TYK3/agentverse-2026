@@ -93,3 +93,26 @@ def test_real_b2_run_passes(tmp_path):
     verdict, path = run(seed=0, out_dir=tmp_path)
     assert path.exists()
     assert verdict["failed"] == [], verdict["steps"]
+
+
+def test_b3_floor_comes_from_the_summary():
+    recs = records(k_min=-36)
+    recs.insert(4, {"t": 200.0, "kind": "level", "level": "B3"})
+    recs[-1]["floor"] = "B3"
+    assert evaluate(recs)["failed"] == []
+    short = records(k_min=-24)
+    short.insert(4, {"t": 200.0, "kind": "level", "level": "B3"})
+    short[-1]["floor"] = "B3"
+    assert STEPS[8] in evaluate(short)["failed"]          # a route that stops at B2 is not to B3
+    no_b3 = records(k_min=-36)
+    no_b3[-1]["floor"] = "B3"
+    assert STEPS[0] in evaluate(no_b3)["failed"]          # never reached B3
+
+
+@pytest.mark.skipif(os.environ.get("RUN_B2_REAL") != "1", reason="full B3 run: set RUN_B2_REAL=1")
+def test_real_b3_run_passes(tmp_path):
+    from tools.run_b2 import run
+
+    verdict, path = run(seed=0, out_dir=tmp_path, floor="B3")
+    assert path.name == "b3-0.jsonl"
+    assert verdict["failed"] == [], verdict["steps"]
