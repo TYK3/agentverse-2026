@@ -416,3 +416,13 @@ body::before {
   .ring-wrap::after { animation: none; }
   .tick, .ring, .ring-wrap, .ring-stage { transition: none; }
 }
+
+/* PAGE-STRETCH-FIX: on desktop the page is exactly one screen tall. Without this, the right
+   panel's growing content (talk, gates, triage) grows the grid row, the 3D canvas resizes to
+   match, and the page stretches down and the map goes blank mid-run. The right panel scrolls. */
+@media (min-width: 769px) {
+  #app { height: 100vh; min-height: 0; overflow: hidden; }
+  #workspace { min-height: 0; grid-template-rows: minmax(0, 1fr); }
+  #map-panel, #right-panel { min-height: 0; }
+  #right-panel { overflow-y: auto; }
+}
