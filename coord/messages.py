@@ -79,6 +79,13 @@ class MapCells(Message):
     cells: list[MapCell]
 
 
+class MapPoints(Message):
+    t: Nonnegative
+    res: Annotated[Number, Field(gt=0)]
+    points: Annotated[list[Vec3], Field(max_length=2048)]
+    points_from: Vec3 | None = None
+
+
 class Vitals(Message):
     model_config = ConfigDict(extra="allow", strict=True)
     breathing_rate: Nonnegative
@@ -350,6 +357,7 @@ TOPICS: dict[str, type[BaseModel]] = {
     "scene/loaded": SceneLoaded,
     "sensors/scout": SensorsScout,
     "map/cells": MapCells,
+    "map/points": MapPoints,
     "map/casualties": MapCasualties,
     "map/hazards": MapHazards,
     "scout/goto": ScoutGoto,
