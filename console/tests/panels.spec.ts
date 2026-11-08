@@ -23,7 +23,10 @@ test('fixture panels update and approvals are queued', async ({ page }) => {
 test('live socket emits exact messages and retains failed approval', async ({ page }) => {
   const messages: any[] = [];
   let socket: any;
+  let hubDown = false;
   await page.routeWebSocket('ws://localhost:8000/ws', ws => {
+    // once the test drops the hub, keep it down: the bus retries after 2s
+    if (hubDown) { ws.close(); return; }
     socket = ws;
     ws.onMessage(raw => messages.push(JSON.parse(String(raw))));
   });
@@ -41,6 +44,7 @@ test('live socket emits exact messages and retains failed approval', async ({ pa
   await expect.poll(() => messages).toContainEqual({ topic: 'gate/answer', data: { id: 'g-live', approved: true, by: 'operator' } });
   socket.send(JSON.stringify({ topic: 'gate/request', data: { id: 'g-disconnected', kind: 'risky_move', summary: 'Wait' } }));
   await expect(page.locator('#approval-meta')).toContainText('g-disconnected');
+  hubDown = true;
   socket.close();
   await expect(page.locator('#connection-status')).toContainText('disconnected');
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
