@@ -6,10 +6,11 @@
 The Scout starts on L1 and finds its own way down to casualty c2 in basement B2 (L1 -> ground -> B1 -> B2
 on ramps R2, R1, R3) with the same closed loop as sim.demo_descent: LevelWorld physics (height only from
 the floor under it), the multi-level map (perception.levels) and the multi-level A* (planner.levels).
-Nothing about the route is scripted. The runner adds one unscripted change: once the Scout is in B2 and
-driving its route to c2 (a route the planner found to the goal, not an explore path), a slab lands on it
-SHIFT_AHEAD ahead of the Scout. Not on an explore path: there it can land in the only passage (R3's
-foot, seen in a run) and test a dead end instead of a stop and recheck. Then it checks that:
+Nothing about the route is scripted. The runner adds one unscripted change: once the Scout is on the
+target floor and driving its way to the casualty (an "ok" route to it, or an explore path ending within
+NEAR_GOAL of it: on B1 c1 stays unknown until close, so every plan there is explore), a slab lands on it
+SHIFT_AHEAD ahead of the Scout. Not on any other explore path: there it can land in the only passage
+(R3's foot, seen in a run) and test a dead end instead of a stop and recheck. Then it checks that:
   - the Scout stops short of the slab (stops or re-plans within STOP_WINDOW; never driven through),
   - the slab gets into the map from what the Scout measured (LiDAR hits or a refused step), not from
     sim truth,
@@ -46,6 +47,7 @@ CASUALTY = {"B1": "c1", "B2": "c2", "B3": "c3"}
 SLAB_HALF = (0.12, 0.12, 0.05)     # metres: a 0.24 m x 0.24 m x 0.1 m slab
 SHIFT_AHEAD = 0.3                  # metres along the route to c2 ahead of the Scout
 MIN_LEFT = 0.6                     # only shift if this much of that route is left (room to go round)
+NEAR_GOAL = 0.75                   # an explore path ending this close to the casualty counts as its route
 MAX_JUMP = 0.035                   # metres per 0.1 s tick: 0.3 m/s plus a ramp's rise
 STOP_WINDOW = 3.0                  # sim seconds after the shift for the Scout to stop or turn away
 
@@ -102,6 +104,18 @@ def footprint(xy, margin=0.0):
     sx, sy = SLAB_HALF[0] + margin, SLAB_HALF[1] + margin
     return {(i, j) for i in range(math.floor((xy[0] - sx) / RES), math.floor((xy[0] + sx) / RES) + 1)
             for j in range(math.floor((xy[1] - sy) / RES), math.floor((xy[1] + sy) / RES) + 1)}
+
+
+def toward_casualty(plan, goal):
+    """True if the plan is the way to the casualty: an "ok" route to it, or an "explore" path whose end is
+    within NEAR_GOAL of it. On B1 c1's cell stays unknown until the Scout is almost there, so every plan is
+    "explore"; an explore path elsewhere (R3's foot on B2, say) could land the slab in the only passage."""
+    if plan["status"] == "ok":
+        return True
+    if plan["status"] != "explore" or not plan["cells"]:
+        return False
+    end = plan["cells"][-1]
+    return math.dist(((end[0] + 0.5) * RES, (end[1] + 0.5) * RES), goal[:2]) < NEAR_GOAL
 
 
 def point_ahead(cells, here, ahead=SHIFT_AHEAD):
@@ -245,7 +259,7 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
             w.goto({"target": target, "reason": f"b2 {why}"})
         # The unscripted change: once, on the target floor, on the route the Scout is driving.
         if (shift is None and w.level() == floor and w.state == "moving" and plan
-                and plan["status"] == "ok" and len(plan["cells"]) > 2):
+                and len(plan["cells"]) > 2 and toward_casualty(plan, goal)):
             xy = point_ahead(plan["cells"], w.pos[:2])
             if xy is not None:
                 drop_slab(w, xy, w.floor_z)
