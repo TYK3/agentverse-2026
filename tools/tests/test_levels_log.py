@@ -4,6 +4,8 @@ names, legs in order, plans only for the leg in progress, steps = evaluate(log),
 the same log. evaluate()'s own pass/fail rules are tested in tools/tests/test_run_levels.py (#192).
 
 One real run (about 25 s wall time) is shared by the module; the determinism check uses two short runs.
+The runs need mujoco, which CI's tools job does not install, so the module skips there (as the real runs in
+test_run_b2 / test_run_levels do); run it locally with the sim requirements.
 """
 
 import itertools
@@ -11,6 +13,8 @@ import json
 import math
 
 import pytest
+
+pytest.importorskip("mujoco")
 
 from tools import run_levels
 
