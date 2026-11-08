@@ -105,3 +105,36 @@ test('DEMO-FLOW: time comes from sim clocks only, not from lanes that stamp thei
   m.setTime(14.9);
   expect(m.t).toBe(14.9);
 });
+
+test('DEMO-FLOW: a successful off-hub B1 descent record lights Descend B1; failures stay pending', () => {
+  const ok = { stage: 'b1', reached: true, levels: ['L1', 'ground', 'B1'], final_pos: [0.732, 1.476, -0.525] };
+  const m = new StoryModel();
+  expect(m.apply('_runner/stage', ok)).toBe('descend');
+  expect(m.phase('descend').state).toBe('done');
+  expect(m.phase('descend').note).toContain('Separate B1');
+  expect(m.facts.deepestZ).toBe(-0.525);
+  expect(m.facts.delivered).toEqual([]);
+
+  const misses = [
+    { stage: 'b1', reached: false, levels: ['L1', 'ground', 'B1'] },
+    { stage: 'b1', skipped: 'sim.demo_descent not installed (L4, PR #114)' },
+    { stage: 'b1', reached: true, levels: ['L1', 'ground'] },
+    { stage: 'other', reached: true, levels: ['L1', 'ground', 'B1'] },
+  ];
+  for (const data of misses) {
+    const fail = new StoryModel();
+    expect(fail.apply('_runner/stage', data)).toBeNull();
+    expect(fail.phase('descend').state).toBe('pending');
+    expect(fail.facts.deepestZ).toBe(0);
+  }
+
+  // Trail cells have no success flag, so they alone must not light the phase.
+  const trail = new StoryModel();
+  expect(trail.apply('_probe/b1_cell', { cell: [12, 27, -12] })).toBeNull();
+  expect(trail.phase('descend').state).toBe('pending');
+
+  // Existing pose trigger still lights descent when a robot is below ground.
+  const pose = new StoryModel();
+  expect(pose.apply('responder/pose', { t: 30, pos: [9.5, 6.8, -3.0], yaw: 0, state: 'moving' })).toBe('descend');
+  expect(pose.phase('descend').state).toBe('done');
+});
