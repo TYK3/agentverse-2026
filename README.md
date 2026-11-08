@@ -1,3 +1,5 @@
+**▶️ Submission video: [https://youtu.be/sXFX6Gd1DOk](https://youtu.be/sXFX6Gd1DOk) · 📄 Technical summary (PDF): [docs/technical-summary.pdf](docs/technical-summary.pdf)**
+
 <p align="center">
   <img src="docs/images/console.png" alt="AFTERSHOCK operator console: a route revoked after debris moved, the re-plan banner naming the trigger, an operator approval for a risky move, and the casualty conversation" width="100%">
 </p>
