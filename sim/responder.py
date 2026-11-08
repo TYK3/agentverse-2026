@@ -43,6 +43,7 @@ REACH = 0.45                # a supply or block further than this from the Respo
 LIGHT_KG = 2.0              # blocks at or above this mass are too heavy to clear
 ARM_PAYLOAD_KG = 0.5        # found material carried to a casualty: the real arm's rated payload (docs/hardware.md)
 SUPPLIES = ("water", "first_aid_kit", "radio", "bandage", "splint", "thermal_blanket")
+FOUND_USES = ("splint",)    # kit items a found block can stand in for: gripping one for this is a carry
 RISKY_KINDS = ("risky_move", "enter_at_risk")
 
 # Held poses in the Responder frame: supplies sit in deck slots, a gripped block is lifted above them.
@@ -220,12 +221,14 @@ class Responder:
         return self._refuse(f"unknown action {action!r}", tag)
 
     def _run_block(self, action, block, item=None):
-        """Y2: grip / release / place_supply on a named block. A grip whose `item` names what the block
-        stands in for (e.g. splint) is found material for a casualty, so it must fit the arm's payload."""
+        """Y2: grip / release / place_supply on a named block. A grip whose `item` is one a block can stand
+        in for (FOUND_USES, e.g. splint) is found material for a casualty, so it must fit the arm's
+        payload; any other item (the contract always names one) means the block is debris to clear."""
+        carry = item in FOUND_USES
         if action == "grip":
-            return self.grip_block(block, carry=bool(item))
+            return self.grip_block(block, carry=carry)
         if action == "release":
-            if item and self._eq("grip_" + block) >= 0 and not self.holding(block):   # release after place_supply
+            if carry and self._eq("grip_" + block) >= 0 and not self.holding(block):   # release after place_supply
                 return self._decide("done", f"gripper open, not holding {block}", f"release {block}")
             return self.release_block(block)
         if action == "place_supply":
@@ -332,7 +335,7 @@ class Responder:
         reach = float(max(self.m.geom_size[self.m.body_geomadr[body]][:2]))
         fwd = np.array([math.cos(self.yaw), math.sin(self.yaw)])
         x, y = self._put_down(block_id, self.pos[:2] + fwd * (HALF_LEN + PLACE_AHEAD + reach))
-        use = f" as a {item.replace('_', ' ')}" if item else ""
+        use = f" as a {item.replace('_', ' ')}" if item in FOUND_USES else ""
         return self._decide("done", f"placed {block_id}{use} at [{x:.2f}, {y:.2f}]", tag)
 
     # ---- motion -----------------------------------------------------------------

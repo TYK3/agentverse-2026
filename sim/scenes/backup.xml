@@ -73,9 +73,10 @@
     <body name="b14" pos="1.9 -0.4 0.04"><freejoint/><geom name="b14_rubble" type="box" size="0.35 0.1 0.04" density="600" rgba="0.7 0.6 0.45 1"/></body>
     <!-- b15: block against the north-west corner of room 1 -->
     <body name="b15" pos="-1.0 1.2 0.1"><freejoint/><geom name="b15_rubble" type="box" size="0.12 0.1 0.1" density="600" rgba="0.55 0.5 0.45 1"/></body>
-    <!-- Y2 found material: a loose pine board (0.4 x 0.06 x 0.04 m, about 0.43 kg at 450 kg/m3) against the east
-         wall of room 3, light enough for the arm's 0.5 kg payload and long enough to splint a forearm or shin. -->
-    <body name="b16" pos="2.37 0.1 0.02"><freejoint/><geom name="b16_rubble" type="box" size="0.03 0.2 0.02" mass="0.43" rgba="0.8 0.65 0.4 1"/></body>
+    <!-- Y2 found material: a loose pine board (0.4 x 0.06 x 0.04 m, about 0.43 kg at 450 kg/m3) on the floor of
+         room 3, 0.17 m off the east wall, light enough for the arm's 0.5 kg payload and long enough to splint a
+         forearm or shin. Below the LiDAR (0.075 m), so only depth points show it. -->
+    <body name="b16" pos="2.25 0.1 0.02"><freejoint/><geom name="b16_rubble" type="box" size="0.03 0.2 0.02" mass="0.43" rgba="0.8 0.65 0.4 1"/></body>
 
     <!-- Casualty marker c1, lying in room 3. No collisions, no joint: a fixed visual marker only. -->
     <body name="casualty_c1" pos="2.0 1.0 0.12" euler="0 90 0">

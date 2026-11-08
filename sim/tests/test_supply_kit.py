@@ -59,7 +59,7 @@ def test_each_kit_item_is_placed_on_the_floor_in_front(world, resp):
 
 
 def test_found_board_is_carried_to_the_casualty_as_a_splint(world, resp):
-    resp._set_pose((2.1, 0.1), 0.0)                 # beside the board, facing the east wall
+    resp._set_pose((1.95, 0.1), 0.0)                # beside the board, facing it
     settle(world, 0.5)
     grip = resp.on_action({"action": "grip", "route": "r0", "item": "splint", "block": "b16"})
     assert grip["outcome"] == "done", grip
@@ -86,9 +86,9 @@ def test_found_material_must_fit_the_arm_payload(world, resp):
     out = resp.on_action({"action": "grip", "route": "r0", "item": "splint", "block": "b11"})
     assert out["outcome"] == "refused" and "0.5 kg" in out["reason"], out
     assert not resp.holding("b11")
-    clear = resp.on_action({"action": "grip", "route": "r0", "block": "b11"})   # clearing: slid aside
+    clear = resp.on_action({"action": "grip", "route": "r0", "item": "water", "block": "b11"})   # debris to clear
     assert clear["outcome"] == "done", clear
-    aside = resp.on_action({"action": "release", "route": "r0", "block": "b11"})
+    aside = resp.on_action({"action": "release", "route": "r0", "item": "water", "block": "b11"})
     assert aside["outcome"] == "done" and not resp.holding("b11")
 
 
@@ -98,3 +98,42 @@ def test_kit_item_missing_from_a_scene_is_refused(world, resp):
     out = resp.on_action({"action": "place_supply", "route": "r0", "item": "splint"})
     assert out["outcome"] == "refused" and "not loaded" in out["reason"]
     assert world.d.eq_active[eq], "the real weld was not touched"
+
+
+def depth_points(world, origin, yaw, hfov=1.2, vfov=0.9, n=48, max_range=3.0):
+    """A stand-in depth camera (Y9 not wired yet): rays from `origin` over a fan, scene-frame hit points.
+    Robot geoms (group 3) and supplies are left out, as the Scout's sensors do."""
+    import mujoco
+    pts, geomid = [], np.zeros(1, dtype=np.int32)
+    groups = np.array([1, 1, 1, 0, 1, 1], dtype=np.uint8)
+    for a in range(n):
+        for b in range(n):
+            h = yaw - hfov / 2 + hfov * a / (n - 1)
+            v = -0.05 - vfov * b / (n - 1)                     # looking ahead and down
+            d = np.array([math.cos(v) * math.cos(h), math.cos(v) * math.sin(h), math.sin(v)])
+            dist = mujoco.mj_ray(world.m, world.d, np.asarray(origin, float), d, groups, 1, -1, geomid)
+            if 0 <= dist < max_range:
+                pts.append([float(x) for x in np.asarray(origin) + d * dist])
+    return pts
+
+
+def test_scout_depth_points_find_the_real_board_and_the_responder_grips_it(world, resp):
+    from planner import supply
+    from sim import scene
+
+    settle(world, 0.5)
+    finder = supply.BoardFinder()
+    finder.on_scene(scene.scene_loaded(world.m, world.d, scene="backup"))
+    for spot, yaw in (((1.7, -0.2, 0.25), 0.6), ((1.7, 0.6, 0.25), -0.6)):   # two looks across room 3
+        finder.add(depth_points(world, spot, yaw))
+    boards = finder.boards()
+    assert [b["block"] for b in boards] == ["b16"], boards        # walls, rubble and the floor are not boards
+    board = finder.best(near=(2.0, 1.0))
+    assert board["kg"] <= R.ARM_PAYLOAD_KG
+    truth = pos_of(world, "b16")
+    assert np.linalg.norm(np.array(board["pos"][:2]) - truth[:2]) < 0.05, "located from points alone"
+    pick = supply.choose(["broken forearm"], set(supply.KIT) - {"splint"}, board)
+    assert pick["source"] == "found" and pick["block"] == "b16"
+    resp._set_pose((board["pos"][0] - 0.3, board["pos"][1]), 0.0)
+    out = resp.on_action({"action": "grip", "route": "r0", "item": pick["item"], "block": pick["block"]})
+    assert out["outcome"] == "done", out
