@@ -129,8 +129,19 @@ class World:
         res = aftershock.RES
         return self.add_block([(cell[0] + 0.5) * res, (cell[1] + 0.5) * res, 0.3])
 
+    def _surface_below(self, x, y, z, exclude):
+        """Height of the first surface straight down from (x, y, z), ignoring body `exclude`; None if none."""
+        geomid = np.zeros(1, np.int32)
+        dist = mujoco.mj_ray(self.m, self.d, np.array([x, y, z], float), np.array([0.0, 0.0, -1.0]),
+                             None, 1, exclude, geomid)
+        return None if dist < 0 else z - dist
+
     def add_block(self, pos):
-        """Drop the spare rubble block at pos [x, y, z] (z is its centre height). Returns its name or None."""
+        """Drop the spare rubble block at pos [x, y, z] (z is its centre height). Returns its name or None.
+
+        z is never below the surface under (x, y) at that level, so the block rests on the floor it was asked
+        for: B2 stays on B2 (ADD-BLOCK-Z). The surface is the first thing straight down from the block's top;
+        with nothing below (outside every floor), z keeps the old clamp to just above ground level."""
         spare = [b for b in aftershock.spare_ids(self.m) if self.m.body_gravcomp[b] == 1]
         if not spare:
             return None
@@ -141,7 +152,9 @@ class World:
         self.m.body_contype[b], self.m.body_conaffinity[b] = 1, 3      # the broad phase filters on these too
         adr = self.m.jnt_qposadr[self.m.body_jntadr[b]]
         vadr = self.m.jnt_dofadr[self.m.body_jntadr[b]]
-        z = max(float(pos[2]), float(self.m.geom_size[g][2]) + 0.005)
+        half = float(self.m.geom_size[g][2])
+        floor = self._surface_below(float(pos[0]), float(pos[1]), float(pos[2]) + half, b)
+        z = max(float(pos[2]), (0.0 if floor is None else floor) + half + 0.005)
         self.d.qpos[adr:adr + 7] = [pos[0], pos[1], z, 1, 0, 0, 0]
         self.d.qvel[vadr:vadr + 6] = 0
         mujoco.mj_forward(self.m, self.d)
