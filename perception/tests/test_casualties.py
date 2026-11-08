@@ -171,3 +171,71 @@ def test_local_check_is_off_while_gemini_vision_is_on():
     c.found.append({"pos": (0.0, 0.0), "z": 0.0, "thermal": 1.0, "sound": 0.0, "vision": 0.0})
     c.thermal_rel = 0.0
     assert not c._local_vision({"camera": {"format": "jpeg", "b64": "x"}}, (0.0, 0.0))
+
+
+def test_gem_ask_uses_interactions_content_blocks(monkeypatch):
+    """gem_ask passes Interactions API image+text content blocks to coord/gem.py and marks stand-in when off."""
+    from coord import gem
+    from perception.casualties import PROMPT, gem_ask
+
+    monkeypatch.setattr(gem, "MODE", "off")
+    gem.stand_ins.discard("vision")
+    assert gem_ask(PROMPT, "dGVzdA==") is None
+    assert "vision" in gem.stand_ins
+
+    recorded = []
+
+    def fake_ask(model_key, contents, *, thinking="medium", feature="?", **kwargs):
+        recorded.append((model_key, contents, thinking, feature))
+        return '{"person": true, "bbox": [66, 90, 188, 52], "posture": "lying"}'
+
+    monkeypatch.setattr(gem, "ask", fake_ask)
+    ans = gem_ask(PROMPT, "dGVzdA==")
+    assert json.loads(ans)["person"] is True
+    assert recorded == [(
+        "fast_subagent",
+        [{"type": "image", "mime_type": "image/jpeg", "data": "dGVzdA=="},
+         {"type": "text", "text": PROMPT}],
+        "low",
+        "vision",
+    )]
+
+
+def test_b1_sim_frames_casualty_detection_offline_and_vision_fixture():
+    """Real B1 sim frames (levels.xml): thermal + sound + camera locate c1 on B1 with z < -0.5."""
+    pytest.importorskip("PIL.Image")
+    sim_levels = pytest.importorskip("sim.levels")
+    w = sim_levels.LevelWorld(render=True)
+    if w.renderer is None:
+        pytest.skip("no GL context for camera frames")
+
+    b1_poses = [(1.6, 1.1), (1.1, 1.3), (0.85, 1.5), (0.45, 1.1), (0.45, 1.0)]
+    b1_frames = []
+    for x, y in b1_poses:
+        w._set_pose((x, y), math.atan2(1.9 - y, 0.45 - x))
+        w._set_z(-0.6)
+        w.tick(0.1)
+        b1_frames.append(w.sensors_message(camera=True))
+
+    t_off = itertools.count()
+    c_off = Casualties(vision_on=lambda: False, clock=lambda: float(next(t_off)))
+    for frame in b1_frames:
+        c_off.on_sensors(frame)
+    out_off = c_off.message()
+    assert len(out_off) == 1, out_off
+    assert out_off[0]["confidence"] >= 0.8
+    assert set(out_off[0]["clues"]) == {"pose", "thermal", "sound"}
+    assert math.dist(out_off[0]["pos"][:2], (0.45, 1.9)) < 0.25
+    assert out_off[0]["pos"][2] == pytest.approx(-0.525)
+
+    t_vis = itertools.count()
+    c_vis = Casualties(
+        ask=lambda p, b: '{"person": true, "bbox": [66, 90, 188, 52], "posture": "lying"}',
+        clock=lambda: float(next(t_vis)),
+    )
+    for frame in b1_frames:
+        c_vis.step(frame)
+    out_vis = c_vis.message()
+    assert len(out_vis) == 1 and out_vis[0]["confidence"] >= 0.9
+    assert set(out_vis[0]["clues"]) == {"pose", "thermal", "sound"}
+
