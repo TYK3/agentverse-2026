@@ -9,7 +9,10 @@ sim loop publishes world/change once the world has the change. The route is adde
 FastAPI app only when sim.start was given the hub's own bus, so tests and scripts never import FastAPI.
 """
 
+import math
 import sys
+
+MAX_POS_M = 50.0  # bound injected positions beyond the current scenes before they reach MuJoCo
 
 
 def handle(world, body):
@@ -17,8 +20,10 @@ def handle(world, body):
     kind = body.get("kind") if isinstance(body, dict) else None
     if kind == "block_added":
         pos = body.get("pos")
-        if not (isinstance(pos, list) and len(pos) == 3 and all(isinstance(v, (int, float)) for v in pos)):
-            return 400, {"error": "block_added needs pos [x, y, z]"}
+        if not (isinstance(pos, list) and len(pos) == 3 and all(
+                isinstance(v, (int, float)) and not isinstance(v, bool)
+                and abs(v) <= MAX_POS_M and math.isfinite(v) for v in pos)):
+            return 400, {"error": "block_added needs finite pos [x, y, z] within +/-50 m"}
         name = world.add_block(pos)
         if name is None:
             return 409, {"error": "no spare block left"}
@@ -44,7 +49,11 @@ def install(world, bus):
     from fastapi.responses import JSONResponse
 
     async def inject(request: Request):
-        status, body = handle(world, await request.json())
+        try:
+            body = await request.json()
+        except (ValueError, RecursionError):
+            body = None
+        status, body = handle(world, body)
         return JSONResponse(body, status_code=status)
 
     app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", None) != "/inject"]

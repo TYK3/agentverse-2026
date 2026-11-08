@@ -170,7 +170,7 @@ async def inject_without_sim(request: Request):
     back to its local demo. It never publishes: world/change only comes from the sim."""
     try:
         body = await request.json()
-    except ValueError:
+    except (ValueError, RecursionError):
         body = None
     if not isinstance(body, dict) or body.get("kind") not in INJECT_KINDS:
         return JSONResponse({"error": "kind must be block_added or aftershock"}, status_code=400)
