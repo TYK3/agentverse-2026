@@ -1,0 +1,107 @@
+/* Theme layer: a retro "pixel" look for chrome only (title, headings, badges, buttons).
+   Readable text (logs, reports, evidence) keeps the normal sans-serif font.
+   Safety colours (amber at-risk, red collapsed/reject, green ok) are not changed here.
+   Fonts are bundled through @fontsource, so the console still works offline. */
+@import '@fontsource/press-start-2p/400.css';
+@import '@fontsource/vt323/400.css';
+
+:root {
+  --bg: #0a0a0a;
+  --panel: #0f172a;
+  --panel-2: #131c31;
+  --border: #334155;
+  --border-hi: #475569;
+  --text: #ededed;
+  --text-2: #cbd5e1;
+  --muted: #94a3b8;
+  --accent: #06b6d4;
+  --accent-strong: #0e7490;
+  --accent-soft: #67e8f9;
+  --focus: #ffd700;
+  --pixel-font: 'Press Start 2P', monospace;
+  --retro-font: 'VT323', 'Courier New', monospace;
+  --shadow-px: 3px 3px 0 #000;
+}
+
+:root { background: var(--bg); }
+
+/* Pixel font: brand and headings, small so it stays legible */
+#top-bar > strong,
+h2,
+.legend-header,
+.map-title-badge,
+.hardware-header h2 {
+  font-family: var(--pixel-font);
+  -webkit-font-smoothing: none;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+#top-bar > strong { font-size: 0.95rem; color: var(--accent-soft); text-shadow: 2px 2px 0 #000; }
+h2 { font-size: 0.62rem; line-height: 1.6; color: var(--accent-soft); }
+.legend-header, .map-title-badge { font-size: 0.55rem; line-height: 1.6; }
+
+/* Retro font for controls and status chips */
+button,
+#top-bar span,
+#mode-label,
+.fps-badge,
+.cell-count-badge,
+.badge,
+.pill {
+  font-family: var(--retro-font);
+  -webkit-font-smoothing: none;
+}
+#top-bar span, #mode-label { font-size: 1.15rem; letter-spacing: 0.03em; }
+
+/* Blocky buttons with a hard shadow and a press-down effect */
+button {
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0.55rem 1rem;
+  border: 2px solid #000;
+  border-radius: 2px;
+  box-shadow: var(--shadow-px);
+  background: var(--accent-strong);
+  color: #fff;
+  transition: transform 60ms steps(1), box-shadow 60ms steps(1);
+}
+button:hover:not(:disabled) { background: #0891b2; border-color: var(--focus); }
+button:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: none; }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.btn-sm { font-size: 1.05rem; padding: 0.35rem 0.7rem; background: var(--panel); color: var(--muted); border: 2px solid var(--border); }
+.btn-sm:hover:not(:disabled) { background: #1e293b; color: var(--focus); }
+.btn-highlight { background: var(--accent-strong); color: #fff; }
+#reject { background: #b91c1c; }
+#reject:hover:not(:disabled) { background: #dc2626; }
+
+/* Square, outlined panels */
+#top-bar, #bottom-bar { background: var(--panel); border-color: var(--border); border-width: 2px; }
+#right-panel { background: #0b1120; }
+.permit-panel,
+#confidence-panel,
+.map-legend,
+.map-title-badge,
+.fps-badge,
+.cell-count-badge,
+.evidence-item,
+.world-change-banner,
+dialog {
+  border-radius: 2px;
+  border-width: 2px;
+}
+dialog { background: var(--panel); border: 2px solid var(--border-hi); box-shadow: 6px 6px 0 #000; }
+input {
+  font-family: var(--retro-font);
+  font-size: 1.2rem;
+  border: 2px solid var(--border);
+  border-radius: 2px;
+  background: #050505;
+}
+input:focus { outline: none; border-color: var(--accent); }
+progress { accent-color: var(--accent); }
+
+/* Pixel scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0a0e1a; }
+::-webkit-scrollbar-thumb { background: var(--border); border: 1px solid var(--border-hi); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }

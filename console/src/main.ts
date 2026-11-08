@@ -1,4 +1,5 @@
 import './style.css';
+import './theme.css';
 import { connect, on } from './bus';
 import {
   MapViewer,
