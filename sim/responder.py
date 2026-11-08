@@ -37,7 +37,11 @@ SPEED = 0.2                 # m/s
 RES = 0.05                  # grid cell size, same as perception's map (cell = floor(pos / RES))
 HALF_LEN, HALF_WIDTH = 0.16, 0.07   # chassis half extents (body x = forward)
 GAP = 0.03                  # free space kept between the chassis front and anything ahead
-RAY_HEIGHTS = (0.03, 0.09)  # world z of the collision rays (low rubble and wall height)
+RAY_HEIGHTS = (0.03, 0.09)  # collision ray heights above the floor under the Responder (low rubble and wall height)
+RIDE_Z = 0.05               # chassis centre above the floor (backup.xml and levels.xml)
+PROBE = 0.25                # the floor ray starts this far above the current floor (under any slab above)
+MAX_RISE = 0.6              # max floor change per metre driven (as sim/levels.py); a bigger change is a drop, ignored
+STEP_SLACK = 0.004          # metres of floor change always allowed per step (ramp seams, float noise)
 ARRIVE = 0.005              # metres
 REACH = 0.45                # a supply or block further than this from the Responder centre cannot be gripped
 LIGHT_KG = 2.0              # blocks at or above this mass are too heavy to clear
@@ -94,6 +98,8 @@ class Responder:
         self.queue = []            # responder/action messages waiting for the current move to finish
         self.failed_routes = set()  # routes whose move was refused: their other actions are refused too
         self.log = []              # every log/decision this Responder published
+        self.floor_z = float(self.pos[2]) - RIDE_Z   # floor under the chassis; follows ramps (levels.xml)
+        self.pitch = 0.0           # nose-down tilt in radians, from the floor under the front and back
 
     # ---- pose -------------------------------------------------------------------
     @property
@@ -106,8 +112,40 @@ class Responder:
         return 2.0 * math.atan2(z, w)
 
     def _set_pose(self, xy, yaw):
-        self.d.mocap_pos[self.mocap][:2] = xy
-        self.d.mocap_quat[self.mocap] = [math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)]
+        """Put the chassis at (x, y) facing yaw, riding the floor under it: z follows the floor (ramps
+        between levels) and pitch follows the slope between the floor under the front and the back."""
+        xy = np.asarray(xy, float)
+        self.floor_z = self._follow(xy, self.floor_z, float(np.linalg.norm(xy - self.pos[:2])))
+        fwd = np.array([math.cos(yaw), math.sin(yaw)])
+        front = self._follow(xy + fwd * HALF_LEN, self.floor_z, HALF_LEN)
+        back = self._follow(xy - fwd * HALF_LEN, self.floor_z, HALF_LEN)
+        self.pitch = math.atan2(back - front, 2 * HALF_LEN)
+        self.d.mocap_pos[self.mocap] = [xy[0], xy[1], self.floor_z + RIDE_Z]
+        cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+        cp, sp = math.cos(self.pitch / 2), math.sin(self.pitch / 2)
+        self.d.mocap_quat[self.mocap] = [cy * cp, -sy * sp, cy * sp, sy * cp]   # yaw about z, then pitch about y
+
+    def _floor_at(self, xy, z_from):
+        """Height of the first surface below (x, y) from z_from, skipping the Responder and what it carries."""
+        geomid = np.zeros(1, dtype=np.int32)
+        z = z_from
+        for _ in range(8):
+            dist = mujoco.mj_ray(self.m, self.d, np.array([xy[0], xy[1], z]), np.array([0.0, 0.0, -1.0]),
+                                 None, 1, self.body, geomid)
+            if dist < 0:
+                return None
+            if not self._carried_geom(int(geomid[0])):
+                return z - dist
+            z -= dist + 1e-4
+        return None
+
+    def _follow(self, xy, floor, run):
+        """Floor height at xy if it is reachable from `floor` over `run` metres (a ramp), else `floor`:
+        a drop or a wall top is not driven onto, and with no floor below (a bare plane scene) nothing changes."""
+        z = self._floor_at(xy, floor + PROBE)
+        if z is None or abs(z - floor) > MAX_RISE * run + STEP_SLACK:
+            return floor
+        return z
 
     # ---- helpers ----------------------------------------------------------------
     def _eq(self, name):
@@ -282,7 +320,7 @@ class Responder:
         half_z = float(self.m.geom_size[geom][1 if cylinder else 2])
         jnt = self.m.body_jntadr[body]
         adr, vadr = self.m.jnt_qposadr[jnt], self.m.jnt_dofadr[jnt]
-        self.d.qpos[adr:adr + 7] = [xy[0], xy[1], half_z + 0.002, 1.0, 0.0, 0.0, 0.0]
+        self.d.qpos[adr:adr + 7] = [xy[0], xy[1], self.floor_z + half_z + 0.002, 1.0, 0.0, 0.0, 0.0]
         self.d.qvel[vadr:vadr + 6] = 0.0
         mujoco.mj_forward(self.m, self.d)
         return float(xy[0]), float(xy[1])
@@ -341,13 +379,16 @@ class Responder:
     # ---- motion -----------------------------------------------------------------
     def free_ahead(self, heading, step):
         """True if no geom is within HALF_LEN + GAP + step ahead, on the centre line or either side."""
-        fwd = np.array([math.cos(heading), math.sin(heading), 0.0])
-        side = np.array([-fwd[1], fwd[0], 0.0])
+        # Cast along the chassis, tilted with it on a ramp, so the ramp surface itself never reads as a block.
+        cp, sp = math.cos(self.pitch), math.sin(self.pitch)
+        fwd = np.array([math.cos(heading) * cp, math.sin(heading) * cp, -sp])
+        side = np.array([-math.sin(heading), math.cos(heading), 0.0])
+        up = np.cross(fwd, side)
         need = HALF_LEN + GAP + step
         geomid = np.zeros(1, dtype=np.int32)
         for z in RAY_HEIGHTS:
             for offset in (0.0, HALF_WIDTH, -HALF_WIDTH):
-                origin = np.array([*self.pos[:2], z]) + side * offset
+                origin = np.array([*self.pos[:2], self.floor_z + RIDE_Z]) + up * (z - RIDE_Z) + side * offset
                 dist = mujoco.mj_ray(self.m, self.d, origin, fwd, None, 1, self.body, geomid)
                 if 0 <= dist < need and not self._carried_geom(int(geomid[0])):
                     return False
