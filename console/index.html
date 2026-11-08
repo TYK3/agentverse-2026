@@ -19,7 +19,7 @@
       <section id="map-panel" aria-label="3D map">
         <canvas id="map-canvas"></canvas>
         <div id="world-change-banner" class="world-change-banner hidden" role="alert">
-          <span id="banner-icon" class="banner-icon">⚠️</span>
+          <span id="banner-icon" class="banner-icon" aria-hidden="true"></span>
           <span id="banner-text" class="banner-text">Aftershock detected: b7 moved. Re-scanning</span>
         </div>
         <div class="map-hud-top">
@@ -34,7 +34,7 @@
           <button id="btn-demo-replan" type="button" class="btn-sm btn-highlight" title="Simulate aftershock and visible re-plan">Simulate Re-Plan</button>
           <button id="btn-benchmark-100k" type="button" class="btn-sm" title="Stress test with 100,000 cells">Benchmark 100k</button>
         </div>
-        <div class="map-legend" aria-label="Map and hazard legend">
+        <div class="map-legend" aria-label="Map and hazard legend" tabindex="0">
           <div class="legend-header">ESTIMATES &amp; STATUS LEGEND</div>
           <div class="legend-row"><span class="legend-swatch seen-solid"></span><span>Seen occupied (solid grey)</span></div>
           <div class="legend-row"><span class="legend-swatch inferred"></span><span>Inferred (35% opacity)</span></div>

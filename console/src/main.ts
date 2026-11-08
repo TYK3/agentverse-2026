@@ -15,6 +15,9 @@ import { setupPanels } from './panels';
 import { setupHardwarePanel } from './hardware';
 import { setupDemoAssets } from './assets';
 import { setupStory } from './story';
+import { setupStageRing } from './stage-ring';
+// Last, so the theme overrides lane styles (story.css is pulled in by story.ts).
+import './theme.css';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);
@@ -118,6 +121,7 @@ setupHardwarePanel();
 setupDemoAssets(mapViewer);
 // Story mode (DEMO-FLOW): phase strip, camera follow, report card; ?run=<url> replays a recording
 const story = setupStory(mapViewer);
+setupStageRing();
 
 // Initial boot
 if (isFakeMode) {
