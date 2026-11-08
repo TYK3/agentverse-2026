@@ -12,15 +12,15 @@ from coord.messages import validate_payload
 def levels_scene():
     return {"scene": "levels", "blocks": [
         {"id": f"b{index}", "label": "slab", "pos": [0.0, 0.0, z], "size": [0.4, 0.3, 0.05]}
-        for index, z in enumerate((0.6, 0.0, -0.6, -1.2), start=1)]}
+        for index, z in enumerate((0.6, 0.0, -0.6, -1.2, -1.8), start=1)]}
 
 
-def test_levels_scene_preserves_l1_ground_b1_b2_heights():
+def test_levels_scene_preserves_l1_ground_b1_b2_b3_heights():
     payload = levels_scene()
     assert validate_payload("scene/loaded", payload) == payload
 
 
-@pytest.mark.parametrize("floor_name", ["B1", "B2", "unknown"])
+@pytest.mark.parametrize("floor_name", ["B1", "B2", "B3", "unknown"])
 def test_floor_labels_are_not_accepted_as_unregistered_scene_names(floor_name):
     with pytest.raises(ValueError):
         validate_payload("scene/loaded", {**levels_scene(), "scene": floor_name})
