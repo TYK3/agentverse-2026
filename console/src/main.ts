@@ -12,6 +12,7 @@ import {
   type WorldChangePayload
 } from './map';
 import { setupPanels } from './panels';
+import { onMergedCells } from './cells-merge';
 import { setupHardwarePanel } from './hardware';
 import { setupDemoAssets } from './assets';
 import { setupStory } from './story';
@@ -51,9 +52,7 @@ const isFakeMode = searchParams.get('fake') === '1';
 const isBenchmarkMode = searchParams.has('benchmark');
 
 // 3D Map Event Subscriptions
-on('map/cells', data => {
-  mapViewer.updateCells(data as MapCellsPayload);
-});
+onMergedCells(payload => mapViewer.updateCells(payload));  // MAP-DELTA-FIX: deltas merge, not replace
 
 on('map/hazards', data => {
   mapViewer.updateHazards(data as HazardRecord[]);
