@@ -11,7 +11,7 @@ from tools import demo
 
 def test_defaults_and_validation():
     a = demo.parse([])
-    assert (a.scene, a.duration, a.shift_at, a.auto_approve, a.speed, a.replay) == ("building", 120.0, None, False, 4.0, None)
+    assert (a.scene, a.duration, a.shift_at, a.auto_approve, a.speed, a.replay) == ("backup", 120.0, None, False, 4.0, None)
     a = demo.parse(["--scene", "tower", "--duration", "90", "--shift-at", "45", "--auto-approve"])
     assert (a.scene, a.duration, a.shift_at, a.auto_approve) == ("tower", 90.0, 45.0, True)
     for bad in (["--duration", "0"], ["--speed", "-1"], ["--duration", "30", "--shift-at", "30"]):
