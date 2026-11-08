@@ -12,10 +12,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from coord.messages import Envelope, validate_payload
+from coord.points import PointCloudPublisher
 
 log = logging.getLogger(__name__)
 LANES = ("sim", "perception", "planner", "voice")
 BROWSER_TOPICS = {"operator/command", "gate/answer", "status/link"}
+LATEST_TOPICS = {"map/points"}
 
 
 class Bus:
@@ -23,6 +25,7 @@ class Bus:
         self.subs = defaultdict(list)
         self.clients = set()
         self.history = deque(maxlen=200)
+        self.latest = {}  # large frame topics keep only their latest bounded message
         self._delivery_lock = asyncio.Lock()
 
     def subscribe(self, topic, fn):
@@ -34,7 +37,12 @@ class Bus:
         if topic != "sensors/scout":
             msg = {"topic": topic, "data": data}
             async with self._delivery_lock:
-                self.history.append(msg)
+                if topic == "scene/loaded":
+                    self.latest.pop("map/points", None)
+                if topic in LATEST_TOPICS:
+                    self.latest[topic] = msg
+                else:
+                    self.history.append(msg)
                 for client in tuple(self.clients):
                     try:
                         await client.send_text(json.dumps(msg, allow_nan=False))
@@ -53,6 +61,8 @@ class Bus:
         # Replay and registration are atomic relative to live delivery.
         async with self._delivery_lock:
             for msg in self.history:
+                await websocket.send_text(json.dumps(msg))
+            for msg in self.latest.values():
                 await websocket.send_text(json.dumps(msg))
             self.clients.add(websocket)
 
@@ -81,6 +91,8 @@ async def publish_gemini_status(target_bus, gem, interval=2):
 async def lifespan(application):
     tasks = []
     try:
+        points = PointCloudPublisher(bus)
+        tasks.append(asyncio.create_task(points.run()))
         for name in LANES:
             try:
                 lane = importlib.import_module(name)
