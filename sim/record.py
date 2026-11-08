@@ -4,7 +4,7 @@
     python -m sim.record --seconds 60 --scene tower      # -> sim/recordings/scout_tower.jsonl
 
 Runs in simulated time (faster than real time), drives the Scout along TOUR with scout/goto
-commands, and writes one {"topic":"sensors/scout","data":{...}} line per tick at 10 Hz.
+commands, and writes one {"t":sim seconds,"topic":"sensors/scout","data":{...}} line per tick at 10 Hz.
 Camera frames are left out. Default output: sim/recordings/scout_backup.jsonl.
 """
 
@@ -65,7 +65,7 @@ def record(seconds=60.0, out=OUT, rate_hz=10, tour=TOUR, path=scene.BACKUP):
         world.tick(dt)
         data = world.sensors_message(camera=False)
         states.append(data["motion"]["state"])
-        lines.append(json.dumps({"topic": "sensors/scout", "data": data}, separators=(",", ":")))
+        lines.append(json.dumps({"t": data["t"], "topic": "sensors/scout", "data": data}, separators=(",", ":")))
     out = pathlib.Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -85,7 +85,8 @@ class Loop:
         for topic, fn in (("route/verified", self.on_verified), ("world/change", self.on_world_change),
                           ("map/cells", self.on_map), ("map/hazards", self.on_hazards),
                           ("map/casualties", self.on_casualties), ("gate/answer", self.on_answer),
-                          ("status/link", self.on_link), ("operator/command", self.on_command)):
+                          ("status/link", self.on_link), ("operator/command", self.on_command),
+                          ("log/decision", self.on_responder_decision)):
             self.bus.subscribe(topic, fn)
         return self
 
@@ -395,6 +396,25 @@ class Loop:
         if self.mission_args:
             await self.wait_for_scan(f"{data['kind']} moved {moved}")
             self.last_try = float("-inf")
+
+    async def on_responder_decision(self, data):
+        """sim/responder.py stops on its collision ray and drops the queued place/release; re-plan.
+
+        Only a sim "blocked" naming the route being executed counts; once handled the loop is IDLE,
+        so a repeat or a stale block for an older route is ignored."""
+        if data.get("model") != "sim" or data.get("outcome") != "blocked" or not self.mission_args:
+            return
+        if not self.route or self.state != EXECUTING or not re.search(rf"\broute {re.escape(self.route['id'])}\b", data.get("reason", "")):
+            return
+        old = self.route["id"]
+        start = self.start_cell() if callable(self.start_cell) else None
+        if start is not None:
+            self.mission_args["start"] = tuple(start)   # re-plan from where the Responder stopped
+        self.state, self.route, self.request, self.verified_route = IDLE, None, None, None
+        await self.wait_for_scan(f"Responder blocked on {old}")
+        self.last_try = float("-inf")
+        await self.log(f"Responder blocked on route {old}", "replanning",
+                       "queued place/release were dropped; waiting for the next map update, then a new route")
 
     async def on_map(self, data):
         # The router subscribed to map/cells first (planner.start or start below), so it already merged it.
