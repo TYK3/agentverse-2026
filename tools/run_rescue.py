@@ -11,8 +11,9 @@ change, as POST /inject does), (3) types the report
 command at the end, and (4) samples the real Scout and Responder poses from the sim object, read
 only, every POSE_EVERY seconds.
 
-Steps checked, in order: scene loaded, casualty found, route verified, move permit granted,
-Responder moving; then the shift: block landed, permit revoked by what the robots sensed, the
+Steps checked, in order: scene loaded, casualty found, a route proposed, the Responder moving on
+a route (whichever it actually drives; the first proposal may be a re-look) and that route's own
+physics check and move permit; then the shift: block landed, permit revoked by what the robots sensed, the
 Responder stopped and stays stopped; then the fresh recheck: a permit granted again (the same route
 re-earned, or a new verified route that avoids the block), the Responder moving again, the supply
 placed by the casualty, the handover report. --b1 adds the L4 descent (sim.demo_descent, #114),
@@ -167,33 +168,35 @@ async def ground_rescue(rec, bus, world, args):
                            show=lambda d: f"{d[0]['id']} at {d[0]['pos']} conf {d[0]['confidence']}")
     if not cas:
         return
-    route = await rec.expect("route proposed", "route/proposed", timeout=60,
-                             show=lambda d: f"{d['id']}, {len(d['cells'])} cells, model {d['model']}")
-    if not route:
-        return
-    rid = route["id"]
-    if not await rec.expect("route verified by physics", "route/verified", lambda d: d["id"] == rid and d["ok"],
-                            timeout=30, show=lambda d: d["detail"]):
-        return
-    if not await rec.expect("move permit granted", "permit/route",
-                            lambda d: d["route"] == rid and d["granted"], timeout=30,
-                            show=lambda d: d["reason"]):
+    if not await rec.expect("route proposed", "route/proposed", timeout=60,
+                            show=lambda d: f"{d['id']}, {len(d['cells'])} cells, model {d['model']}"):
         return
 
-    # Let the Responder get going on that route before the shift.
+    # Follow the route the Responder actually drives: the first proposal may be a re-look that never
+    # moves it, and a later one is what it follows. That route must carry its own evidence.
     r = world.responder
-    t_end = time.monotonic() + 60
-    start_xy = None
+    t_end = time.monotonic() + args.move_timeout
+    start, rid = None, None
     while time.monotonic() < t_end:
-        if r.state == "moving" and r.route == rid:
-            start_xy = start_xy or [float(v) for v in r.pos[:2]]
-            if math.dist(start_xy, r.pos[:2]) >= args.drive_before:
+        if r.state == "moving" and r.route:
+            if r.route != rid:
+                rid, start = r.route, [float(v) for v in r.pos[:2]]
+            if math.dist(start, r.pos[:2]) >= args.drive_before:
                 break
         await asyncio.sleep(0.1)
-    moving = r.state == "moving" and start_xy is not None
-    rec.step("Responder moving on the route", moving,
-             f"state {r.state} on {r.route}, {math.dist(start_xy or r.pos[:2], r.pos[:2]):.2f} m driven")
+    moving = rid is not None and r.state == "moving" and r.route == rid
+    rec.step("Responder moving on a route", moving,
+             f"state {r.state} on {r.route}, {math.dist(start or r.pos[:2], r.pos[:2]):.2f} m driven")
     if not moving:
+        return
+    route = next((d for t, tp, d in reversed(rec.seen) if tp == "route/proposed" and d["id"] == rid), None)
+    verified = next((d for t, tp, d in rec.seen if tp == "route/verified" and d["id"] == rid and d["ok"]), None)
+    permit = next((d for t, tp, d in rec.seen if tp == "permit/route" and d["route"] == rid and d["granted"]), None)
+    rec.step("that route was verified by physics", verified is not None,
+             verified["detail"] if verified else f"no route/verified ok for {rid} before it moved")
+    rec.step("that route had a move permit", permit is not None,
+             permit["reason"] if permit else f"no granted permit/route for {rid} before it moved")
+    if route is None or verified is None or permit is None:
         return
 
     # The shift: the spare block lands on the route ahead of the Responder.
@@ -362,6 +365,8 @@ def parse(argv=None):
     p.add_argument("--recheck-timeout", type=float, default=120.0, help="seconds for the fresh recheck")
     p.add_argument("--deliver-timeout", type=float, default=180.0, help="seconds to place the supply")
     p.add_argument("--drive-before", type=float, default=0.3, help="metres driven before the shift")
+    p.add_argument("--move-timeout", type=float, default=120.0,
+                   help="seconds after the first proposal for the Responder to start driving a route")
     p.add_argument("--shift", choices=("visible", "ahead"), default="visible",
                    help="drop the block where the Scout can see it (default), or just ahead of the Responder")
     p.add_argument("--b1-time", type=float, default=400.0, help="sim seconds allowed for the B1 descent")
