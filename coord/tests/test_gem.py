@@ -100,7 +100,7 @@ def test_503_is_retried(monkeypatch):
     seen = fake_client(monkeypatch, [RuntimeError("503 UNAVAILABLE"), RuntimeError("429 RESOURCE_EXHAUSTED"), "ok"])
     assert gem.ask("fast_subagent", "frame") == "ok"
     assert len(seen) == 3
-    assert gem.status()["calls_last_hour"] == 1  # retries count as one call
+    assert gem.status()["calls_last_hour"] == 3  # each real retry consumes the cap
 
 
 def test_other_errors_are_not_retried(monkeypatch):

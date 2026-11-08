@@ -324,3 +324,10 @@ def test_physics_rejected_cells_stay_impassable(doorway):
     """The loop marks physics-rejected cells "blocked": never routed through, even as the only way."""
     rejected = {**hazard((3, 2, 0), "at_risk"), "blocked": True}
     assert find_route(doorway, [rejected], (0, 2, 0), (6, 2, 0))["status"] == "no_verified_route"
+
+
+def test_exclusion_zone_is_never_entered_even_as_the_only_way(doorway):
+    """L5: perception sensed debris moving here; the keep-out zone is a wall until fresh scans lift it."""
+    zone = {**hazard((3, 2, 0), "at_risk"), "exclusion": True}
+    assert find_route(doorway, [zone], (0, 2, 0), (6, 2, 0))["status"] == "no_verified_route"
+    assert find_route(doorway, [{**zone, "exclusion": False}], (0, 2, 0), (6, 2, 0))["status"] == "ok"

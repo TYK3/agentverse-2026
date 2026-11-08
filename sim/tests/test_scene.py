@@ -31,7 +31,7 @@ def test_blocks_are_labelled(loaded):
     assert all(re.fullmatch(r"b\d+", b["id"]) for b in blocks)
     assert set(labels) == {"wall", "rubble"}
     assert labels.count("wall") >= 8          # outer walls plus two interior walls with openings
-    assert 4 <= labels.count("rubble") <= 6
+    assert 4 <= labels.count("rubble") <= 7        # b16 is a loose board (Y2 found material)
 
 
 def test_casualty_does_not_collide(loaded):
@@ -85,5 +85,5 @@ def test_start_publishes_scene_loaded():
     asyncio.run(sim.start(bus, loop=False))
     assert [t for t, _ in bus.sent] == ["scene/loaded"]
     payload = bus.sent[0][1]
-    assert payload["scene"] == "backup" and len(payload["blocks"]) == 15
+    assert payload["scene"] == "backup" and len(payload["blocks"]) == 16
     _check_scene_loaded(payload)

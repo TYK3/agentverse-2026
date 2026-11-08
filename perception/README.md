@@ -38,6 +38,35 @@ moves b8, b10 and b11), compared with sim truth:
 - after it, collapsed vs where they fell: precision 0.99 (the LiDAR sees fallen blocks' faces);
 - cleared vs where b8 and b11 stood: precision 0.82, recall 0.97.
 
+## Keep-out zones from sensed motion (L5, `perception/motion.py`)
+
+A precaution from what the Scout saw move, not a collapse prediction. LiDAR and depth rays feed a
+0.05 m voxel watch, one observation per voxel per frame (a return beats a pass). States are kept per
+viewpoint (sensor origin binned to 0.1 m), because a corner that looks occupied from one spot can look
+free from another. A voxel established as occupied (5 frames) that then reads free 3 frames running
+has moved away; one established free that reads occupied 2 frames running, not touching an existing
+surface, has had something land in it. Three such voxels within 0.3 m open a zone: every plan column
+within 0.5 m is sent in `map/hazards` as `at_risk` with `exclusion: true`, and the planner never routes
+through it. A zone is lifted only after 6 frames that re-measure its columns with no new motion; time
+alone never lifts it. Motion is a change seen from the same place, so the Scout senses it while it
+watches a pile. Scan changes while driving are the Z1 scan diff's job.
+
+Backup scene closed loop: 90 s of exploring gives no zone. b10 sliding 0.15 m over 3 s while the
+Scout watches from room 2 opens a zone over b10 (seen up to 0.47 m), and 6 s of still re-scans lift it.
+
+## Injury triage and first-aid gate (Y3, `perception/triage.py`)
+
+Assesses casualty condition and determines first-aid intervention:
+- Fuses multi-modal observations: thermal signature, acoustic clues / sound level, camera posture check, and voice dialogue responses (via `voice.GUIDE.summary(cid)` or `casualty/answer`).
+- Powered by `gemini-4-argon` through `coord/gem.py` (`lead_reasoning`) with `GEMINI_MODE=live`. In `GEMINI_MODE=off`, uses deterministic clinical triage rules.
+- Triage priority levels: `immediate` (critical life-threat), `urgent` (stabilization needed), `delayed` (minor / stable), `unknown`.
+- Matches injuries to Responder arm first-aid supply items: `water`, `first_aid_kit`, `radio`, `bandage`, `splint`, `thermal_blanket`.
+- **First-Aid Gate & Human Card**:
+  - High confidence (>= 0.8) and unambiguous condition: autonomous gate decision (`gate/decision` `outcome="act"`) triggers `responder/action`.
+  - Unsure / ambiguous condition (< 0.8, conflicting clues, or severe multi-trauma): publishes `gate/decision` (`outcome="refer"`) and a needs-human triage card via `gate/request` (`kind="risky_move"`) with recommended supply options for operator approval.
+  - Upon operator `gate/answer` (`approved=True`), triggers `responder/action` with the selected first-aid item and logs to `log/decision`.
+- Exposes `perception.triage.triage_summary(cid)` and `TRIAGE.summary(cid)` for integration with the Y6 remote paramedic report.
+
 ## Casualties (T10, `perception/casualties.py`)
 
 `map/casualties` (contract shape, `vitals.simulated: true`) is published at 2 Hz when it changes, and is

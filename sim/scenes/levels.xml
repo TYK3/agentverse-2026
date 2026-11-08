@@ -1,0 +1,55 @@
+<!--
+  L4 multi-level scene, written by sim/scenes/make_levels.py (edit that, not this file).
+  A mezzanine L1 (floor z = +0.6), the ground floor (z = 0) and a basement B1 (z = -0.6).
+
+  Plan view (x right, y up), footprint 5 m x 2.4 m:
+     y=2.4 +-------------------------------------------+
+           | L1 (x<1.5) |== ramp R2: L1 -> ground ==> |   y 1.8..2.4, x 1.5 -> 3.5, side wall at y = 1.8
+     y=1.8 | edge rail  |                             |
+           |            |   ground floor              |
+     y=0.6 |            | <== ramp R1: ground -> B1 ==|   y 0..0.6, x 3.5 -> 1.5, railed shaft
+     y=0   +-------------------------------------------+
+         x=0         x=1.5                  x=3.5    x=5
+  B1 lies under the whole footprint; R1 lands on it at x = 1.5. Casualty c1 lies in B1 at the west end.
+  Every drop is railed (0.2 m) except the ramp mouths, because a 2D LiDAR cannot see a drop.
+  Levels are static geoms, not b<number> blocks, so the aftershock check has nothing to shake here.
+-->
+<mujoco model="aftershock_levels">
+  <option timestep="0.002" gravity="0 0 -9.81"/>
+  <visual><global offwidth="1280" offheight="960"/></visual>
+  <default><geom friction="1 0.005 0.0001"/></default>
+  <worldbody>
+    <light name="sun" pos="2.5 1.2 6" dir="0 0 -1" directional="true" diffuse="0.8 0.8 0.8"/>
+    <body name="ground" mocap="true" pos="0 0 0"/>
+    <geom name="b1_floor" type="box" pos="2.5000 1.2000 -0.6300" size="2.5000 1.2000 0.0300" rgba="0.5 0.5 0.5 1"/>
+    <geom name="wall_s" type="box" pos="2.5000 -0.0400 0.4000" size="2.5400 0.0400 1.0000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="wall_n" type="box" pos="2.5000 2.4400 0.4000" size="2.5400 0.0400 1.0000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="wall_w" type="box" pos="-0.0400 1.2000 0.4000" size="0.0400 1.2000 1.0000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="wall_e" type="box" pos="5.0400 1.2000 0.4000" size="0.0400 1.2000 1.0000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="g_floor_w" type="box" pos="0.7500 1.2000 -0.0300" size="0.7500 1.2000 0.0300" rgba="0.5 0.5 0.5 1"/>
+    <geom name="g_floor_m" type="box" pos="2.5000 1.5000 -0.0300" size="1.0000 0.9000 0.0300" rgba="0.5 0.5 0.5 1"/>
+    <geom name="g_floor_e" type="box" pos="4.2500 1.2000 -0.0300" size="0.7500 1.2000 0.0300" rgba="0.5 0.5 0.5 1"/>
+    <geom name="ramp_r1" type="box" pos="2.5086 0.3000 -0.3287" size="1.0540 0.3000 0.0300" euler="0 -16.6992 0" rgba="0.45 0.55 0.6 1"/>
+    <geom name="r1_side" type="box" pos="2.5000 0.6400 -0.2000" size="1.0000 0.0400 0.4000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="r1_end_rail" type="box" pos="1.4600 0.3400 0.1000" size="0.0400 0.3400 0.1000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="l1_floor" type="box" pos="0.7500 1.2000 0.5700" size="0.7500 1.2000 0.0300" rgba="0.5 0.5 0.5 1"/>
+    <geom name="l1_edge_rail" type="box" pos="1.5400 0.8600 0.7000" size="0.0400 0.8600 0.1000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="ramp_r2" type="box" pos="2.4914 2.1000 0.2713" size="1.0540 0.3000 0.0300" euler="0 16.6992 0" rgba="0.45 0.55 0.6 1"/>
+    <geom name="r2_side" type="box" pos="2.5000 1.7600 0.4000" size="1.0000 0.0400 0.4000" rgba="0.8 0.7 0.5 1"/>
+    <geom name="r2_back" type="box" pos="1.5400 2.1000 0.2700" size="0.0400 0.3000 0.2700" rgba="0.8 0.7 0.5 1"/>
+    <geom name="b20_rubble" type="box" pos="4.4000 1.1500 0.0750" size="0.2000 0.1500 0.0750" rgba="0.55 0.5 0.45 1"/>
+    <geom name="b21_rubble" type="box" pos="1.0500 1.0500 -0.5400" size="0.1500 0.1500 0.0600" rgba="0.55 0.5 0.45 1"/>
+    <!-- Casualty c1 in B1: a fixed visual marker, no collisions. -->
+    <body name="casualty_c1" pos="0.45 1.9 -0.48" euler="0 90 0">
+      <geom name="c1_g" type="capsule" size="0.1 0.25" contype="0" conaffinity="0" rgba="1 0.3 0.3 1"/>
+    </body>
+    <!-- Scout as in backup.xml: mocap, origin = sensor origin 0.075 m above the floor, robot geoms in
+         group 3. It starts on L1; sim/levels.py sets its height from the floor under it. -->
+    <body name="scout" mocap="true" pos="0.5 0.5 0.675">
+      <geom name="scout_chassis" type="box" size="0.1 0.08 0.04" pos="0 0 -0.035" group="3" contype="0" conaffinity="0" rgba="0.2 0.5 0.9 1"/>
+      <geom name="scout_mast" type="cylinder" size="0.02 0.02" pos="0 0 0.02" group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <camera name="scout_cam" pos="0.1 0 0.03" xyaxes="0 -1 0 0 0 1" fovy="60"/>
+    </body>
+    <camera name="overview" pos="2.5 -3.5 3.2" xyaxes="1 0 0 0 0.6 0.8"/>
+  </worldbody>
+</mujoco>

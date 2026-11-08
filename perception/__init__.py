@@ -8,6 +8,9 @@ from perception.cloud import Cloud
 from perception.explore import Explorer
 from perception.grid import Grid
 from perception.hazards import Hazards
+from perception.inspect import Inspector, ask_er
+from perception.listen import Listener
+from perception.triage import TRIAGE, Triager, triage_summary
 
 PERIOD = 0.5          # map/cells and map/casualties (when changed) at 2 Hz
 SNAPSHOT_EVERY = 10   # ticks, so a full snapshot every 5 s
@@ -45,8 +48,16 @@ async def start(bus):
             _spawn(vision(b64))      # the frame lives only until this call returns
 
     bus.subscribe("sensors/scout", sensors)
+    listener = Listener(grid)  # L2: call out, listen for taps, listen again from a second spot
+
+    async def listen(data):
+        for topic, payload in listener.on_sensors(data, now()):
+            await bus.publish(topic, payload)
+
+    bus.subscribe("sensors/scout", listen)
     hazards = Hazards(grid, Cloud(grid.res))
     bus.subscribe("sensors/scout", hazards.on_sensors)
+    _inspect(bus, now)          # G2: ER points, kept only where the depth points ground them
 
     def change(data):
         hazards.on_change(data)     # timed on the sensors clock, like the scan diff
@@ -56,8 +67,35 @@ async def start(bus):
     bus.subscribe("map/hazards", explorer.on_hazards)
     bus.subscribe("scout/goto", lambda d: explorer.on_goto(d, now()))
     bus.subscribe("gate/decision", lambda d: explorer.on_decision(d, now()))
+    TRIAGE.attach(bus)
     _spawn(_publish(bus, grid, explorer, casualties, hazards, now))
     return grid
+
+
+def _inspect(bus, now):
+    try:
+        from coord import gem
+    except ImportError:
+        return None
+    inspector = Inspector()
+    if gem.MODE == "off":
+        gem.mark_stand_in("spatial_inspection")    # no ER points: the Explorer's own frontiers only
+
+    async def er(pose, b64):
+        text, receipt, model = await asyncio.to_thread(ask_er, gem, b64)    # off the event loop
+        if text is not None:
+            for topic, payload in inspector.goals(pose, text, receipt=receipt, model=model, now=now()):
+                await bus.publish(topic, payload)
+
+    def frame(data):
+        inspector.keep_points(data, now())
+        if gem.MODE != "off" and inspector.due(data, now()):
+            inspector.last_ask = now()
+            cam = data["camera"]
+            _spawn(er(data["pose"], cam["b64"] if isinstance(cam, dict) else cam))
+
+    bus.subscribe("sensors/scout", frame)
+    return inspector
 
 
 def _spawn(coro):
@@ -91,3 +129,11 @@ async def _publish(bus, grid, explorer, casualties, hazards, now):
             goto = explorer.tick(t)
             if goto:
                 await bus.publish("scout/goto", goto)
+
+
+__all__ = [
+    "TRIAGE",
+    "Triager",
+    "start",
+    "triage_summary",
+]

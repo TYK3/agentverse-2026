@@ -64,6 +64,73 @@ python -m planner.fake_run --map coord/fixtures/map__cells.json \
 Unreachable routes print the failure result and exit 1. The default development
 scene has a single doorway at `[3,2,0]`; marking that cell collapsed blocks it.
 
+## Handover report (T16)
+
+`planner.start(bus)` also attaches a `ReportCollector` as `router.reporter`.
+Call `await router.reporter.generate()` or send `operator/command` with text
+`report`, `handover report` or `generate report`. The result publishes
+`report/handover {json, markdown}` and writes an ignored
+`reports/handover_<UTC timestamp>.md` file. The returned result also contains
+the local `path`; that filesystem path is not sent to the console.
+
+The collector retains allowlisted map counts, casualty positions/confidence/
+clues, simulated vitals, estimated hazards before/after, routes and physics
+verdicts, re-plan reasons, action commands and every approval answer with its
+operator and time. It never subscribes to sensor images. Action commands are
+labelled as commanded; the contract has no delivery-completion event, so the
+report does not infer delivery from a command. An exact `log/decision` from the
+sim (`model=sim`, `physics=mujoco`, `outcome=done`, `placed <item> at [x, y]`)
+records a confirmed simulated placement, matching the T06 Responder's log.
+
+The plain template works with `GEMINI_MODE=off`. When the shared wrapper is
+available and enabled, one `coord.gem.ask("fast_subagent", ..., feature="handover_report")`
+attempt per collector asks `gemini-3.8-flash` for structured JSON. The draft may
+rewrite the summary; recorded sections must match exactly or it falls back to
+the template. Errors, invalid JSON, changed facts and timeouts use the same
+template. Repeated requests refresh the facts and never spend another model
+call; an old draft is discarded after new events. Stand-ins are labelled.
+
+Replay the development handover fixtures with:
+
+```sh
+GEMINI_MODE=off python -m planner.report_run
+```
+
+`bash planner/check.sh` includes this demo and the report tests. The check uses
+pytest and Pydantic to validate the published report against the shared schema.
+
+### Remote paramedic reports (ref Y6)
+
+`paramedic report` and `remote paramedic report` also generate a handover. Its
+existing `report/handover` envelope includes `json.paramedic_reports[]` and a
+Markdown section for each casualty: scene coordinates in metres with observation
+time, detection confidence and sensor clues; simulated breathing rate; the six
+Y5 response categories; self-reported pain locations; requested actions,
+observed sim action outcomes and confirmed simulated deliveries, human gate
+decisions and unknown information.
+Reports retain the last observation of casualties absent from a later list and
+label it as such. Detection confidence never becomes medical certainty. A
+missing reply is unknown, and `none_reported` pain is not a diagnosis.
+
+The optional dialogue reader calls the public `voice.GUIDE.summary(cid)` from Y5
+only if the voice lane is already loaded. It does not start voice or make a model
+call. Until Y5 is available, symptoms and answers remain explicitly unknown.
+Tests and other local integrations can inject `dialogue_summary(cid)` into
+`ReportCollector`. Only known response categories and body parts are retained;
+no face data, audio or raw transcripts are copied. Y3 has no published triage
+interface yet, so the report does not invent a triage assessment.
+
+Actions are associated only with routes whose goal ends exactly in ` to <id>`.
+Unassociated actions remain in the global handover. For repeated supply items,
+placement logs use the sim's active route; when no route can be established
+unambiguously the delivery remains unassigned. Commands never prove treatment
+or delivery, and this collector never authorizes robot motion or medical steps.
+
+`GEMINI_MODE=off python -m planner.paramedic_run` replays a labelled synthetic
+two-casualty fixture (one simulated delivery, one denied human gate). The same
+fixture is included in `bash planner/check.sh`; real audio and patient input are
+not part of this demo.
+
 ## Human approval and tasks (T14)
 
 `router = await planner.start(bus)` attaches the verification loop as
