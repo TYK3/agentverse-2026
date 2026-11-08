@@ -71,6 +71,42 @@ def test_scan_diff_cells_are_visited():
     assert e.tick(0.0)["reason"] == "re-scan where the scan changed: cell [35, 2, 0]"
 
 
+def test_keep_out_zone_is_revisited_so_fresh_scans_can_lift_it():
+    """ref #144 seed 23: a keep-out zone lifts only after fresh scans of the moved voxels (motion.py), so the
+    Scout goes back to look at it, even if a re-scan visit already passed nearby after the change."""
+    _, e = corridor()
+    e.on_change({"kind": "inject", "t": 1.0})
+    e.on_diff([(30, 0, K)])
+    e.on_sensors({"pose": {"pos": [1.2, 0.025, Z]}})        # the diff visit is done: within LOOK of cell 30
+    assert e.tick(2.0)["reason"].startswith("frontier")
+    e.on_sensors({"pose": {"pos": [0.1, 0.025, Z]}})        # ... and the Scout has driven on
+    zone = [{"cell": [30, j, 0], "status": "at_risk", "exclusion": True} for j in (0, 1)]
+    e.on_hazards(zone)
+    goto = e.tick(3.0)
+    assert goto["reason"] == "re-scan keep-out zone until it settles: cell [30, 0, 0]"
+    e.on_hazards(zone)                                      # the same zone again: not queued twice
+    assert e.visits == []
+    e.on_sensors({"pose": {"pos": [1.2, 0.025, Z]}})        # within LOOK: it stays and watches
+    assert e.tick(4.0) is None
+    e.on_hazards([])                                        # fresh scans lifted the zone
+    assert e.tick(5.0)["reason"].startswith("frontier")
+
+
+def test_a_keep_out_watch_gives_up_after_its_hold():
+    _, e = corridor()
+    e.on_sensors({"pose": {"pos": [1.2, 0.025, Z]}})
+    e.on_hazards([{"cell": [30, 0, 0], "status": "at_risk", "exclusion": True}])
+    assert e.tick(0.0) is None                              # watching
+    assert e.tick(16.0)["reason"].startswith("frontier")    # VISIT_HOLD (15 s) later the Scout moves on
+
+
+def test_a_zone_that_lifts_before_its_visit_is_dropped():
+    _, e = corridor()
+    e.on_hazards([{"cell": [30, 0, 0], "status": "at_risk", "exclusion": True}])
+    e.on_hazards([])
+    assert e.tick(0.0)["reason"].startswith("frontier")
+
+
 def test_frontiers_outside_the_building_are_skipped():
     """An open yard: walls only to the north, so no frontier is enclosed on 3 sides."""
     g = Grid()
