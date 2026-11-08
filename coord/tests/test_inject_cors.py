@@ -1,6 +1,7 @@
 """LIVE-UI: the console may POST /inject on the hub from its dev origin, and nothing else opens up."""
 
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -145,3 +146,44 @@ def test_live_sim_rejects_malformed_json_without_mutating_or_breaking_next_injec
         good = client.post("/inject", json={"kind": "aftershock"}, headers={"Origin": CONSOLE})
     assert good.status_code == 200 and good.json() == {"ok": True}
     assert calls == ["aftershock"]
+
+
+@pytest.mark.parametrize("pos", [
+    pytest.param([True, 0, 0], id="boolean"),
+    pytest.param([float("nan"), 0, 0], id="nan"),
+    pytest.param([0, float("inf"), 0], id="infinity"),
+    pytest.param([0, 0, -float("inf")], id="negative-infinity"),
+    pytest.param([1e308, 0, 0], id="overflowing-physics"),
+    pytest.param([10**1000, 0, 0], id="huge-integer"),
+    pytest.param([50.001, 0, 0], id="outside-scene-bound"),
+])
+def test_live_sim_rejects_unsafe_positions_before_world_call(clean_bus, restore_routes, pos):
+    calls = []
+    world = SimpleNamespace(add_block=lambda point: calls.append(point) or "spare1")
+    assert _sim_inject().install(world, clean_bus)
+    with TestClient(hub.app, raise_server_exceptions=False) as client:
+        bad = client.post("/inject", content=json.dumps({"kind": "block_added", "pos": pos}),
+                          headers={"content-type": "application/json"})
+        assert bad.status_code == 400 and isinstance(bad.json()["error"], str)
+        assert not calls
+        valid = [0.6, 0.25, -1.8]
+        good = client.post("/inject", json={"kind": "block_added", "pos": valid})
+    assert good.status_code == 200 and calls == [valid]
+    assert not clean_bus.history
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_deep_json_is_rejected_and_next_inject_still_works(clean_bus, restore_routes, live):
+    calls = []
+    if live:
+        world = SimpleNamespace(trigger_aftershock=lambda: calls.append("aftershock") or True)
+        assert _sim_inject().install(world, clean_bus)
+    with TestClient(hub.app, raise_server_exceptions=False) as client:
+        bad = client.post("/inject", content=b"[" * 100_000 + b"]" * 100_000,
+                          headers={"Origin": CONSOLE, "content-type": "application/json"})
+        assert bad.status_code == 400 and isinstance(bad.json()["error"], str)
+        assert bad.headers["access-control-allow-origin"] == CONSOLE and not calls
+        good = client.post("/inject", json={"kind": "aftershock"})
+    assert good.status_code == (200 if live else 503)
+    assert calls == (["aftershock"] if live else [])
+    assert not clean_bus.history
