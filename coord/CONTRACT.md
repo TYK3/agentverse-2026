@@ -26,7 +26,7 @@ run started. These are first drafts: the owning lane refines them by PR.
 ## Messages
 | Name | Producer | Consumer | Shape |
 |---|---|---|---|
-| `scene/loaded` | sim | all | `{"scene":"backup"\|"photo"\|"tower"\|"building","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
+| `scene/loaded` | sim | all | `{"scene":"backup"\|"photo"\|"tower"\|"building"\|"levels","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
 | `sensors/scout` | sim | perception, planner (L1 permits trace the LiDAR) | LiDAR ranges, camera frame, thermal grid, acoustic `{"bearing":deg,"level":0..1}`, pose |
 | `map/cells` | perception | planner, console | `{"t":0,"res":0.05,"cells":[{"cell":[i,j,k],"state":"seen"\|"inferred"\|"unknown","occupied":true}]}` |
 | `map/points` | hub from measured Scout depth | console (Y4) | `{"t":0.5,"res":0.05,"points":[[x,y,z],...],"points_from":[x,y,z]}`; max 2048 points/frame, at most 2 Hz, latest-only (D1) |
@@ -88,6 +88,14 @@ run started. These are first drafts: the owning lane refines them by PR.
   Scout sensed (L5). Routes never pass through it. It is a precaution from observed motion, not a
   collapse prediction, and it is lifted only after fresh scans of the zone show no further motion.
 - `scene/loaded` block `size` is MuJoCo half-extents in metres (T03); Three.js uses `2 * size`.
+- SCENE-B2: `scene/loaded.scene="levels"` identifies the multi-level scene; L1,
+  ground, B1, B2 and B3 are floor names within it, not separate scene values. Current
+  levels-scene floor heights are 0.6, 0, -0.6, -1.2 and -1.8 m respectively. Scene-frame
+  block positions and measured map/point coordinates retain negative basement z;
+  the hub does not flatten, shift or rescale them. B3 uses the same `levels`
+  identity and existing coordinate shape as the other floors.
+  Selecting this scene name does not prove descent or select the sim world class;
+  the sim owner must wire LevelWorld and publish the explicit `levels` label.
 - T05 publishes `world/change.kind="block_added"` after an operator-injected block lands.
   It carries the block id in `moved_blocks`, invalidates the prior route and triggers a re-scan
   like an aftershock. `t` remains seconds since the run began; no extra position field is needed.

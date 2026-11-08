@@ -24,7 +24,7 @@ class Block(Message):
 
 
 class SceneLoaded(Message):
-    scene: Literal["backup", "photo", "tower", "building"]
+    scene: Literal["backup", "photo", "tower", "building", "levels"]
     blocks: list[Block]
 
 

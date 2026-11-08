@@ -16,8 +16,9 @@ were the same every time. This is a reproducibility check of the real stack, not
 summary also gives sim seconds per wall second: below 1 the sim fell behind real time, so any lane
 timing itself on the wall clock sees a different world at the same wall time.
 
-runs/demo60-<seed>[-<n>].jsonl: every bus message {"t","topic","data"} except raw sensors/scout and
-responder/pose frames (sampled every POSE_EVERY s as _probe/pose), plus _runner/action records and
+runs/demo60-<seed>[-<n>].jsonl: every bus message {"t","topic","data"} except raw sensors/scout frames;
+responder/pose (10 Hz) only when the Responder's state or route changes; poses sampled every
+POSE_EVERY s as _probe/pose, plus _runner/action records and
 the final _runner/summary. Exit 0 only if every step passed (and, with --repeat, all runs agreed).
 """
 
@@ -90,7 +91,9 @@ def evaluate(events, duration=DURATION):
     granted = [(t, d) for t, topic, d in events if topic == "permit/route" and d["granted"]]
     if granted:
         hit("move permit granted", granted[0][0], granted[0][1]["route"])
-    poses = [(t, d) for t, topic, d in events if topic == "_probe/pose" and d.get("responder")]
+    poses = sorted([(t, d) for t, topic, d in events if topic == "_probe/pose" and d.get("responder")]
+                   + [(t, {"responder": d["pos"], "responder_state": d["state"], "responder_route": d["route"]})
+                      for t, topic, d in events if topic == "responder/pose"], key=lambda p: p[0])
     moving = [(t, d) for t, d in poses if d.get("responder_state") == "moving"]
     if moving:
         hit("Responder moving", moving[0][0], f"on {moving[0][1].get('responder_route')}")
@@ -198,8 +201,14 @@ async def run_once(seed, f, auto_approve, duration=DURATION):
         except ValueError as e:
             write(topic, data, rejected=str(e).splitlines()[0])
             raise
+        prev = latest.get(topic)
         latest[topic] = data
-        if topic not in ("sensors/scout", "responder/pose"):
+        if topic == "responder/pose":
+            # 10 Hz: logged only when its state or route changes, so a short move is never missed
+            if prev is None or (prev["state"], prev["route"]) != (data["state"], data["route"]):
+                write(topic, data)
+                events.append((now(), topic, data))
+        elif topic != "sensors/scout":
             write(topic, data)
             events.append((now(), topic, data))
         await publish(topic, data)

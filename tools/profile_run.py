@@ -38,15 +38,32 @@ def lane_of(fn):
     return (mod or "?").split(".")[0]
 
 
-def timed(fn, book, clock=time.perf_counter):
-    """Wrap a subscriber so its wall time (awaited too) is added to book[lane]."""
+def handler_name(fn):
+    """module.qualname of a subscriber, e.g. perception.grid.Mapper.on_scout."""
+    target = getattr(fn, "__func__", fn)
+    mod = getattr(target, "__module__", None) or "?"
+    return f"{mod}.{getattr(target, '__qualname__', type(fn).__name__)}"
+
+
+def timed(fn, book, clock=time.perf_counter, detail=None, topic=""):
+    """Wrap a subscriber so its wall time (awaited too) is added to book[lane], and, when a
+    detail book is given, to detail[(handler, topic)] (each call's ms kept for max)."""
     lane = lane_of(fn)
+    key = (handler_name(fn), topic)
+
+    def add(ms):
+        book[lane]["ms"] += ms
+        if detail is not None:
+            d = detail[key]
+            d["calls"] += 1
+            d["ms"] += ms
+            d["max_ms"] = max(d["max_ms"], ms)
 
     async def finish(start, result):
         try:
             return await result
         finally:
-            book[lane]["ms"] += (clock() - start) * 1000
+            add((clock() - start) * 1000)
 
     def wrapper(data):
         start = clock()
@@ -54,7 +71,7 @@ def timed(fn, book, clock=time.perf_counter):
         result = fn(data)
         if inspect.isawaitable(result):
             return finish(start, result)
-        book[lane]["ms"] += (clock() - start) * 1000
+        add((clock() - start) * 1000)
         return result
     return wrapper
 
@@ -72,7 +89,8 @@ async def profile(lanes, duration, warmup):
 
     bus, book = Bus(), defaultdict(lambda: {"calls": 0, "ms": 0.0})
     subscribe = bus.subscribe
-    bus.subscribe = lambda topic, fn: subscribe(topic, timed(fn, book))
+    detail = defaultdict(lambda: {"calls": 0, "ms": 0.0, "max_ms": 0.0})
+    bus.subscribe = lambda topic, fn: subscribe(topic, timed(fn, book, detail=detail, topic=topic))
 
     async def answer(req):
         await bus.publish("gate/answer", {"id": req["id"], "approved": True, "by": "operator"})
@@ -85,6 +103,7 @@ async def profile(lanes, duration, warmup):
     world = started["sim"]
     await asyncio.sleep(warmup)
     book.clear()
+    detail.clear()
     samples, end = [], time.monotonic() + duration
     while time.monotonic() < end:
         samples.append((time.monotonic(), float(world.t)))
@@ -98,7 +117,12 @@ async def profile(lanes, duration, warmup):
             "sim_s": round(samples[-1][1] - samples[0][1], 2),
             "handlers": {k: {"calls": v["calls"], "ms": round(v["ms"], 1),
                              "share": round(v["ms"] / 1000 / wall, 3) if wall else None}
-                         for k, v in sorted(book.items())}}
+                         for k, v in sorted(book.items())},
+            "per_handler": [{"handler": h, "topic": t, "calls": v["calls"], "ms": round(v["ms"], 1),
+                             "mean_ms": round(v["ms"] / v["calls"], 3) if v["calls"] else 0.0,
+                             "max_ms": round(v["max_ms"], 2),
+                             "share": round(v["ms"] / 1000 / wall, 4) if wall else None}
+                            for (h, t), v in sorted(detail.items(), key=lambda kv: -kv[1]["ms"])]}
 
 
 # ---- parent ----------------------------------------------------------------------------
@@ -135,7 +159,26 @@ def report(rows, duration):
     for r in rows:
         for lane, h in r.get("handlers", {}).items():
             out.append(f"| {r['set']} | {lane} | {h['calls']} | {h['ms']} | {h['share']} |")
+    out += per_handler_table(rows)
     return "\n".join(out) + "\n"
+
+
+def per_handler_table(rows, lane="perception"):
+    """Per-handler cost from the run with the most lanes: `lane` handlers first, then the rest."""
+    full = next((r for r in reversed(rows) if r.get("per_handler")), None)
+    if full is None:
+        return []
+    mine = [h for h in full["per_handler"] if h["handler"].split(".")[0] == lane]
+    rest = [h for h in full["per_handler"] if h["handler"].split(".")[0] != lane]
+    total = sum(h["ms"] for h in mine)
+    out = ["", f"## Per-handler cost ({full['set']}: {', '.join(full['lanes'])})", "",
+           (f"{lane} handlers total {total:.1f} ms over {full.get('wall_s', '-')} s wall. Inclusive "
+           "time (nested publishes count), share = handler seconds per wall second."), "",
+           "| Handler | Topic | Calls | Total ms | Mean ms | Max ms | Share |",
+           "|---|---|---|---|---|---|---|"]
+    out += [f"| {h['handler']} | {h['topic']} | {h['calls']} | {h['ms']} | {h['mean_ms']} | "
+            f"{h['max_ms']} | {h['share']} |" for h in mine + rest]
+    return out
 
 
 def parse(argv=None):

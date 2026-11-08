@@ -1,7 +1,6 @@
 """perception lane: the live map, casualties, hazard estimates and Scout exploration. The hub (coord/hub.py) calls `start(bus)` on startup."""
 
 import asyncio
-import time
 
 from perception.casualties import PROMPT, Casualties
 from perception.cloud import Cloud
@@ -28,10 +27,11 @@ async def start(bus):
     """
     grid = Grid()
     explorer = Explorer(grid)
-    t0 = time.monotonic()
-
     def now():
-        return time.monotonic() - t0
+        # Sim time of the latest sensors/scout frame (grid.add_sensors runs first on every frame), not
+        # the wall clock: when the sim runs slower than real time, a wall-clock hold or expiry would
+        # land on a different world each run, and the same seed would not repeat (demo60, #31).
+        return grid.t
 
     bus.subscribe("sensors/scout", grid.add_sensors)
     bus.subscribe("sensors/scout", explorer.on_sensors)
