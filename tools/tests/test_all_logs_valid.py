@@ -14,9 +14,6 @@ ROOT = Path(__file__).resolve().parents[2]
 # rather than skipped so the gap stays visible; strict xfail flags the entry
 # for removal as soon as the file (or the schema) is brought into line.
 KNOWN_NONCONFORMING = {
-    'perception/fixtures/scout_backup_standin.jsonl': 'bus envelopes without top-level t',
-    'sim/recordings/scout_backup.jsonl': 'bus envelopes without top-level t',
-    'sim/recordings/scout_tower.jsonl': 'bus envelopes without top-level t',
     'tools/tests/golden/b1_descent.jsonl': 'demo_descent meta/event rows, not a schema kind',
 }
 
