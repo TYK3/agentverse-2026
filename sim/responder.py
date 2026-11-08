@@ -13,6 +13,8 @@ Messages (coord/CONTRACT.md):
 - in  `responder/action` move | place_supply | grip | release; actions that arrive while a move is
                          running are queued and run in order when it ends (there is no completion message)
 - in  `world/change`     freeze in place, drop the current move and the queue (wait for a new responder/action)
+- in  `permit/route`     L1: granted false stops a move on that route at once and refuses new moves on it
+                         until a granted true arrives (routes with no permit message behave as before)
 - out `log/decision`     every action's outcome; refusals say outcome "refused" and why
 
 Clearing debris is `grip_block(block_id)` / `release_block(block_id)`: responder/action's `item` only
@@ -76,6 +78,7 @@ class Responder:
         self.risky = {}            # gate request id -> route id needing approval
         self.approved = set()      # route ids with an approved gate/answer
         self.needs_gate = set()    # route ids with an open risky gate request
+        self.revoked = set()       # route ids whose move permit (L1, permit/route) is revoked
         self.path = []             # remaining (x, y) waypoints of the current move
         self.route = None
         self.state = "idle"        # idle | moving | arrived | blocked | frozen
@@ -153,6 +156,19 @@ class Responder:
             self._decide("frozen", f"world/change {msg.get('kind', '')}: stopped, dropped {dropped} queued action(s), "
                                    "waiting for a new action")
 
+    def on_permit(self, msg):
+        """L1: a revoked move permit stops the Responder on that route; a re-earned one lifts the hold."""
+        route = msg.get("route")
+        if msg.get("granted"):
+            self.revoked.discard(route)
+            return
+        self.revoked.add(route)
+        if self.state == "moving" and self.route == route:
+            dropped = len(self.queue)
+            self.path, self.queue, self.state = [], [], "frozen"
+            self._decide("frozen", f"move permit for {route} revoked ({msg.get('reason', '')}): stopped, "
+                                   f"dropped {dropped} queued action(s)")
+
     def on_action(self, msg):
         """Run a responder/action now, or queue it behind the current move (the planner sends a whole
         move -> grip -> place_supply -> release sequence at once and there is no completion message)."""
@@ -189,6 +205,8 @@ class Responder:
         cells = self.routes.get(route_id)
         if not cells:
             return self._refuse(f"no route/proposed with id {route_id!r}", tag)
+        if route_id in self.revoked:
+            return self._refuse(f"move permit for route {route_id} is revoked until a fresh scan", tag)
         if route_id in self.needs_gate and route_id not in self.approved:
             return self._refuse(f"route {route_id} is risky and has no approved gate/answer", tag)
         self.path = [cell_centre(c) for c in cells]
@@ -346,4 +364,5 @@ def attach(world, bus):
     bus.subscribe("gate/answer", r.on_gate_answer)
     bus.subscribe("responder/action", r.on_action)
     bus.subscribe("world/change", r.on_world_change)
+    bus.subscribe("permit/route", r.on_permit)
     return r

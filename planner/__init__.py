@@ -12,7 +12,7 @@ async def start(bus) -> RoutePlanner:
     `router.handoff` (X3, planner/handoff.py) starts those missions: each casualty perception reports
     is handed to the Responder, and the work is re-split when the Scout or the Responder is blocked.
     """
-    from planner import handoff, loop
+    from planner import handoff, loop, permit
 
     planner = RoutePlanner(bus)
     bus.subscribe("map/cells", planner.update_map)
@@ -20,4 +20,5 @@ async def start(bus) -> RoutePlanner:
     lp = await loop.start(bus, planner)
     planner.loop, planner.task = lp, lp.task
     planner.handoff = handoff.start(bus, lp, planner)
+    planner.permits = permit.start(bus)  # L1: move permits that only fresh observation re-earns
     return planner
