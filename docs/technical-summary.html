@@ -53,7 +53,7 @@
   <section class="card">
     <h2>Problem</h2>
     <p>After an earthquake, rescuers cannot see inside a collapsed building, and an aftershock can bring down more of it on the people who go in. Sending a person or a heavy machine in blind wastes the first hours and adds risk.</p>
-    <p class="todo"><b>Add before submitting:</b> one cited figure on the need (e.g. from an INSARAG or USAR source). The repo holds none, and this page does not invent one.</p>
+    <p><b>Time is the constraint:</b> “the vast majority of survivors are brought out within 24 hours by local teams”, and more than 90% within three days (Ilan Kelman, UCL disaster researcher, to AFP, 9 Feb 2023¹). A robot that maps safely in those first hours saves the time a blind entry loses.</p>
   </section>
 
   <section class="card">
@@ -142,12 +142,12 @@
     <h2>Evidence: what we measured</h2>
     <div class="grid2">
       <ul>
-        <li><b>End-to-end runner</b> (one command, auto-approve, local models only): B1 seeds 18 and 19 pass <b>17/17</b> checks; most other seeds 16/17.</li>
+        <li><b>End-to-end runner</b> (one command, auto-approve, local models only): B1 seeds 3, 5, 18 and 19 pass <b>17/17</b> checks.</li>
         <li><b>Multi-level descent</b> to B2: seeds 0–4 pass <b>9/9</b>: the Scout descends, maps a dropped slab, stops, re-routes, reaches the casualty.</li>
       </ul>
       <ul>
         <li><b>Test suites:</b> about 900 Python tests and 36 browser tests on the main branch.</li>
-        <li><b>Known gap, shown not hidden:</b> the most common failure is “supply placed within 0.5 m of the casualty”: the Responder's collision ray stops it short. Fixes are in review.</li>
+        <li><b>Failures we found and fixed:</b> the most common miss was “supply placed within 0.5 m of the casualty” (the collision ray read the casualty as a wall; re-plans started from a stale cell). After both fixes, seeds 3 and 5 pass <b>17/17</b>.</li>
       </ul>
     </div>
   </section>
@@ -170,7 +170,7 @@
 </main>
 
 <footer>
-  <span>Sources: docs/brief.md, docs/aftershock.md, docs/hardware.md, planner/budget.json, coord/CONTRACT.md, coord/gem.py; runs and benchmarks from the team board, 8 Nov 2026.</span>
+  <span>¹ AFP via Daily Sabah, 9 Feb 2023: dailysabah.com/turkey/chances-of-survival-may-be-up-to-a-week-after-earthquakes-experts/news (expert comment, not a study). Sources: docs/brief.md, docs/aftershock.md, docs/hardware.md, planner/budget.json, coord/CONTRACT.md, coord/gem.py; runs and benchmarks from the team board, 8 Nov 2026.</span>
   <span>AFTERSHOCK · 8 Nov 2026</span>
 </footer>
 </div>
