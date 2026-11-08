@@ -1,0 +1,29 @@
+{
+  "metric": "reached casualty and entered no collapsed cell",
+  "elapsed_wall_s": 0.11,
+  "backends": "T23-grid-world / T12-router",
+  "stand_ins": [
+    "grid-dynamics",
+    "no-MuJoCo-verification",
+    "oracle-map",
+    "scripted-collapse",
+    "test-operator"
+  ],
+  "all_trials_completed": true,
+  "results": [
+    {
+      "planner": "naive",
+      "safe_successes": 25,
+      "measured_trials": 30,
+      "attempted_trials": 30,
+      "safe_success_rate": 0.8333333333333334
+    },
+    {
+      "planner": "aftershock",
+      "safe_successes": 30,
+      "measured_trials": 30,
+      "attempted_trials": 30,
+      "safe_success_rate": 1.0
+    }
+  ]
+}

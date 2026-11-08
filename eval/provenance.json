@@ -1,0 +1,15 @@
+{
+  "measured_utc_date": "2026-11-08",
+  "frozen_git_head": "dc1963f07b2329d85abe455f39d2da0ac276d7f6",
+  "upstream_main": "f92bdbd",
+  "command": "GEMINI_MODE=off python tools/eval.py --runs 30 --output eval/measured-sensor-goal --trial-timeout 300 --max-seconds 880",
+  "workers": 12,
+  "simulation_seconds": 60,
+  "aftershock_at": 25,
+  "scene_scope": "backup scene; production scene-derived hazard estimates (pre-Z1)",
+  "source_scope": "production classes on simulation clock; browser, voice, hub startup untested",
+  "published_driver_delta": "Import order only, after archiving exact measured sources",
+  "driver_sha256": "862b5957af0feb49f9fb15cae7d844186e2c5147dc8b875ec65b9d601dbca1a4",
+  "traces_sha256": "931e6d5b497dc9851ef295bb7edef722c5e117bc58b3867bf5f491ee6adff5aa",
+  "sources_sha256": "1604ec9001ea7b47c648bae9ba90a245a3c404b247fd988224c935b9e023649c"
+}
