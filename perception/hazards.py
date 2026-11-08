@@ -55,6 +55,7 @@ class Hazards:
         self.update(t)
         self.predicted = {ij: why for ij, (s, why) in self.labels.items() if s == "at_risk"}
         self.grid.begin_change(t)
+        self.grid.forget((i, j, k) for i, j in self.predicted for k in self.grid.layers)
         self.cloud.reset()
         kind = "aftershock" if data.get("kind", "aftershock") == "aftershock" else "injected block"
         self.change = f"the {kind} at {t:.1f} s"
