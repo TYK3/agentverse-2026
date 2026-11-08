@@ -233,3 +233,11 @@ def test_startup_lanes_status_and_cleanup(clean_bus, monkeypatch):
 def test_docs(clean_bus):
     with TestClient(hub.app) as client:
         assert client.get("/docs").status_code == 200
+
+
+def test_scene_loaded_accepts_the_tower_scene():
+    """sim/scenes/tower.xml (ref Y1) publishes scene/loaded with scene "tower"."""
+    from coord.messages import validate_payload
+
+    payload = {"scene": "tower", "blocks": [{"id": "b1", "label": "slab", "pos": [0.0, 0.0, 1.05], "size": [1.0, 1.0, 0.05]}]}
+    assert validate_payload("scene/loaded", payload)["scene"] == "tower"
