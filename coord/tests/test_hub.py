@@ -253,3 +253,10 @@ def test_hazard_exclusion_and_points_from_are_optional():
     data = dict(example["data"], points=[[0.1, 0.2, 0.3]], points_from=[0.0, 0.0, 0.18])
     assert validate_payload("sensors/scout", data) == data
 
+
+def test_scene_loaded_accepts_the_building_scene():
+    """sim/scenes/building.xml (ref Y1b) publishes scene/loaded with scene "building"."""
+    from coord.messages import validate_payload
+
+    payload = {"scene": "building", "blocks": [{"id": "b1", "label": "column", "pos": [0.0, 0.0, 1.4], "size": [0.15, 0.15, 1.4]}]}
+    assert validate_payload("scene/loaded", payload)["scene"] == "building"

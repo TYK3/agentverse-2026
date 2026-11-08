@@ -2,6 +2,7 @@
 clears only light debris, waits for an approved gate on risky routes and freezes on world/change."""
 
 import asyncio
+import itertools
 
 import mujoco
 import numpy as np
@@ -361,3 +362,86 @@ def test_responder_hears_route_proposed_before_the_physics_check():
 
     bus, world = asyncio.run(go())
     assert bus.order[0] is world.responder
+
+
+# ---- E2: continuous motion from sim ticks, published as responder/pose -------------------------
+
+def _poses_during_move(world, resp, route_id, ticks):
+    poses = []
+    for _ in range(ticks):
+        resp.step(0.1)
+        world.tick(0.1)
+        poses.append(resp.pose_message(world.t))
+    return poses
+
+
+def test_motion_is_continuous_and_speed_bounded(world, resp):
+    route(resp, "r1", demo_responder.ROUTES["r1"])
+    resp.on_action({"action": "move", "route": "r1", "item": "water"})
+    end = R.cell_centre(resp.routes["r1"][-1])
+    poses = _poses_during_move(world, resp, "r1", 40)              # 4 s of an ~20 s route
+    xy = [np.array(p["pos"][:2]) for p in poses]
+    steps = [float(np.linalg.norm(b - a)) for a, b in itertools.pairwise(xy)]
+    assert max(steps) <= R.SPEED * 0.1 + 1e-3, "never faster than SPEED"
+    assert min(steps) > 0.0, "moves on every tick while the route lasts"
+    assert all(p["state"] == "moving" for p in poses)
+    assert float(np.linalg.norm(xy[-1] - end)) > 1.0, "no jump to the route's end"
+    # every intermediate pose lies on the route polyline (cell centres), within a few millimetres
+    centres = [R.cell_centre(c) for c in resp.routes["r1"]]
+    for p in xy:
+        d = min(float(np.linalg.norm(p - c)) for c in centres)
+        assert d <= R.RES * 0.75, d
+
+
+def test_pose_message_matches_the_contract(world, resp):
+    messages = pytest.importorskip("coord.messages")
+    route(resp, "r1", demo_responder.ROUTES["r1"])
+    resp.on_action({"action": "move", "route": "r1", "item": "water"})
+    for p in _poses_during_move(world, resp, "r1", 3) + [R.Responder(world.m, world.d).pose_message(0)]:
+        messages.validate_payload("responder/pose", p)
+
+
+def test_revoked_permit_stops_mid_route_and_pose_holds(world, resp):
+    route(resp, "r1", demo_responder.ROUTES["r1"])
+    resp.on_action({"action": "move", "route": "r1", "item": "water"})
+    _poses_during_move(world, resp, "r1", 10)
+    resp.on_permit({"route": "r1", "granted": False, "t": world.t, "reason": "rubble shift", "evidence": []})
+    held = _poses_during_move(world, resp, "r1", 10)
+    assert {p["state"] for p in held} == {"frozen"}
+    assert len({tuple(p["pos"]) for p in held}) == 1, "stays exactly where it stopped"
+
+
+def test_blocked_route_pose_stops_short_of_the_wall(world, resp):
+    route(resp, "rw", [(-0.48, -1.77), (-0.48, -0.6), (0.6, -0.6)])
+    resp.on_action({"action": "move", "route": "rw", "item": "water"})
+    poses = _poses_during_move(world, resp, "rw", 200)
+    last = next(p for p in poses if p["state"] == "blocked")
+    assert last["pos"][0] + R.HALF_LEN < -0.05, "front stays outside wall b6"
+    assert poses[-1]["pos"] == last["pos"]
+
+
+def test_sim_loop_publishes_a_pose_every_tick():
+    import sim
+
+    class Bus:
+        def __init__(self):
+            self.subs, self.poses = {}, []
+
+        def subscribe(self, topic, fn):
+            self.subs.setdefault(topic, []).append(fn)
+
+        async def publish(self, topic, data):
+            if topic == "responder/pose":
+                self.poses.append(data)
+
+    async def go():
+        bus = Bus()
+        world = await sim.start(bus)
+        await asyncio.sleep(0.55)
+        world.task.cancel()
+        await asyncio.gather(world.task, return_exceptions=True)
+        return bus.poses, round(world.t / 0.1)
+
+    poses, ticks = asyncio.run(go())
+    assert len(poses) >= 2 and len(poses) == ticks, "exactly one responder/pose per sim tick"
+    assert [p["t"] for p in poses] == sorted(p["t"] for p in poses)
