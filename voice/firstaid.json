@@ -1,6 +1,7 @@
 {
   "title": "Search and Rescue First Aid Guidance",
   "disclaimer": "First aid guidance for bystanders and rescue operators. This guidance is for immediate support only, never a medical diagnosis. All medical decisions require qualified professional care.",
+  "note": "guidance is the full step for a bystander or the operator, as the source says it. casualty_line is what the robot says to a trapped, conscious casualty (plain words, at most 20, self-care only); a step without one is never said to the casualty. Every source was opened and checked on 2026-11-08 (ref FIRSTAID-SOURCES).",
   "steps": [
     {
       "id": "step_1",
@@ -14,27 +15,30 @@
       "action": "control_bleeding",
       "title": "Control Severe Bleeding",
       "guidance": "Apply firm, direct pressure on the bleeding wound with a clean cloth or dressing. If an object is embedded, press around it without removing it.",
+      "casualty_line": "If you can, press a cloth firmly on where it is bleeding, and keep pressing.",
       "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/bleeding-heavily"
     },
     {
       "id": "step_3",
       "action": "protect_spine",
       "title": "Do Not Move Neck or Spine",
-      "guidance": "Do not move the neck or back unless the casualty is in immediate danger. Support the head with your hands to keep the head, neck, and spine aligned.",
-      "source": "https://www.sja.org.uk/first-aid-advice/recovery-position/"
+      "guidance": "Do not move the casualty, and do not tell them to move, unless they are in immediate danger. Steady and support the head so the head, neck and spine stay in a straight line until help takes over.",
+      "casualty_line": "Keep your head and neck still. Do not try to move. Help is coming to you.",
+      "source": "https://www.sja.org.uk/first-aid-advice/spinal-injury/"
     },
     {
       "id": "step_4",
       "action": "recovery_position",
       "title": "Place in Recovery Position",
       "guidance": "If the casualty is unresponsive but breathing normally and not in danger of spinal trauma, roll them onto their side to keep the airway open.",
-      "source": "https://www.nhs.uk/conditions/first-aid/recovery-position/"
+      "source": "https://www.sja.org.uk/first-aid-advice/recovery-position/"
     },
     {
       "id": "step_5",
       "action": "keep_warm",
       "title": "Keep Warm and Prevent Shock",
       "guidance": "Cover the casualty with a blanket, jacket, or dry cloth to preserve body warmth and prevent shock. Do not apply direct artificial heat.",
+      "casualty_line": "Pull anything dry over you to keep warm. We will try to bring you a blanket.",
       "source": "https://www.nhs.uk/conditions/hypothermia/"
     },
     {
@@ -43,6 +47,22 @@
       "title": "Reassure and Monitor",
       "guidance": "Stay with the casualty, speak calmly to reassure them, and monitor breathing continuously until emergency medical personnel arrive.",
       "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/unresponsive-and-breathing"
+    },
+    {
+      "id": "step_7",
+      "action": "protect_airway_from_dust",
+      "title": "Protect Mouth and Nose from Dust",
+      "guidance": "If trapped, protect the mouth, nose and eyes from airborne debris: cover the mouth and nose with a cloth, clothing or a dust mask. Do not put wet cloth over the nose or mouth.",
+      "casualty_line": "Cover your mouth and nose with dry cloth and breathe slowly.",
+      "source": "https://www.redcross.org/get-help/how-to-prepare-for-emergencies/types-of-emergencies/earthquake.html"
+    },
+    {
+      "id": "step_8",
+      "action": "keep_limb_still",
+      "title": "Keep an Injured Limb Still",
+      "guidance": "Support the injured limb so it does not move, and keep supporting it until medical help arrives.",
+      "casualty_line": "Keep the hurt part still. Do not try to move it. Help is coming to you.",
+      "source": "https://www.redcross.org.uk/first-aid/learn-first-aid/broken-bone"
     }
   ]
 }

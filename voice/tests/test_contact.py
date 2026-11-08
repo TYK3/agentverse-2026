@@ -128,6 +128,72 @@ def test_every_line_is_short_plain_and_cited():
             assert firstaid.get_step(cites) is not None, f"{move} cites a missing first aid step"
 
 
+def test_self_care_lines_are_the_cited_steps_own_words():
+    """ref FIRSTAID-SOURCES: what the robot says is the cited step's casualty_line, never a drifting copy."""
+    for move, (line, intent, asks, cites) in C.MOVES.items():
+        if move.startswith("care_"):
+            assert asks is None and intent == "first_aid" and cites, move
+            assert line == firstaid.casualty_line(cites), move
+    assert C.MOVES["care_breathing"][3] == "protect_airway_from_dust"
+    assert C.MOVES["care_spine"][3] == "protect_spine" and C.MOVES["care_still"][3] == "keep_limb_still"
+
+
+def test_neck_pain_gets_keep_head_still_and_is_never_asked_to_move_or_walk():
+    c = C.Contact(gem=False)
+    c.on_casualties([{"id": "c9", "confidence": 0.9}], now=0)
+    c.hear({"id": "c9", "text": "Yes, I can hear you."}, now=1)
+    out = c.hear({"id": "c9", "text": "My neck hurts a lot."}, now=2)
+    said = [m for m in c.sessions["c9"].asked]
+    assert said[:3] == ["hear", "where", "care_spine"], said
+    assert C.MOVES["care_spine"][0] in [d["text"] for t, d in out if t == "say"]
+    for k, reply in enumerate(["No.", "No, I can breathe.", "No.", "Yes, I'm cold."] * 2, start=3):
+        c.hear({"id": "c9", "text": reply}, now=k)
+    asked = c.sessions["c9"].asked
+    assert "move" not in asked and "walk" not in asked, asked
+
+
+def test_a_late_answer_picks_an_unresponsive_contact_up_again():
+    """ref LATE-REPLY (live run): "Are you hurt?" was answered 36 s later, after the contact had ended as
+    unresponsive, so the answer was dropped and no first aid line was ever said."""
+    c = C.Contact(gem=False)
+    c.on_casualties([{"id": "c1", "confidence": 0.9}], now=0)
+    c.hear({"id": "c1", "text": "Yes, I can hear you."}, now=1)            # -> "where"
+    c.tick(now=1 + C.REPLY_WAIT_S)                                          # repeat
+    c.tick(now=1 + 2 * C.REPLY_WAIT_S)                                      # second silence
+    s = c.sessions["c1"]
+    assert s.status == "unresponsive" and c.active is None
+    out = c.hear({"id": "c1", "text": "Yes, my left leg. I think it's broken."}, now=40)
+    assert s.status == "talking" and c.active == "c1"
+    assert s.facts["hurt"] == ["leg"] and s.injuries
+    assert any(t == "log/decision" and d["outcome"] == "resumed" for t, d in out)
+    assert s.asked[-1] == "move", s.asked                                    # the conversation goes on
+    assert c.tick(now=41) == [], "no instant repeat right after picking up (live run: a stale timer did)"
+    c.tick(now=40 + C.REPLY_WAIT_S)
+    c.tick(now=40 + 2 * C.REPLY_WAIT_S)
+    assert s.status == "unresponsive"
+    c.hear({"id": "c1", "text": "My arms, yes. Not my left leg, it hurts too much."}, now=90)
+    assert s.revived == 2 and s.facts["can_move"] is False and "care_still" in s.asked, s.asked
+
+
+def test_no_pick_up_after_the_turn_cap():
+    c = C.Contact(gem=False)
+    c.on_casualties([{"id": "c1", "confidence": 0.9}], now=0)
+    s = c.sessions["c1"]
+    s.asked += ["where"] * (C.MAX_TURNS - len(s.asked))
+    s.status, c.active = "unresponsive", None
+    assert c.hear({"id": "c1", "text": "Yes, my leg."}, now=50) == [], "MAX_TURNS still bounds the contact"
+
+
+def test_a_late_answer_does_not_cut_into_another_contact():
+    c = C.Contact(gem=False)
+    c.on_casualties([{"id": "c1", "confidence": 0.9}, {"id": "c2", "confidence": 0.8}], now=0)
+    c.tick(now=C.REPLY_WAIT_S)
+    c.tick(now=2 * C.REPLY_WAIT_S)
+    assert c.sessions["c1"].status == "unresponsive" and c.active == "c2"
+    assert c.hear({"id": "c1", "text": "Yes, I can hear you."}, now=25) == []
+    assert c.active == "c2"
+
+
 # ---- Gemini, bounded --------------------------------------------------------------------------------
 
 class FakeGem:

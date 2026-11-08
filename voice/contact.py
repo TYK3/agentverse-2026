@@ -58,12 +58,13 @@ MOVES: dict[str, tuple[str, str, str | None, str | None]] = {
     "move": ("Can you move your arms and legs?", "first_aid", "can_move", None),
     "cold": ("Are you cold or wet?", "first_aid", "cold", None),
     "walk": ("Do you think you could stand up and walk?", "first_aid", "can_walk", None),
-    "care_bleeding": ("If you can, press a cloth firmly on where it is bleeding, and keep pressing.",
-                      "first_aid", None, "control_bleeding"),
-    "care_still": ("Keep the hurt part still. Do not try to move it. Help is coming to you.",
-                   "first_aid", None, "protect_spine"),
-    "care_breathing": ("Cover your mouth and nose with cloth and breathe slowly.", "first_aid", None, "check_breathing"),
-    "care_warm": ("Pull anything dry over you to keep warm. A robot is bringing a blanket.", "first_aid", None, "keep_warm"),
+    # Self-care lines are the cited steps' casualty_line in voice/firstaid.json (ref FIRSTAID-SOURCES).
+    "care_bleeding": (firstaid.casualty_line("control_bleeding"), "first_aid", None, "control_bleeding"),
+    "care_spine": (firstaid.casualty_line("protect_spine"), "first_aid", None, "protect_spine"),
+    "care_still": (firstaid.casualty_line("keep_limb_still"), "first_aid", None, "keep_limb_still"),
+    "care_breathing": (firstaid.casualty_line("protect_airway_from_dust"), "first_aid", None,
+                       "protect_airway_from_dust"),
+    "care_warm": (firstaid.casualty_line("keep_warm"), "first_aid", None, "keep_warm"),
     "close": ("Thank you. You did well. Stay where you are. Rescuers know where you are and are coming.",
               "reassure", None, "reassure_and_monitor"),
 }
@@ -72,6 +73,7 @@ AFTERSHOCK = "Stop. Stay where you are. Cover your head with your arms. I am sti
 BANNED = ("diagnos", "you have a", "medicine", "medication", "pill", "tablet", "inject", "tourniquet", "surgery",
           "fracture", "concussion", "you will be fine", "promise")
 
+SPINE = ("head", "neck", "back", "spine")   # hurt here -> keep head and neck still (protect_spine)
 PARTS = ("head", "neck", "back", "spine", "chest", "stomach", "belly", "arm", "hand", "leg", "knee", "foot",
          "ankle", "hip", "shoulder", "face", "eye", "ribs", "wrist")
 _YES = re.compile(r"\b(yes|yeah|yep|i can|i am|i'm so|it is|it's (bleeding|hard))\b")
@@ -89,6 +91,7 @@ class Session:
     said_at: float = 0.0
     repeated: bool = False
     silent: int = 0
+    revived: int = 0                                     # times picked up again after a late answer
     status: str = "talking"
     receipts: list[str] = field(default_factory=list)
     transcript: list[tuple[str, str]] = field(default_factory=list)   # (who, text)
@@ -160,10 +163,12 @@ def next_move(s: Session) -> str:
     if f["breathing_hard"] and "care_breathing" not in asked:
         return "care_breathing"
     hurt = f["hurt"] or []
-    if hurt and "move" not in asked and f["can_move"] is None:
+    if any(p in hurt for p in SPINE) and "care_spine" not in asked:
+        return "care_spine"   # head, neck or back: keep still at once, before asking them to move anything
+    if hurt and "move" not in asked and f["can_move"] is None and "care_spine" not in asked:
         return "move"
-    if hurt and f["can_move"] is not None and "care_still" not in asked and (f["can_move"] is False or any(
-            p in hurt for p in ("neck", "back", "spine", "head", "leg"))):
+    if hurt and f["can_move"] is not None and not asked & {"care_still", "care_spine"} and (
+            f["can_move"] is False or "leg" in hurt):
         return "care_still"
     if f["cold"] and "care_warm" not in asked:
         return "care_warm"
@@ -171,7 +176,9 @@ def next_move(s: Session) -> str:
         fact = MOVES[q][2]
         if q in asked or f[fact] is not None:
             continue
-        if q == "walk" and (f["can_move"] is False or "care_still" in asked):
+        if q == "move" and "care_spine" in asked:
+            continue          # never ask someone told to keep their head and neck still to move
+        if q == "walk" and (f["can_move"] is False or asked & {"care_still", "care_spine"}):
             continue          # do not suggest walking with a part that must stay still
         return q
     return "close"
@@ -284,8 +291,20 @@ class Contact:
         """A casualty/reply. `interpret(session, text)` -> checked Gemini answer or None (default: none)."""
         now = self.clock() if now is None else now
         s = self.sessions.get(data.get("id"))
-        if s is None or s.status != "talking" or data.get("id") != self.active:
+        if not self.accepts(data.get("id")):
             return []
+        revived = []
+        if s.status == "unresponsive":
+            # A late answer: the casualty was slower than REPLY_WAIT_S (or the sim ran behind the wall
+            # clock), so "unresponsive" was wrong. Pick the contact up again; MAX_TURNS still bounds it
+            # (ref LATE-REPLY).
+            s.status, s.revived, s.silent, s.started, s.said_at = "talking", s.revived + 1, 0, now, now
+            s.waiting = next((m for m in reversed(s.asked) if MOVES[m][2]), None)   # what they answer
+            self.active = s.cid
+            if s.cid in self.queue:
+                self.queue.remove(s.cid)
+            revived = [self._log(s, now, f"heard {s.cid} after unresponsive", "resumed",
+                                 "late answer: responsive after all, contact picked up again")]
         text = data.get("text", "")
         s.transcript.append(("casualty", text))
         s.silent, s.repeated = 0, False
@@ -307,8 +326,18 @@ class Contact:
         move = got["next"] if got else next_move(s)
         ack = got["ack"] if got else ""
         understood = ", ".join(f"{k}={v}" for k, v in facts.items()) or "nothing new"
-        return [self._log(s, now, f"heard {s.cid}: {text!r}", "understood", understood, model=model),
+        return [*revived, self._log(s, now, f"heard {s.cid}: {text!r}", "understood", understood, model=model),
                 *self._say(s, move, now, ack=ack, model=model)]
+
+    def accepts(self, cid) -> bool:
+        """Whether a casualty/reply from `cid` is heard: the active contact, or one ended as unresponsive
+        with robot lines left (MAX_TURNS) while no other contact is running."""
+        s = self.sessions.get(cid)
+        if s is None:
+            return False
+        if s.status == "talking":
+            return cid == self.active
+        return s.status == "unresponsive" and len(s.asked) < MAX_TURNS and self.active in (None, cid)
 
     def tick(self, now: float | None = None) -> list[tuple[str, Any]]:
         now = self.clock() if now is None else now
@@ -427,7 +456,7 @@ def start(bus, *, clock=None, gem=None):
 
     async def on_reply(data):
         s = c.sessions.get(data.get("id"))
-        if s is None or data.get("id") != c.active:
+        if not c.accepts(data.get("id")):
             return
         got = (None, MODEL, None)
         if c.gem:
