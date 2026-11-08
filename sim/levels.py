@@ -1,4 +1,4 @@
-"""L4: the Scout drives between levels (L1 -> ground -> B1 -> B2) on real ramps, never teleported.
+"""L4: the Scout drives between levels (L1 -> ground -> B1 -> B2 -> B3) on real ramps, never teleported.
 
 `LevelWorld` is `sim.world.World` on sim/scenes/levels.xml with one change to how the Scout moves:
   - its height comes only from the floor under it. Before each step a ray is cast straight down
@@ -28,7 +28,7 @@ PROBE = 0.25        # the support ray starts this far above the current floor (u
 MAX_RISE = 0.6      # max floor change per metre driven (tan 31 deg); ramps here are 16.7 deg
 STEP_SLACK = 0.004  # metres of floor change always allowed per step (ramp seams, float noise)
 LEVEL_TOL = 0.10    # metres: the Scout's floor must be this close to a target's z to have arrived
-LEVEL_Z = {"L1": 0.6, "ground": 0.0, "B1": -0.6, "B2": -1.2}   # floor heights in levels.xml
+LEVEL_Z = {"L1": 0.6, "ground": 0.0, "B1": -0.6, "B2": -1.2, "B3": -1.8}   # floor heights in levels.xml
 SUBSTEP = 0.01      # metres: long steps are checked in pieces so a drop between samples is not missed
 
 
@@ -95,7 +95,7 @@ class LevelWorld(World):
         return events
 
     def level(self):
-        """Name of the level the Scout is on: L1, ground, B1, B2 or ramp."""
+        """Name of the level the Scout is on: L1, ground, B1, B2, B3 or ramp."""
         for name, z in LEVEL_Z.items():
             if abs(self.floor_z - z) < 0.02:
                 return name
