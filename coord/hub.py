@@ -8,6 +8,7 @@ import logging
 import os
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from time import monotonic
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -108,6 +109,8 @@ async def publish_gemini_status(target_bus, gem, interval=2):
 @asynccontextmanager
 async def lifespan(application):
     tasks = []
+    application.state.health_started_at = monotonic()
+    application.state.health_sim = None
     try:
         points = PointCloudPublisher(bus)
         tasks.append(asyncio.create_task(points.run()))
@@ -125,6 +128,8 @@ async def lifespan(application):
                 continue
             # start(bus) wires subscriptions and launches background work, then returns.
             result = await start(bus)
+            if name == "sim":
+                application.state.health_sim = result
             if isinstance(result, asyncio.Task):
                 tasks.append(result)
             elif isinstance(result, (list, tuple)):
@@ -141,6 +146,8 @@ async def lifespan(application):
             tasks.append(asyncio.create_task(publish_gemini_status(bus, gem)))
         yield
     finally:
+        application.state.health_started_at = None
+        application.state.health_sim = None
         for task in tasks:
             task.cancel()
         if tasks:
@@ -161,6 +168,21 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["content-type"],
 )
+
+
+@app.get("/health")
+async def health():
+    """Hub liveness and sim task state; this is not physics or rescue readiness."""
+    began = getattr(app.state, "health_started_at", None)
+    world = getattr(app.state, "health_sim", None)
+    task = world if isinstance(world, asyncio.Task) else getattr(world, "task", None)
+    scene = getattr(world, "scene", None)
+    return {
+        "ok": began is not None,
+        "uptime_s": round(max(0.0, monotonic() - began), 3) if began is not None else 0.0,
+        "sim": {"loaded": world is not None, "running": isinstance(task, asyncio.Task) and not task.done(),
+                "scene": scene if isinstance(scene, str) else None},
+    }
 
 
 @app.post("/inject")
