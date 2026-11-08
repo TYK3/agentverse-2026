@@ -241,3 +241,118 @@ h2 { margin: 0 0 1rem; color: var(--muted); }
 dialog, .story-card, .hardware-dialog { border-width: 1px; }
 input { border-width: 1px; background: transparent; }
 #asset-credits { border-width: 1px !important; background: var(--bg) !important; }
+
+/* ---------- Minimal pass 2: show less at once ----------
+   Nothing is removed; secondary detail appears on hover or focus. */
+
+/* Story strip: numbers only, the current step shows its name */
+.story-head { background: transparent; border: 0; padding: 0; gap: 0.75rem; }
+.story-strip { gap: 0.4rem; flex-wrap: nowrap; }
+.story-label { display: none; }
+.story-phase.story-current .story-label,
+.story-phase:hover .story-label { display: inline; }
+.story-phase { border: 1px solid transparent; padding: 0.15rem 0.35rem; background: transparent; }
+.story-num { border: 0; width: auto; min-width: 1.1rem; }
+.story-phase[data-state="done"] { color: var(--accent-strong); border-color: transparent; }
+.story-phase[data-state="waiting"],
+.story-phase[data-state="held"] { color: var(--warn); background: transparent; border-color: var(--warn); }
+.story-phase[data-state="active"]:not(.story-current) { color: var(--accent); background: transparent; border-color: var(--accent); }
+.story-phase.story-current { color: #000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
+.story-phase.story-current[data-state="waiting"],
+.story-phase.story-current[data-state="held"] { background: var(--warn); border-color: var(--warn); }
+.story-follow { border: 0; color: var(--muted); }
+
+/* Legend: a single line until you hover or tab to it */
+.map-legend { padding: 0.5rem 0.8rem; background: rgba(10, 10, 10, 0.6); }
+.map-legend .legend-row { display: none; }
+.map-legend .legend-header { margin: 0; padding: 0; border: 0; cursor: help; }
+.map-legend .legend-header::after { content: '  +'; color: var(--accent); }
+.map-legend:hover .legend-row,
+.map-legend:focus-within .legend-row,
+.map-legend:focus .legend-row { display: flex; }
+.map-legend:hover .legend-header,
+.map-legend:focus .legend-header { margin-bottom: 0.5rem; }
+.map-legend:hover .legend-header::after,
+.map-legend:focus .legend-header::after { content: ''; }
+
+/* Developer tools and stats fade back until hovered */
+.map-controls, .map-stats-badge, #asset-credits { opacity: 0.45; transition: opacity 150ms; }
+.map-controls:hover, .map-stats-badge:hover, #asset-credits:hover,
+.map-controls:focus-within { opacity: 1; }
+.map-title-badge { color: var(--muted); }
+
+/* Top bar: quieter status text, the title is the only bright item */
+#top-bar span { color: var(--muted); font-size: 1rem; }
+#budget-panel { color: var(--muted); }
+#top-bar span.offline, #budget-panel.over-budget, .over-budget { color: var(--danger); }
+#top-bar span.online { color: var(--ok); }
+
+/* Right panel: more air, smaller headings */
+#right-panel h2 { font-size: 0.55rem; margin-bottom: 0.9rem; }
+.permit-panel, #confidence-panel { margin-bottom: 2.25rem; }
+
+/* ---------- Utilitarian minimalism (adapted) ----------
+   Taken from the minimalist protocol: no Inter, a system sans with a
+   mono for metadata, no emojis (CSS-drawn icons), generous padding,
+   1px dividers, quiet entry motion, a faint ambient light spot.
+   Kept from ours on purpose: the dark palette and safety colours, the
+   retro pixel headings and buttons, and every control. */
+:root {
+  --sans: 'SF Pro Display', 'Geist Sans', 'Helvetica Neue', 'Switzer', system-ui, sans-serif;
+  --mono: 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--sans);
+  line-height: 1.6;
+}
+body { font-family: var(--sans); }
+
+/* Metadata in mono: times, IDs, step counters, log meta */
+.permit-time, .evidence-time, #reasoning-log small, .story-num,
+#approval-meta, .story-card dd, #report-content pre {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0;
+}
+.story-num { font-size: 0.8rem; }
+#reasoning-log { line-height: 1.6; }
+.evidence-title { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.65rem; }
+
+/* Generous padding inside dialogs and sections */
+dialog, .story-card { padding: 2rem 2.25rem; }
+.hardware-dialog { padding: 2rem 2.25rem; }
+
+/* Icons: simple CSS primitives instead of emoji */
+.banner-icon { display: inline-grid; place-items: center; width: 1.4rem; height: 1.4rem; font-family: var(--pixel-font); font-size: 0.6rem; line-height: 1; border: 2px solid currentColor; }
+.aftershock-banner .banner-icon::before { content: '!'; }
+.replan-banner .banner-icon::before { content: '>'; }
+.replan-banner .banner-icon { color: var(--accent); }
+
+/* Legend toggle: sharp + and - */
+.map-legend:hover .legend-header::after,
+.map-legend:focus .legend-header::after,
+.map-legend:focus-within .legend-header::after { content: '  -'; }
+
+/* Quiet motion: panels fade up once on load, staggered; transform/opacity only */
+@keyframes av-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+#right-panel > * { animation: av-enter 600ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+#right-panel > *:nth-child(2) { animation-delay: 80ms; }
+#right-panel > *:nth-child(3) { animation-delay: 160ms; }
+#right-panel > *:nth-child(4) { animation-delay: 240ms; }
+#right-panel > *:nth-child(5) { animation-delay: 320ms; }
+#right-panel > *:nth-child(6) { animation-delay: 400ms; }
+#reasoning-log li { animation: av-enter 400ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.btn-sm:active:not(:disabled), .btn-topbar:active { transform: scale(0.98); }
+
+/* Faint ambient light, fixed and non-interactive, so the dark canvas is not flat */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(900px 500px at 15% 0%, rgba(255, 220, 170, 0.035), transparent 70%);
+}
+#app { position: relative; z-index: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  #right-panel > *, #reasoning-log li { animation: none; }
+}
