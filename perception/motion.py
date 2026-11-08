@@ -36,6 +36,7 @@ EXCLUDE = 0.5         # metres around moved columns that are kept out
 QUIET_FRAMES = 6      # frames re-measuring the moved voxels with no motion before a zone lifts
 QUIET_RAYS = 3        # voxels in the moved columns a frame must re-measure to count toward lifting
 CAM_FWD, CAM_Z = 0.15, 0.18   # Scout depth camera mount (docs/hardware.md), when points_from is absent
+FORGET_S = 20.0       # seconds after which a viewpoint the Scout left is dropped (memory stays bounded)
 DEPTH_CARVE = 512     # depth rays walked for free space per frame (every point still counts as a hit)
 FACES = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
 
@@ -64,6 +65,8 @@ class MotionWatch:
     def __init__(self):
         self.v = {}            # (voxel, viewpoint) -> [state "free"|"occ", agreeing frames, contrary frames since]
         self.view = None       # the viewpoint of the rays being added
+        self.views = {}        # viewpoint -> last time it was used
+        self.frames = 0
         self.events = []       # (voxel, t, "vanished"|"appeared") not yet in a zone
         self.zones = []
         self.lifted = []       # zones lifted by fresh observation, for the reasons
@@ -114,7 +117,19 @@ class MotionWatch:
         for key, hit in self.obs.items():
             (self._hit if hit else self._pass)(key)
         self.seen = {v for v, _ in self.obs}
+        self.views.update({view: self.t for _, view in self.obs})
+        self.frames += 1
+        if self.frames % 50 == 0:
+            self._forget()
         self._frame()
+
+    def _forget(self):
+        """Drop voxel states of viewpoints unused for FORGET_S: motion is a change seen from one place."""
+        old = {view for view, t in self.views.items() if self.t - t > FORGET_S}
+        if old:
+            self.v = {key: s for key, s in self.v.items() if key[1] not in old}
+            for view in old:
+                del self.views[view]
 
     # ---- voxel states ----------------------------------------------------------------------
 
