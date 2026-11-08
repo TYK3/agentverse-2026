@@ -5,7 +5,9 @@ import importlib
 import inspect
 import json
 import logging
+import multiprocessing
 import os
+import queue
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
@@ -75,6 +77,187 @@ class Bus:
 
 bus = Bus()
 
+# HUB-PROCESSES: with HUB_PROCESSES=1 the lanes named here run in their own process, so a slow planner or
+# perception callback on the hub's event loop cannot stall the sim's 10 Hz tick. Off by default.
+PROCESS_LANES = ("sim",)
+PROCESS_READY_S = 120.0     # a lane process has this long to load (MuJoCo scene) and call its start(bus)
+PROCESS_STOP_S = 5.0
+
+
+def processes_enabled(env=None):
+    return (os.environ if env is None else env).get("HUB_PROCESSES", "") == "1"
+
+
+class ProxyBus:
+    """The bus a lane sees inside its own process: subscribe/publish go over queues to the hub's Bus.
+
+    publish() returns at once (the hub validates and delivers the message); subscribe() asks the hub to
+    forward that topic here, where this process's own subscribers run in subscription order, one message
+    at a time, exactly as the hub's Bus runs them.
+    """
+
+    def __init__(self, outbox):
+        self.outbox = outbox
+        self.subs = defaultdict(list)
+
+    def subscribe(self, topic, fn):
+        if not self.subs[topic]:
+            self.outbox.put(("sub", topic))
+        self.subs[topic].append(fn)
+
+    async def publish(self, topic, data):
+        self.outbox.put(("pub", topic, data))
+
+    async def deliver(self, topic, data):
+        for fn in tuple(self.subs.get(topic, ())):
+            try:
+                result = fn(data)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                log.exception("Subscriber failed for %s (lane process)", topic)
+
+
+async def _queue_get(q, timeout=0.25):
+    """One item from a multiprocessing queue without blocking the event loop, or None after `timeout`."""
+    try:
+        return await asyncio.get_running_loop().run_in_executor(None, q.get, True, timeout)
+    except queue.Empty:
+        return None
+
+
+def _lane_process_main(name, inbox, outbox):
+    """Entry point of a lane process (spawned): start the lane on a ProxyBus and serve the hub's messages."""
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(_lane_process(name, inbox, outbox))
+
+
+async def _lane_process(name, inbox, outbox):
+    proxy = ProxyBus(outbox)
+    try:
+        lane = importlib.import_module(name)
+        world = await lane.start(proxy)
+    except Exception as exc:  # noqa: BLE001 - reported to the hub, which logs and carries on without it
+        outbox.put(("failed", f"{type(exc).__name__}: {exc}"))
+        return
+    outbox.put(("ready",))
+    try:
+        while True:
+            item = await _queue_get(inbox)
+            if item is None:
+                continue
+            if item[0] == "stop":
+                break
+            if item[0] == "msg":
+                await proxy.deliver(item[1], item[2])
+            elif item[0] == "inject":       # POST /inject, answered by the lane's world (sim/inject.py)
+                from sim import inject
+                status, body = inject.handle(world, item[2])
+                outbox.put(("inject", item[1], status, body))
+    finally:
+        task = getattr(world, "task", None)
+        if isinstance(task, asyncio.Task):
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+class LaneProcess:
+    """The hub side of a lane running in its own process (HUB_PROCESSES=1)."""
+
+    def __init__(self, name, target_bus):
+        ctx = multiprocessing.get_context("spawn")     # fork + asyncio + MuJoCo is not safe; spawn is
+        self.name, self.bus = name, target_bus
+        self.inbox, self.outbox = ctx.Queue(), ctx.Queue()
+        self.process = ctx.Process(target=_lane_process_main, args=(name, self.inbox, self.outbox),
+                                   name=f"lane-{name}", daemon=True)
+        self.forwarded = set()
+        self.replies = {}
+        self.task = None
+        self._next = 0
+
+    def _forward(self, topic):
+        async def forward(data):
+            self.inbox.put(("msg", topic, data))
+        return forward
+
+    async def _handle(self, item):
+        kind = item[0]
+        if kind == "sub" and item[1] not in self.forwarded:
+            self.forwarded.add(item[1])
+            self.bus.subscribe(item[1], self._forward(item[1]))
+        elif kind == "pub":
+            try:
+                await self.bus.publish(item[1], item[2])
+            except Exception:
+                log.exception("Lane %s published an invalid %s", self.name, item[1])
+        elif kind == "inject":
+            future = self.replies.pop(item[1], None)
+            if future is not None and not future.done():
+                future.set_result((item[2], item[3]))
+
+    async def start(self, ready_s=PROCESS_READY_S):
+        """Spawn the process and relay its messages until it says ready. Returns False if it failed."""
+        self.process.start()
+        end = asyncio.get_running_loop().time() + ready_s
+        while asyncio.get_running_loop().time() < end:
+            item = await _queue_get(self.outbox)
+            if item is None:
+                if not self.process.is_alive():
+                    break
+                continue
+            if item[0] == "ready":
+                self.task = asyncio.create_task(self._relay())
+                return True
+            if item[0] == "failed":
+                log.error("Lane %s process failed to start: %s", self.name, item[1])
+                break
+            await self._handle(item)
+        await self.stop()
+        return False
+
+    async def _relay(self):
+        while True:
+            item = await _queue_get(self.outbox)
+            if item is not None:
+                await self._handle(item)
+
+    async def inject(self, body, timeout=10.0):
+        self._next += 1
+        future = asyncio.get_running_loop().create_future()
+        self.replies[self._next] = future
+        self.inbox.put(("inject", self._next, body))
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except TimeoutError:
+            self.replies.pop(self._next, None)
+            return 504, {"error": f"{self.name} process did not answer"}
+
+    async def stop(self):
+        if self.task is not None:
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+            self.task = None
+        if self.process.is_alive():
+            self.inbox.put(("stop",))
+            await asyncio.get_running_loop().run_in_executor(None, self.process.join, PROCESS_STOP_S)
+        if self.process.is_alive():
+            self.process.terminate()
+            self.process.join(PROCESS_STOP_S)
+
+
+def _install_process_inject(lane):
+    """POST /inject answered by the sim world in its process (the in-process sim adds its own route)."""
+    async def inject(request: Request):
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        status, reply = await lane.inject(body)
+        return JSONResponse(reply, status_code=status)
+
+    app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", None) != "/inject"]
+    app.add_api_route("/inject", inject, methods=["POST"])
+
 
 async def publish_checked(topic, data):
     await bus.publish(topic, data)
@@ -108,10 +291,20 @@ async def publish_gemini_status(target_bus, gem, interval=2):
 @asynccontextmanager
 async def lifespan(application):
     tasks = []
+    processes = []
     try:
         points = PointCloudPublisher(bus)
         tasks.append(asyncio.create_task(points.run()))
         for name in LANES:
+            if processes_enabled() and name in PROCESS_LANES:
+                lane_process = LaneProcess(name, bus)
+                if await lane_process.start():
+                    processes.append(lane_process)
+                    if name == "sim":
+                        _install_process_inject(lane_process)
+                else:
+                    log.warning("Lane %s process did not start; running without it", name)
+                continue
             try:
                 lane = importlib.import_module(name)
             except ModuleNotFoundError as exc:
@@ -141,6 +334,8 @@ async def lifespan(application):
             tasks.append(asyncio.create_task(publish_gemini_status(bus, gem)))
         yield
     finally:
+        for lane_process in processes:
+            await lane_process.stop()
         for task in tasks:
             task.cancel()
         if tasks:
