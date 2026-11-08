@@ -1,3 +1,5 @@
+/reports/
+
 # local read position and cached login for tools/board
 .board/
 

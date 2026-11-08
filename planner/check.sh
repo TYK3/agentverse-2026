@@ -6,3 +6,4 @@ uvx ruff check planner
 uv run --no-project --with pytest --with pydantic --with fastapi --with psutil python -m pytest planner -q
 uv run --no-project python -m planner.fake_run
 uv run --no-project --with pydantic python -m planner.loop_run > /dev/null
+uv run --no-project python -m planner.report_run > /dev/null

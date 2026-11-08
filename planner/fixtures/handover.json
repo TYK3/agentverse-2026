@@ -1,0 +1,17 @@
+[
+  {"topic":"map/cells","data":{"t":0,"res":0.1,"cells":[{"cell":[0,0,0],"state":"seen","occupied":false},{"cell":[1,0,0],"state":"seen","occupied":false},{"cell":[2,0,0],"state":"unknown","occupied":false}]}},
+  {"topic":"map/casualties","data":[{"id":"c1","pos":[0.2,0,0],"confidence":0.8,"clues":["thermal","sound"],"vitals":{"breathing_rate":14,"simulated":true}}]},
+  {"topic":"map/hazards","data":[{"cell":[2,1,0],"status":"at_risk","why":"unsupported wall","estimate":true}]},
+  {"topic":"route/proposed","data":{"id":"r1","robot":"responder","cells":[[0,0,0],[1,0,0]],"goal":"deliver water to c1","model":"local-astar"}},
+  {"topic":"route/verified","data":{"id":"r1","ok":true,"unstable_cells":[],"detail":"fixture physics"}},
+  {"topic":"gate/request","data":{"id":"g1","kind":"risky_move","summary":"clear light obstacle near c1","route":"r1"}},
+  {"topic":"gate/answer","data":{"id":"g1","approved":true,"by":"operator"}},
+  {"topic":"responder/action","data":{"action":"place_supply","route":"r1","item":"water"}},
+  {"topic":"log/decision","data":{"t":20,"perception":"responder at [0.1, 0.0], place_supply water","model":"sim","physics":"mujoco","outcome":"done","reason":"placed water at [0.20, 0.00]"}},
+  {"topic":"world/change","data":{"kind":"aftershock","t":30,"moved_blocks":["b7"]}},
+  {"topic":"map/hazards","data":[{"cell":[2,1,0],"status":"collapsed","why":"wall moved in aftershock","estimate":true}]},
+  {"topic":"log/decision","data":{"t":30,"perception":"aftershock moved b7","model":"local-astar","physics":"","outcome":"replanning","reason":"old route dropped; waiting for Scout rescan"}},
+  {"topic":"route/proposed","data":{"id":"r2","robot":"responder","cells":[[0,0,0]],"goal":"deliver radio to c1","model":"local-astar"}},
+  {"topic":"gate/request","data":{"id":"g2","kind":"enter_at_risk","summary":"enter the rescanned cell","route":"r2"}},
+  {"topic":"gate/answer","data":{"id":"g2","approved":false,"by":"operator"}}
+]
