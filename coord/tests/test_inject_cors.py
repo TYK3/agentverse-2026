@@ -128,3 +128,20 @@ def test_live_sim_route_replaces_the_stand_in_and_is_reachable_from_the_console(
     assert block.json() == {"ok": True, "block": "spare1"}
     assert bad.status_code == 400
     assert calls == ["aftershock", ("block_added", [0.6, 0.25, 0.1])]
+
+
+@pytest.mark.parametrize("raw", [b"", b"not json", b'{"kind":'])
+def test_live_sim_rejects_malformed_json_without_mutating_or_breaking_next_inject(
+        clean_bus, restore_routes, raw):
+    calls = []
+    world = SimpleNamespace(trigger_aftershock=lambda: calls.append("aftershock") or True)
+    assert _sim_inject().install(world, clean_bus)
+    with TestClient(hub.app, raise_server_exceptions=False) as client:
+        bad = client.post("/inject", content=raw,
+                          headers={"Origin": CONSOLE, "content-type": "application/json"})
+        assert bad.status_code == 400
+        assert bad.headers["access-control-allow-origin"] == CONSOLE
+        assert not calls and not clean_bus.history
+        good = client.post("/inject", json={"kind": "aftershock"}, headers={"Origin": CONSOLE})
+    assert good.status_code == 200 and good.json() == {"ok": True}
+    assert calls == ["aftershock"]

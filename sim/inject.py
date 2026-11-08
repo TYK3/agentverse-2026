@@ -44,7 +44,11 @@ def install(world, bus):
     from fastapi.responses import JSONResponse
 
     async def inject(request: Request):
-        status, body = handle(world, await request.json())
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        status, body = handle(world, body)
         return JSONResponse(body, status_code=status)
 
     app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", None) != "/inject"]
