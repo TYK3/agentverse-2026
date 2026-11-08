@@ -78,12 +78,24 @@ async def publish_gemini_status(target_bus, gem, interval=2):
     forwarded = set()
     while True:
         await target_bus.publish("status/gemini", gem.status())
-        history = getattr(gem, "receipts", list)()
-        for receipt in history:
-            if receipt["id"] not in forwarded:
-                await target_bus.publish("gemini/receipt", receipt)
-        # Bounded by gem's receipt ring. Each completed invocation is forwarded once.
-        forwarded = {receipt["id"] for receipt in history}
+        try:
+            history = getattr(gem, "receipts", list)()
+            current = set()
+            for receipt in history:
+                try:
+                    call_id = receipt["id"]
+                    if not isinstance(call_id, str) or not call_id:
+                        raise ValueError("invalid receipt ID")
+                    current.add(call_id)
+                    if call_id not in forwarded:
+                        await target_bus.publish("gemini/receipt", receipt)
+                        forwarded.add(call_id)  # only successful deliveries are deduplicated
+                except Exception as exc:  # noqa: BLE001 - isolate optional telemetry without logging private exception text
+                    log.warning("Gemini receipt delivery skipped (%s); will retry", type(exc).__name__)
+            # Bound deduplication to the current ring, retaining it if a snapshot fails.
+            forwarded.intersection_update(current)
+        except Exception as exc:  # noqa: BLE001 - optional provider snapshots must not kill the status loop
+            log.warning("Gemini receipt snapshot skipped (%s); will retry", type(exc).__name__)
         await asyncio.sleep(interval)
 
 
