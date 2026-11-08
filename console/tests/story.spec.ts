@@ -105,3 +105,18 @@ test('DEMO-FLOW: time comes from sim clocks only, not from lanes that stamp thei
   m.setTime(14.9);
   expect(m.t).toBe(14.9);
 });
+
+test('REAL-LOG: ?run alone replays the committed real run, with sim time and an honest card', async ({ page }) => {
+  await page.goto('/?run&speed=40');
+  const badge = page.locator('#story .story-badge');
+  await expect(badge).toContainText('REPLAY real-run.jsonl');
+  await expect(badge).toContainText('end', { timeout: 60000 });
+  for (const phase of ['quake', 'search', 'found', 'talk', 'approve', 'shift']) {
+    await expect(page.locator(`#story .story-phase[data-phase="${phase}"]`)).not.toHaveAttribute('data-state', 'pending');
+  }
+  const card = page.locator('#story .story-card');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('building');
+  await expect(card).toContainText(/Time\s*5\d\.\d s/);       // sim time of the real run (~53 s), not a wall clock
+  await expect(card).toContainText('Not seen in this run');   // a real run, so not every phase happened
+});

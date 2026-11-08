@@ -5,8 +5,8 @@
 // - StoryModel: pure. apply(topic, data) moves the phases on; no DOM, so tests drive it directly.
 // - StoryView: the overlay (strip, caption, LIVE/REPLAY badge, follow toggle, report card) and the
 //   camera follow (it eases the map's OrbitControls target; it pauses while the user drags).
-// setupStory(mapViewer) wires both to the bus and, with ?run=, replays the recording (replay-jsonl.ts)
-// instead of the live socket. It only reads the bus; it never sends.
+// setupStory(mapViewer) wires both to the bus and, with ?run=<url>, replays the recording (replay-jsonl.ts)
+// instead of the live socket; ?run alone replays the committed real run (DEFAULT_RUN). It only reads the bus; it never sends.
 
 import './story.css';
 import { on } from './bus';
@@ -25,6 +25,8 @@ type Viewer = {
 };
 
 const FOLLOW_PAUSE_MS = 8000;
+/** A real hub run recorded by SIM_RECORD (sim/recorder.py) and slimmed; see console/public/replays/README.md. */
+export const DEFAULT_RUN = '/replays/real-run.jsonl';
 const EASE = 0.06;
 
 export class StoryView {
@@ -164,7 +166,9 @@ export class StoryView {
  *  `replaying` tells main.ts not to connect. */
 export function setupStory(viewer: Viewer | null): { model: StoryModel; view: StoryView; replaying: boolean } {
   const params = new URLSearchParams(window.location.search);
-  const run = params.get('run');
+  const asked = params.get('run');
+  // `?run` (no value) or `?run=default` replays the committed real run instead of demo data.
+  const run = asked === null ? null : (asked === '' || asked === 'default' ? DEFAULT_RUN : asked);
   const model = new StoryModel();
   const view = new StoryView(model, viewer, run ? 'replay' : 'live');
   on('*', msg => {
