@@ -37,6 +37,8 @@ import math
 import mujoco
 import numpy as np
 
+from sim.world import casualties
+
 SPEED = 0.2                 # m/s
 RES = 0.05                  # grid cell size, same as perception's map (cell = floor(pos / RES))
 HALF_LEN, HALF_WIDTH = 0.16, 0.07   # chassis half extents (body x = forward)
@@ -109,6 +111,10 @@ class Responder:
         self.failed_routes = set()  # routes whose move was refused: their other actions are refused too
         self.log = []              # every log/decision this Responder published
         self.last_hit = None       # nearest blocking ray hit of the last free_ahead: (x, y), geom name
+        # SUPPLY-RAY-R1R3: casualty geoms (c<n>_g) never block the collision ray. They collide with
+        # nothing, so the chassis can drive up to them, and the Responder is delivering to them. Only
+        # those: x1_rubble and the Scout are non-colliding too, and must still stop it.
+        self.passable = {geom for _, geom, _ in casualties(m)}
         self.floor_z = float(self.pos[2]) - RIDE_Z   # floor under the chassis; follows ramps (levels.xml)
         self.pitch = 0.0           # nose-down tilt in radians, from the floor under the front and back
 
@@ -481,10 +487,9 @@ class Responder:
                 d = np.array([p1[0], p1[1], f1 + z]) - a
                 length = float(np.linalg.norm(d))
                 u = d / length
-                dist = mujoco.mj_ray(self.m, self.d, a, u, None, 1, self.body, geomid)
-                if (0 <= dist < length and not self._carried_geom(int(geomid[0]))
-                        and (nearest is None or dist < nearest[0])):
-                    nearest = (dist, a + u * dist, int(geomid[0]))
+                dist, geom = self._ray(a, u, length, geomid)
+                if dist is not None and (nearest is None or dist < nearest[0]):
+                    nearest = (dist, a + u * dist, geom)
         if nearest is None:
             self.last_hit = None
             return True
@@ -492,6 +497,22 @@ class Responder:
         self.last_hit = ((float(point[0]), float(point[1])),
                          mujoco.mj_id2name(self.m, mujoco.mjtObj.mjOBJ_GEOM, geom) or f"geom{geom}")
         return False
+
+    def _ray(self, a, u, length, geomid):
+        """Nearest (distance, geom) within `length` along u from a that blocks, or (None, None).
+
+        A geom that never blocks (a casualty, or what the Responder carries) is looked past: the ray
+        goes on from just beyond it, so a block behind it still counts."""
+        start = 0.0
+        for _ in range(8):
+            dist = mujoco.mj_ray(self.m, self.d, a + u * start, u, None, 1, self.body, geomid)
+            if dist < 0 or start + dist >= length:
+                return None, None
+            geom = int(geomid[0])
+            if geom not in self.passable and not self._carried_geom(geom):
+                return start + dist, geom
+            start += dist + 1e-4
+        return None, None
 
     def _hit_cell(self, xy):
         """Grid cell of a scene-frame (x, y), as perception's map: floor(pos / RES); k from the current route."""
