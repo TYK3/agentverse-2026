@@ -260,3 +260,11 @@ def test_scene_loaded_accepts_the_building_scene():
 
     payload = {"scene": "building", "blocks": [{"id": "b1", "label": "column", "pos": [0.0, 0.0, 1.4], "size": [0.15, 0.15, 1.4]}]}
     assert validate_payload("scene/loaded", payload)["scene"] == "building"
+
+
+def test_scene_loaded_accepts_the_tower_annex_scene():
+    """sim/scenes/tower_annex.xml publishes scene/loaded with scene "tower_annex" (TOWER-ANNEX-SCENE)."""
+    from coord.messages import validate_payload
+
+    payload = {"scene": "tower_annex", "blocks": [{"id": "b1", "label": "wall", "pos": [0.0, 0.0, 0.5], "size": [0.1, 1.0, 0.5]}]}
+    assert validate_payload("scene/loaded", payload)["scene"] == "tower_annex"
