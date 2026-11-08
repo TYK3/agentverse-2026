@@ -1,0 +1,4 @@
+{
+  "topic": "casualty/triage",
+  "data": {"id": "c1", "injuries": ["development example: reported arm pain"], "recommended_action": "first_aid_kit"}
+}
