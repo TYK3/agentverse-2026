@@ -15,6 +15,7 @@ import time
 
 from planner.paramedic import is_report_command
 from planner.route import RoutePlanner
+from planner.supply import KIT
 
 IDLE, PROPOSED, VERIFIED, GATED, EXECUTING = "IDLE", "PROPOSED", "VERIFIED", "GATED", "EXECUTING"
 ACT, RELOOK = 0.8, 0.5  # confidence >= ACT acts, >= RELOOK re-looks, below refers to a human
@@ -109,12 +110,14 @@ class Loop:
     # ---- mission and proposals ----------------------------------------------------------------
 
     async def mission(self, start, goal, *, goal_text="deliver water to c1", item="water", casualty="c1",
-                      action="deliver"):
-        if item not in ("water", "first_aid_kit", "radio") or action not in ("deliver", "grip"):
+                      action="deliver", block=None):
+        """`block` (Y2): found material standing in for `item`. action "fetch" drives to it and grips it
+        (no place); a later "deliver" with the same block carries it to the casualty and sets it down."""
+        if item not in KIT or action not in ("deliver", "grip", "fetch") or (action == "fetch" and not block):
             raise ValueError("unsupported Responder item or action")
         await self.cancel_request("mission replaced")
         self.mission_args = {"start": tuple(start), "goal": tuple(goal), "goal_text": goal_text,
-                             "item": item, "casualty": casualty, "action": action}
+                             "item": item, "casualty": casualty, "action": action, "block": block}
         self.replans, self.unstable, self.relooked = 0, {}, {}
         return await self.propose(f"mission: {goal_text}")
 
@@ -360,17 +363,21 @@ class Loop:
             return await self.log("execution check", "hold", f"{why}; Responder idle")
         if kind and approved_kind != kind:
             return await self.refer(self.confidence()[0], why, kind=kind)
-        rid, item = self.route["id"], self.mission_args["item"]
+        rid, item, block = self.route["id"], self.mission_args["item"], self.mission_args.get("block")
         self.state = EXECUTING
-        actions = ["move"] + (["grip"] if self.mission_args["action"] == "grip" else [])
-        for action in actions + ["place_supply", "release"]:
+        act = self.mission_args["action"]
+        actions = ["move"] + (["grip"] if act in ("grip", "fetch") else [])
+        for action in actions + ([] if act == "fetch" else ["place_supply", "release"]):
             if not self.route or self.route["id"] != rid or self.state != EXECUTING:
                 return
             current_kind, why = self.execution_risk()
             if current_kind == "hold" or (current_kind and current_kind != approved_kind):
                 self.state = IDLE
                 return await self.log("execution check", "hold", f"{why}; remaining commands cancelled")
-            await self.bus.publish("responder/action", {"action": action, "route": rid, "item": item})
+            msg = {"action": action, "route": rid, "item": item}
+            if block and action != "move":
+                msg["block"] = block          # Y2: grip / place the found material, not a kit item
+            await self.bus.publish("responder/action", msg)
 
     # ---- perception updates and the visible re-plan -------------------------------------------
 

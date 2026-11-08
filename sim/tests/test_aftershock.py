@@ -96,7 +96,7 @@ def test_inject_drops_a_block_and_reports_it():
 
 def test_spare_block_is_not_in_scene_loaded():
     m, d = scene.load()
-    assert [b["id"] for b in scene.blocks(m, d)] == [f"b{i}" for i in range(1, 16)]
+    assert [b["id"] for b in scene.blocks(m, d)] == [f"b{i}" for i in range(1, 17)]
     assert m.geom_contype[m.geom("x1_rubble").id] == 0
 
 

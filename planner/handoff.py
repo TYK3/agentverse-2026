@@ -4,7 +4,11 @@ Three jobs, all local (no Gemini call):
 
 1. Handoff. Every casualty perception reports (`map/casualties`) is queued for the Responder, the
    most confident first. When the Responder is free the handoff starts a T13 mission
-   (`loop.mission`) to the nearest seen, free floor cell beside the casualty, with the next supply
+   (`loop.mission`) to the nearest seen, free floor cell beside the casualty. Y2: the supply is
+   chosen from the casualty's injuries (planner/supply.py: `injuries` on map/casualties or Y3's
+   `casualty/triage`), from the kit still on the deck or, for a fracture once the kit splint is gone,
+   a board the Scout's depth points found: then the Responder first fetches the board (move + grip)
+   and then carries it to the casualty. With no injury known it brings the next supply in turn
    (water, then first_aid_kit, then radio). If no such cell is mapped yet, the Scout is sent to
    look (`scout/goto`).
 2. Human gate only on low confidence. The handoff adds no gate of its own: the T13 loop already
@@ -30,11 +34,13 @@ import math
 import re
 from collections import deque
 
+from planner import supply
 from planner.route import _cell, _neighbours, _read_map
 
 SUPPLIES = ("water", "first_aid_kit", "radio")
 MAX_ATTEMPTS = 2          # Responder tries per casualty before the handoff gives up on it
 GOAL_RADIUS_M = 0.5       # the Responder stops on a free cell within this distance of the casualty
+BOARD_RADIUS_M = 0.35     # ... and within this of a board it fetches (sim gripper reach is 0.45 m)
 SCOUT_NOTE_EVERY_S = 5.0  # log a Scout block at most this often (its blocked state repeats every frame)
 RETRY_AFTER_S = 5.0       # after a block, retry no sooner than this (time for the Scout to re-scan)
 LOOK_EVERY_S = 10.0       # ask the Scout to look beside a casualty at most this often (it is mid-route)
@@ -62,11 +68,17 @@ class Handoff:
         self.blocked_at = float("-inf")
         self.last_look = {}        # casualty id -> clock() of the last look request
         self.decisions = []        # every log/decision this module published
+        self.kit = set(supply.KIT)  # supplies still on the Responder's deck (Y2)
+        self.triage = {}           # casualty id -> injuries from casualty/triage (Y3)
+        self.finder = supply.BoardFinder()
+        self.fetching = None       # {"cid", "block", "item"} while the Responder fetches found material
+        self.holding_block = None  # a found block gripped and not yet placed
 
     def attach(self):
         for topic, fn in (("map/casualties", self.on_casualties), ("map/cells", self.on_map),
                           ("map/hazards", self.on_hazards), ("sensors/scout", self.on_sensors),
-                          ("log/decision", self.on_log), ("world/change", self.on_world_change)):
+                          ("log/decision", self.on_log), ("world/change", self.on_world_change),
+                          ("scene/loaded", self.finder.on_scene), ("casualty/triage", self.on_triage)):
             self.bus.subscribe(topic, fn)
         return self
 
@@ -98,8 +110,8 @@ class Handoff:
                     queue.append(other)
         return seen
 
-    def goal_for(self, casualty):
-        """Nearest seen, free, reachable floor cell within GOAL_RADIUS_M of the casualty, or None."""
+    def goal_for(self, casualty, radius=GOAL_RADIUS_M):
+        """Nearest seen, free, reachable floor cell within `radius` of the casualty (or any {"pos"}), or None."""
         res, records = self._map()
         if not records:
             return None
@@ -112,7 +124,7 @@ class Handoff:
         best = None
         for c in reachable:
             d = math.hypot((c[0] + 0.5) * res - x, (c[1] + 0.5) * res - y)
-            if d <= GOAL_RADIUS_M and (best is None or (d, c) < best):
+            if d <= radius and (best is None or (d, c) < best):
                 best = (d, c)
         return best[1] if best else None
 
@@ -156,16 +168,51 @@ class Handoff:
                     await self.log(f"casualty {cid} confidence {cas['confidence']:.2f}", "relook",
                                    f"no free reachable cell within {GOAL_RADIUS_M} m of {cid} yet; Scout sent to look")
                 continue
-            item = SUPPLIES[len(self.served) % len(SUPPLIES)]
+            item, block, why = self.pick(cas)
+            if block and block != self.holding_block:
+                board = next((b for b in self.finder.boards() if b["block"] == block), None)
+                near = self.goal_for({"pos": board["pos"]}, BOARD_RADIUS_M) if board else None
+                if near is None:
+                    item, block, why = "first_aid_kit", None, f"{why}; board not reachable on the map yet, first aid kit"
+                else:
+                    self.attempts[cid] = self.attempts.get(cid, 0) + 1
+                    self.active, self.fetching = cid, {"cid": cid, "block": block, "item": item}
+                    await self.log(f"casualty {cid} confidence {cas['confidence']:.2f}", "handoff",
+                                   f"Responder fetches {block} for {cid} first ({why}), from cell {list(near)}")
+                    await self.loop.mission(list(self.start_cell()), list(near), goal_text=f"fetch {block} as a {item} for {cid}",
+                                            item=item, casualty=cid, action="fetch", block=block)
+                    return cid
             self.attempts[cid] = self.attempts.get(cid, 0) + 1
             self.active = cid
+            what = f"{block} as a {item}" if block else item
             await self.log(f"casualty {cid} confidence {cas['confidence']:.2f}, clues {', '.join(cas.get('clues', []))}",
-                           "handoff", f"Scout hands {cid} to the Responder: {item} to cell {list(goal)} "
-                                      f"(try {self.attempts[cid]}/{MAX_ATTEMPTS}); T13 gates by confidence")
-            await self.loop.mission(list(self.start_cell()), list(goal), goal_text=f"deliver {item} to {cid}",
-                                    item=item, casualty=cid)
+                           "handoff", f"Scout hands {cid} to the Responder: {what} to cell {list(goal)} "
+                                      f"(try {self.attempts[cid]}/{MAX_ATTEMPTS}); {why}; T13 gates by confidence")
+            await self.loop.mission(list(self.start_cell()), list(goal), goal_text=f"deliver {what} to {cid}",
+                                    item=item, casualty=cid, block=block)
             return cid
         return None
+
+    def injuries_of(self, cas):
+        return list(cas.get("injuries") or []) + list(self.triage.get(cas["id"], []))
+
+    def pick(self, cas):
+        """(item, block or None, why) for this casualty: planner/supply.py from its injuries, else the
+        next supply in turn that is still on the deck."""
+        if self.holding_block and self.fetching and self.fetching["cid"] == cas["id"]:
+            return self.fetching["item"], self.holding_block, "carrying the found material already"
+        got = supply.choose(self.injuries_of(cas), self.kit, self.finder.best(near=cas["pos"][:2]))
+        if got:
+            return got["item"], got["block"], got["why"]
+        turn = [s for s in SUPPLIES if s in self.kit] or [s for s in supply.KIT if s in self.kit] or ["water"]
+        return turn[0], None, "no injury known: next supply in turn"   # used supplies leave self.kit
+
+    def on_triage(self, data):
+        """Y3 casualty/triage: {id, injuries, ...} (one entry or a list); keeps each casualty's injuries."""
+        for entry in data if isinstance(data, list) else [data]:
+            if entry.get("id"):
+                self.triage[entry["id"]] = list(entry.get("injuries") or []) + (
+                    [entry["recommended_action"]] if entry.get("recommended_action") else [])
 
     async def on_casualties(self, data):
         for c in data:
@@ -191,7 +238,14 @@ class Handoff:
             at = _AT.search(data.get("perception", ""))
             if at:
                 self.responder_cell = self._cell_of(float(at.group(1)), float(at.group(2)))
+            if outcome == "done" and self.fetching and reason.startswith(f"gripped {self.fetching['block']}"):
+                return await self.deliver_found(reason)
             if outcome == "done" and reason.startswith("placed") and self.active:
+                placed = reason.split()[1]
+                self.kit.discard(placed)
+                if placed == self.holding_block:
+                    self.finder.taken.add(placed)
+                    self.holding_block, self.fetching = None, None
                 self.served.add(self.active)
                 await self.log(f"Responder at {list(self.responder_cell)}", "done",
                                f"{reason} for {self.active}; next casualty")
@@ -202,6 +256,19 @@ class Handoff:
         elif outcome == "hold" and self.active and self.loop.state == "IDLE":
             # T13 refused or a human declined: the casualty stays queued but this mission is over.
             await self.give_up_or_retry(f"T13 hold: {reason}")
+
+    async def deliver_found(self, reason):
+        """Leg 2 of found material: the board is in the gripper; carry it to the casualty."""
+        cid, block, item = self.fetching["cid"], self.fetching["block"], self.fetching["item"]
+        self.holding_block = block
+        cas = self.casualties.get(cid)
+        goal = self.goal_for(cas) if cas else None
+        if goal is None:
+            return await self.give_up_or_retry(f"{reason}; no free cell beside {cid} for the {item}")
+        await self.log(f"Responder at {list(self.responder_cell)}", "handoff",
+                       f"{reason}; carrying {block} as a {item} to {cid} at cell {list(goal)}")
+        await self.loop.mission(list(self.start_cell()), list(goal), goal_text=f"deliver {block} as a {item} to {cid}",
+                                item=item, casualty=cid, block=block)
 
     async def responder_blocked(self, outcome, reason):
         x, y = ((self.responder_cell[0] + 0.5) * 0.05, (self.responder_cell[1] + 0.5) * 0.05)
@@ -232,6 +299,7 @@ class Handoff:
         pos = data.get("pose", {}).get("pos")
         if pos:
             self.scout_cell = self._cell_of(pos[0], pos[1])
+        self.finder.on_sensors(data)
         motion = data.get("motion") or {}
         target = motion.get("target")
         if motion.get("state") != "blocked" or not target:
