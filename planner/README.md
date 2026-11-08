@@ -156,6 +156,20 @@ re-look rather than returning to the old origin. A permit re-earned by fresh
 observation re-proposes the paused delivery from that current pose and repeats
 physics/confidence checks. It does not replay the original route's waypoints.
 
+On the Scout's fine grid, each candidate move checks the swept forward chassis
+footprint against measured occupied squares, including the collision guard's
+0.19 m front clearance. This prevents a route from turning too late beside a
+wall even when its centre cells are free. Handoff stopping cells also leave
+room for the chassis and final heading; the arm places the supply ahead.
+Coarse development maps retain their existing routing behaviour. These checks
+cannot establish that stale free cells behind a newly sensed surface remain
+free: fresh mapping and the live collision guard still govern movement.
+
+`planner/tests/test_route_footprint.py` drives the real MuJoCo Responder through
+two corner detours, three right-angle corridors and a casualty approach, with
+its collision guard unchanged. Run it with MuJoCo, NumPy, pytest, Pydantic and
+FastAPI installed; the optional MuJoCo cases skip if MuJoCo is unavailable.
+
 `router = await planner.start(bus)` attaches the verification loop as
 `router.loop`, plus the budget publisher as `router.task`. Use that existing loop.
 `await loop.mission(start, goal, item="water", action="deliver")` dispatches

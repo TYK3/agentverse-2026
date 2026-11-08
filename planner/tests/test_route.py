@@ -374,8 +374,10 @@ def test_responder_parked_against_a_wall_can_back_out():
     assert result["status"] == "ok" and result["cells"][0] == [0, 0, 0]
 
 
-def test_responder_reaches_a_goal_beside_an_occupied_casualty():
+def test_responder_holds_when_goal_would_overlap_an_occupied_casualty():
     room = fine_room(9)
     room["cells"] = [c if c["cell"] != [19, 5, 0] else {**c, "occupied": True} for c in room["cells"]]
     result = find_route(room, [], (0, 4, 0), (19, 4, 0))   # the casualty's body is mapped at [19, 5]
-    assert result["status"] == "ok" and result["cells"][-1] == [19, 4, 0]
+    assert result["status"] == "no_verified_route"  # 0.05 m offset cannot fit the 0.14 m chassis
+    result = find_route(room, [], (0, 4, 0), (14, 4, 0))  # stop short; the arm places the supply ahead
+    assert result["status"] == "ok" and result["cells"][-1] == [14, 4, 0]

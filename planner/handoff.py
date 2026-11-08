@@ -35,7 +35,15 @@ import re
 from collections import deque
 
 from planner import supply
-from planner.route import _cell, _neighbours, _read_map
+from planner.route import (
+    ROBOT_FRONT_M,
+    ROBOT_HALF_WIDTH_M,
+    _blocked_moves,
+    _cell,
+    _clearance_cells,
+    _neighbours,
+    _read_map,
+)
 
 SUPPLIES = ("water", "first_aid_kit", "radio")
 MAX_ATTEMPTS = 2          # Responder tries per casualty before the handoff gives up on it
@@ -105,12 +113,16 @@ class Handoff:
         return {c for c, r in records.items()
                 if c[2] == 0 and r["state"] == "seen" and not r["occupied"] and c not in blocked}, blocked
 
-    def _reachable(self, start, safe):
+    def _reachable(self, start, safe, blocked_moves=None):
         if start not in safe:
             return set()
         seen, queue = {start}, deque([start])
         while queue:
-            for other, _ in _neighbours(queue.popleft(), safe):
+            current = queue.popleft()
+            for other, _ in _neighbours(current, safe):
+                direction = (other[0] - current[0], other[1] - current[1])
+                if blocked_moves and current in blocked_moves[direction]:
+                    continue
                 if other not in seen:
                     seen.add(other)
                     queue.append(other)
@@ -125,7 +137,13 @@ class Handoff:
         start = self.start_cell(safe, res)
         if start is None:
             return None
-        reachable = self._reachable(start, safe)
+        occupied = {c for c, r in records.items() if c[2] == 0 and r["occupied"]}
+        moves = _blocked_moves(occupied, res) if res < ROBOT_HALF_WIDTH_M else None
+        reachable = self._reachable(start, safe, moves)
+        if res < ROBOT_HALF_WIDTH_M:
+            # Leave room for the final heading and the arm, including the occupied grid square.
+            # The nearest free point can lie inside the chassis footprint beside the casualty.
+            reachable -= _clearance_cells(occupied, res, ROBOT_FRONT_M + res / math.sqrt(2) + .005)
         x, y = casualty["pos"][:2]
         best = None
         for c in reachable:
