@@ -39,15 +39,18 @@ export function setupStageRing(): void {
   const read = () => {
     const chips = [...strip.querySelectorAll<HTMLElement>('.story-phase')];
     const cur = chips.find((c) => c.classList.contains('story-current'));
-    const lastStarted = [...chips].reverse().find((c) => c.dataset.state !== 'pending');
-    const phase = (cur ?? lastStarted)?.dataset.phase ?? null;
-    const stage = Math.max(0, STAGES.findIndex((s) => phase !== null && s.phases.includes(phase)));
     const state = (id: string) => chips.find((c) => c.dataset.phase === id)?.dataset.state ?? 'pending';
+    // In a live run the Scout keeps searching and talking after the Responder has moved on, so the
+    // strip's current chip jumps back and forth. The ring only moves forward: it shows the furthest
+    // stage that has any step started.
+    let stage = -1;
+    STAGES.forEach((s, i) => { if (s.phases.some((id) => state(id) !== 'pending')) stage = i; });
+    const started = stage >= 0;
+    stage = Math.max(0, stage);
     const s = STAGES[stage];
     const done = s.phases.filter((id) => state(id) === 'done').length;
-    const waiting = !!cur && (cur.dataset.state === 'waiting' || cur.dataset.state === 'held');
+    const waiting = s.phases.some((id) => state(id) === 'waiting' || state(id) === 'held');
     const allDone = state('report') === 'done';
-    const started = phase !== null;
     return { stage, fill: done / s.phases.length, waiting, allDone, started, title: cur?.title ?? '' };
   };
 
