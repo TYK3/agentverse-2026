@@ -1,0 +1,67 @@
+<!-- Scout unit (Y7a), true scale, from docs/hardware.md (Y7b): AgileX LIMO Pro base plus a FLIR Lepton 3.5,
+     a Seeed ReSpeaker v2.0 and a CEVA BNO085.
+     Frame: x forward, y left, z up, origin on the ground under the centre of the base (docs/hardware.md
+     "Sensor positions"). The root body is mocap: a driver sets its pose, as sim/world.py does for the
+     backup scene's Scout. All geoms are in group 3 (robot geoms, skipped by the Scout's own rays, #67/#74)
+     and do not collide; the driver checks for obstacles before each move.
+     Maker figures: 322 x 220 mm footprint, 24 mm ground clearance, 4.8 kg base. The masses below add
+     up to about 5.2 kg with add-ons (the docs/hardware.md estimate).
+     Estimates (not in the spec): wheel radius 0.05 m, wheelbase 0.20 m, track 0.172 m, and the split
+     of the 4.8 kg base between body and wheels. Sensor sites sit exactly where the spec table puts them. -->
+<mujoco model="scout">
+  <worldbody>
+    <body name="scout" mocap="true">
+      <!-- LIMO Pro base, 4.8 kg: lower deck between the wheels and an upper body over them, 322 x 220 mm. -->
+      <geom name="chassis_lower" type="box" size="0.161 0.06 0.038" pos="0 0 0.062" mass="1.5"
+            group="3" contype="0" conaffinity="0" rgba="0.2 0.5 0.9 1"/>
+      <geom name="chassis_upper" type="box" size="0.161 0.11 0.05" pos="0 0 0.15" mass="2.4"
+            group="3" contype="0" conaffinity="0" rgba="0.2 0.5 0.9 1"/>
+      <geom name="wheel_fl" type="cylinder" size="0.05 0.0225" pos="0.1 0.086 0.05" euler="90 0 0" mass="0.2"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="wheel_fr" type="cylinder" size="0.05 0.0225" pos="0.1 -0.086 0.05" euler="90 0 0" mass="0.2"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="wheel_rl" type="cylinder" size="0.05 0.0225" pos="-0.1 0.086 0.05" euler="90 0 0" mass="0.2"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <geom name="wheel_rr" type="cylinder" size="0.05 0.0225" pos="-0.1 -0.086 0.05" euler="90 0 0" mass="0.2"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+
+      <!-- EAI YDLIDAR T-mini Pro, 38.6 x 38.6 x 33.4 mm, on a riser; part of the 4.8 kg base. -->
+      <geom name="lidar_riser" type="box" size="0.015 0.015 0.0215" pos="0 0 0.2215" mass="0.05"
+            group="3" contype="0" conaffinity="0" rgba="0.15 0.15 0.15 1"/>
+      <geom name="lidar" type="cylinder" size="0.0193 0.0167" pos="0 0 0.26" mass="0.05"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.1 0.1 1"/>
+      <site name="lidar" pos="0 0 0.26" size="0.01" group="3"/>
+
+      <!-- Orbbec DaBai, built into the front face. FOV is not in the spec ("not checked"), so fovy keeps the
+           backup scene's 60 degrees. -->
+      <camera name="depth_cam" pos="0.15 0 0.18" xyaxes="0 -1 0 0 0 1" fovy="60"/>
+      <site name="depth_cam" pos="0.15 0 0.18" size="0.008" group="3"/>
+
+      <!-- FLIR Lepton 3.5 on a PureThermal board: 160 x 120, 57 degrees horizontal, so 44.3 degrees vertical. -->
+      <geom name="thermal" type="box" size="0.008 0.0125 0.0125" pos="0.152 0 0.21" mass="0.03"
+            group="3" contype="0" conaffinity="0" rgba="0.3 0.3 0.3 1"/>
+      <camera name="thermal_cam" pos="0.15 0 0.21" xyaxes="0 -1 0 0 0 1" fovy="44.3" resolution="160 120"/>
+      <site name="thermal" pos="0.15 0 0.21" size="0.008" group="3"/>
+
+      <!-- Seeed ReSpeaker Mic Array v2.0, 70 x 70 x 13.3 mm, 70 g, flat on top. -->
+      <geom name="mic_riser" type="box" size="0.01 0.01 0.0317" pos="-0.05 0 0.2317" mass="0.02"
+            group="3" contype="0" conaffinity="0" rgba="0.15 0.15 0.15 1"/>
+      <geom name="mic_array" type="box" size="0.035 0.035 0.00665" pos="-0.05 0 0.27" mass="0.07"
+            group="3" contype="0" conaffinity="0" rgba="0.1 0.4 0.2 1"/>
+      <site name="mic_array" pos="-0.05 0 0.27" size="0.008" group="3"/>
+
+      <!-- CEVA BNO085 plus the LoRa board (under 0.02 kg together), inside near the centre. -->
+      <site name="imu" pos="0 0 0.10" size="0.006" group="3"/>
+
+      <!-- Brackets and cabling for the add-ons, about 0.25 kg (docs/hardware.md "Scout estimates"). -->
+      <geom name="brackets" type="box" size="0.05 0.05 0.004" pos="0 0 0.204" mass="0.23"
+            group="3" contype="0" conaffinity="0" rgba="0.5 0.5 0.5 1"/>
+    </body>
+  </worldbody>
+
+  <sensor>
+    <accelerometer name="imu_accel" site="imu"/>
+    <gyro name="imu_gyro" site="imu"/>
+    <framequat name="imu_quat" objtype="site" objname="imu"/>
+  </sensor>
+</mujoco>
