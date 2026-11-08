@@ -65,8 +65,15 @@ async def publish_checked(topic, data):
 
 
 async def publish_gemini_status(target_bus, gem, interval=2):
+    forwarded = set()
     while True:
         await target_bus.publish("status/gemini", gem.status())
+        history = getattr(gem, "receipts", list)()
+        for receipt in history:
+            if receipt["id"] not in forwarded:
+                await target_bus.publish("gemini/receipt", receipt)
+        # Bounded by gem's receipt ring. Each completed invocation is forwarded once.
+        forwarded = {receipt["id"] for receipt in history}
         await asyncio.sleep(interval)
 
 
