@@ -1,0 +1,81 @@
+{
+  "_about": "Every coordinate, timing, line and reaction of tools/showcase.py. Scene frame metres (backup scene). Edit here, not in code.",
+  "scene": "backup",
+  "dt": 0.1,
+  "cell_res": 0.05,
+
+  "map_upgrade": {
+    "_about": "Applied before the run starts: b11 is stashed off-stage so it can fall later; extra rubble dressing.",
+    "stash": {"b11": [2.30, -0.80, 0.08]},
+    "dressing": {"b16": [1.60, 1.25, 0.02], "b12": [-1.20, 0.95, 0.10]}
+  },
+
+  "scout": {
+    "park": [-1.20, -1.70],
+    "steps_per_leg": 14,
+    "survey": [[-0.70, -1.60], [-0.70, -0.80], [-0.70, 0.25], [0.50, 0.25], [0.60, 0.60],
+               [1.10, 0.62], [1.60, 0.65], [1.70, 0.90], [1.10, 0.62], [0.50, 0.25],
+               [-0.70, 0.25], [-0.70, -1.60]],
+    "casualty_found_at_waypoint": 7,
+    "rooms": {"1": "room 1 (entry, west)", "4": "room 2 (centre)", "6": "room 3 (casualty room)"},
+    "emergency_at_waypoint": 9
+  },
+
+  "emergency": {
+    "_about": "Aftershock: the room 1 corridor collapses onto route r1. Preset landing spots; the planner already holds the detour.",
+    "shake": true,
+    "drops": {"x1": [-0.48, -0.35, 0.70], "b13": [-0.44, -0.10, 0.80], "b15": [-0.52, -0.55, 0.90]},
+    "blocked_route": "r1",
+    "detour": "r1b"
+  },
+
+  "routes": {
+    "r1":  [[-0.48, -1.77], [-0.48, 0.25], [0.97, 0.25], [0.97, 0.47]],
+    "r1b": [[-0.48, -1.77], [-0.48, -1.35], [-0.75, -1.35], [-0.75, 0.25], [0.97, 0.25], [0.97, 0.47]],
+    "r2":  [[0.97, 0.47], [1.77, 0.47], [1.77, 0.62]]
+  },
+
+  "sudden_fall": {
+    "_about": "Predicted fall: b11 drops into the room 2/3 gap beside the casualty as the Responder reaches the gap. It holds, waits, then lifts it.",
+    "body": "b11",
+    "at": [1.25, 0.45, 0.70],
+    "hold_s": 2.0
+  },
+
+  "supplies": {
+    "carry_first": "water",
+    "set_down": ["water", "first_aid_kit", "bandage", "thermal_blanket"]
+  },
+
+  "conversation": [
+    {"robot": "Hello, can you hear me? I am a rescue robot. Help is on the way.", "casualty": "Yes! I can hear you. Please help me."},
+    {"robot": "What is your name?", "casualty": "Maria. My name is Maria."},
+    {"robot": "Maria, are you bleeding anywhere?", "casualty": "My left leg. There is a deep cut, it keeps bleeding."},
+    {"robot": "Is it hard to breathe?", "casualty": "A little. My chest hurts when I breathe in."},
+    {"robot": "Can you move your arms and legs?", "casualty": "My arms, yes. My left leg is stuck and it really hurts."},
+    {"robot": "Are you cold?", "casualty": "Yes, I am shivering."}
+  ],
+
+  "assessment": {
+    "source": "preset triage table",
+    "wounds": [
+      {"where": "left lower leg", "what": "deep cut, active bleeding", "severity": "HIGH"},
+      {"where": "chest", "what": "pain on breathing in", "severity": "MEDIUM"},
+      {"where": "left leg", "what": "trapped, possible fracture, do not move", "severity": "MEDIUM"},
+      {"where": "whole body", "what": "cold, shivering, shock risk", "severity": "LOW"}
+    ],
+    "reply": "Thank you Maria. I am leaving a bandage, a first aid kit and a blanket right beside you."
+  },
+
+  "first_aid": ["control_bleeding", "protect_spine", "keep_warm", "check_breathing", "reassure_and_monitor"],
+
+  "signal": {
+    "casualty_id": "c1",
+    "name": "Maria",
+    "confidence": 0.97,
+    "clues": ["thermal signature", "voice", "spoke with robot"],
+    "vitals": {"breathing": "laboured", "responsive": "yes", "bleeding": "active (left leg)", "simulated": true},
+    "beacon_every_s": 1.0,
+    "beacon_pings": 3
+  }
+}
