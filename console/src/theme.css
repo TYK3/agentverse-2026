@@ -1,0 +1,418 @@
+/* Theme layer: a retro "pixel" look for chrome only (title, headings, badges, buttons).
+   Readable text (logs, reports, evidence) keeps the normal sans-serif font.
+   Safety colours (amber at-risk, red collapsed/reject, green ok) are not changed here.
+   Fonts are bundled through @fontsource, so the console still works offline. */
+@import '@fontsource/press-start-2p/400.css';
+@import '@fontsource/vt323/400.css';
+
+:root {
+  --bg: #0a0a0a;
+  --panel: #0f172a;
+  --panel-2: #131c31;
+  --border: #334155;
+  --border-hi: #475569;
+  --text: #ededed;
+  --text-2: #cbd5e1;
+  --muted: #94a3b8;
+  --accent: #06b6d4;
+  --accent-strong: #0e7490;
+  --accent-soft: #67e8f9;
+  --focus: #ffd700;
+  --pixel-font: 'Press Start 2P', monospace;
+  --retro-font: 'VT323', 'Courier New', monospace;
+  --shadow-px: 3px 3px 0 #000;
+  /* The only colours that carry meaning. Use nothing else for state. */
+  --ok: #34d399;
+  --ok-bg: rgba(52, 211, 153, 0.14);
+  --warn: #fbbf24;
+  --warn-bg: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-strong: #b91c1c;
+  --danger-bg: rgba(248, 113, 113, 0.14);
+  --info-bg: rgba(6, 182, 212, 0.14);
+}
+
+:root { background: var(--bg); }
+
+/* Pixel font: brand and headings, small so it stays legible */
+#top-bar > strong,
+h2,
+.legend-header,
+.map-title-badge,
+.hardware-header h2 {
+  font-family: var(--pixel-font);
+  -webkit-font-smoothing: none;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+#top-bar > strong { font-size: 0.95rem; color: var(--accent-soft); text-shadow: 2px 2px 0 #000; }
+h2 { font-size: 0.62rem; line-height: 1.6; color: var(--accent-soft); }
+.legend-header, .map-title-badge { font-size: 0.55rem; line-height: 1.6; }
+
+/* Retro font for controls and status chips */
+button,
+#top-bar span,
+#mode-label,
+.fps-badge,
+.cell-count-badge,
+.badge,
+.pill {
+  font-family: var(--retro-font);
+  -webkit-font-smoothing: none;
+}
+#top-bar span, #mode-label { font-size: 1.15rem; letter-spacing: 0.03em; }
+
+/* Blocky buttons with a hard shadow and a press-down effect */
+button {
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0.55rem 1rem;
+  border: 2px solid #000;
+  border-radius: 2px;
+  box-shadow: var(--shadow-px);
+  background: var(--accent-strong);
+  color: #fff;
+  transition: transform 60ms steps(1), box-shadow 60ms steps(1);
+}
+button:hover:not(:disabled) { background: #0891b2; border-color: var(--focus); }
+button:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: none; }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.btn-sm { font-size: 1.05rem; padding: 0.35rem 0.7rem; background: var(--panel); color: var(--muted); border: 2px solid var(--border); }
+.btn-sm:hover:not(:disabled) { background: #1e293b; color: var(--focus); }
+.btn-highlight { background: var(--accent-strong); color: #fff; }
+#reject { background: #b91c1c; }
+#reject:hover:not(:disabled) { background: #dc2626; }
+
+/* Square, outlined panels */
+#top-bar, #bottom-bar { background: var(--panel); border-color: var(--border); border-width: 2px; }
+#right-panel { background: #0b1120; }
+.permit-panel,
+#confidence-panel,
+.map-legend,
+.map-title-badge,
+.fps-badge,
+.cell-count-badge,
+.evidence-item,
+.world-change-banner,
+dialog {
+  border-radius: 2px;
+  border-width: 2px;
+}
+dialog { background: var(--panel); border: 2px solid var(--border-hi); box-shadow: 6px 6px 0 #000; }
+input {
+  font-family: var(--retro-font);
+  font-size: 1.2rem;
+  border: 2px solid var(--border);
+  border-radius: 2px;
+  background: #050505;
+}
+input:focus { outline: none; border-color: var(--accent); }
+progress { accent-color: var(--accent); }
+
+/* Pixel scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0a0e1a; }
+::-webkit-scrollbar-thumb { background: var(--border); border: 1px solid var(--border-hi); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+
+/* ---------- Colour consistency ----------
+   Rules: cyan = interactive or "in progress"; green = safe or passed;
+   amber = waiting or estimate; red = danger, revoked or reject.
+   Blue is kept only for the route (it matches the route tube in the 3D map). */
+
+/* Story strip: one family of chips, no filled rainbow */
+#story {
+  --story-bg: rgba(10, 10, 10, 0.88);
+  --story-line: var(--border);
+  --story-text: var(--text);
+  --story-dim: var(--muted);
+  --story-active: var(--accent);
+  --story-wait: var(--warn);
+  --story-held: var(--warn);
+  --story-done: var(--accent-soft);
+}
+.story-head, .story-caption { border-radius: 2px; border: 2px solid var(--border); backdrop-filter: none; }
+.story-phase { border-radius: 2px; font-family: var(--retro-font); font-size: 1.05rem; }
+.story-num { border-radius: 2px; font-size: 0.85rem; }
+.story-phase[data-state="done"] { color: var(--accent-soft); background: var(--info-bg); border-color: var(--accent-strong); }
+.story-phase[data-state="active"] { color: #000; background: var(--accent); border-color: var(--accent); }
+.story-phase[data-state="waiting"] { background: var(--warn-bg); }
+.story-phase[data-state="held"] { color: #000; background: var(--warn); }
+.story-phase.story-current { box-shadow: var(--shadow-px); }
+.story-badge { border-radius: 2px; font-family: var(--retro-font); font-size: 1rem; }
+.story-badge[data-mode="live"] { background: var(--danger-strong); color: #fff; }
+.story-badge[data-mode="replay"] { background: var(--accent-strong); color: #fff; }
+.story-follow, .story-card button {
+  border-radius: 2px; border: 2px solid var(--border); background: var(--panel); color: var(--text);
+  font-family: var(--retro-font); font-size: 1.05rem; box-shadow: var(--shadow-px);
+}
+.story-follow[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-soft); }
+.story-card { background: var(--panel); border: 2px solid var(--border-hi); border-radius: 2px; box-shadow: 6px 6px 0 #000; }
+.story-card h2 { font-size: 0.75rem; }
+.story-missed { color: var(--warn); }
+
+/* Top bar: Hardware Specs looks like every other secondary button */
+.btn-topbar { background: var(--panel); color: var(--muted); border: 2px solid var(--border); border-radius: 2px; font-size: 1.05rem; font-weight: 400; }
+.btn-topbar:hover { background: #1e293b; color: var(--focus); border-color: var(--focus); }
+.online, .act { color: var(--ok); }
+.offline, .refer { color: var(--danger); }
+.relook, .badge { color: var(--warn); }
+.over-budget { color: var(--danger); }
+.over-budget progress { accent-color: var(--danger); }
+
+/* Map HUD */
+.map-title-badge { background: var(--panel); border: 2px solid var(--border); color: var(--accent-soft); }
+.fps-badge.fps-good { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
+.fps-badge.fps-low { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
+.cell-count-badge { background: var(--panel); border: 2px solid var(--border); color: var(--muted); }
+.world-change-banner { border-radius: 2px; box-shadow: 6px 6px 0 #000; }
+.replan-banner { background: var(--panel); color: var(--text); border: 2px solid var(--accent); }
+.aftershock-banner { background: var(--danger-strong); color: #fff; border: 2px solid var(--danger); }
+.map-legend { background: rgba(10, 10, 10, 0.9); border: 2px solid var(--border); box-shadow: none; }
+.legend-header { color: var(--muted); border-bottom-color: var(--border); }
+
+/* Permit and evidence */
+.permit-status { border-radius: 2px; font-family: var(--retro-font); font-size: 1rem; }
+.permit-status.granted { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok); }
+.permit-status.revoked { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+.permit-route-label { color: var(--accent-soft); }
+.evidence-item { background: #0b1120; }
+.evidence-item.kind-verified, .evidence-item.kind-clear { border-left-color: var(--ok); }
+.evidence-item.kind-shift { border-left-color: var(--warn); }
+.evidence-item.kind-hazard { border-left-color: var(--danger); }
+.evidence-item.kind-fresh_scan { border-left-color: var(--accent); }
+.badge-estimate { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); border-radius: 2px; }
+
+/* Dialogs */
+.hardware-dialog { background: var(--panel); border: 2px solid var(--border-hi); border-radius: 2px; color: var(--text); }
+.hardware-table th { background: var(--panel-2); color: var(--accent-soft); }
+.hardware-table th, .hardware-table td { border-bottom-color: var(--border); }
+
+/* Credits card sat on top of the command bar: lift it and match the panels */
+#asset-credits {
+  left: auto !important;
+  right: 12px !important;
+  bottom: 76px !important;
+  background: var(--panel) !important;
+  border: 2px solid var(--border) !important;
+  border-radius: 2px !important;
+  font-family: var(--retro-font) !important;
+  font-size: 1rem !important;
+}
+#asset-credits a { color: var(--accent-soft) !important; }
+
+/* ---------- Minimal pass ----------
+   Same retro fonts and colour rules, less chrome: one hard shadow (primary
+   actions only), 1px lines, flat sections, more space. */
+#top-bar, #bottom-bar { background: var(--bg); border-width: 1px; padding: 1rem 1.75rem; }
+#right-panel { background: var(--bg); border-left: 1px solid var(--border); padding: 1.75rem 1.5rem; }
+h2 { margin: 0 0 1rem; color: var(--muted); }
+
+/* Secondary buttons are flat; only primary actions keep the pixel shadow */
+.btn-sm, .btn-topbar, .story-follow, .story-card button, #mic-command, #close-report, .btn-close {
+  box-shadow: none;
+  background: transparent;
+  border-width: 1px;
+}
+.btn-sm:active, .btn-topbar:active { transform: none; }
+.btn-highlight { background: transparent; color: var(--accent-soft); border-color: var(--accent); }
+
+/* Right panel: flat sections divided by lines instead of boxes */
+.permit-panel, #confidence-panel {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0 0 1.5rem;
+  margin-bottom: 1.75rem;
+}
+.evidence-item { background: transparent; padding: 0.3rem 0.6rem; }
+#reasoning-log { margin-bottom: 1.75rem; }
+
+/* Map HUD: labels, not boxes */
+.map-title-badge, .cell-count-badge { background: transparent; border: 0; padding-left: 0; }
+.map-legend { background: rgba(10, 10, 10, 0.75); border: 1px solid var(--border); }
+.story-head { background: rgba(10, 10, 10, 0.75); border-width: 1px; }
+.story-phase { border-width: 1px; }
+.story-phase[data-state="done"] { background: transparent; }
+.story-caption { background: transparent; border: 0; padding-left: 0; }
+
+/* Dialogs keep one shadow so they lift off the map */
+dialog, .story-card, .hardware-dialog { border-width: 1px; }
+input { border-width: 1px; background: transparent; }
+#asset-credits { border-width: 1px !important; background: var(--bg) !important; }
+
+/* ---------- Minimal pass 2: show less at once ----------
+   Nothing is removed; secondary detail appears on hover or focus. */
+
+/* Story strip: all ten steps named on ONE line, joined by thin connectors.
+   Labels shrink (with an ellipsis) before the strip would wrap; the
+   current step never shrinks. */
+.story-head { background: rgba(10, 10, 10, 0.72); border: 1px solid var(--border); padding: 0.4rem 0.6rem; gap: 0.6rem; flex-wrap: nowrap; }
+.story-badge { font-size: 0.9rem; padding: 0.1rem 0.4rem; }
+.story-strip { gap: 0; flex-wrap: nowrap; align-items: center; min-width: 0; overflow: hidden; }
+.story-phase {
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 0.25rem;
+  border: 1px solid transparent;
+  padding: 0.1rem 0.3rem;
+  background: transparent;
+  font-size: 0.95rem;
+}
+.story-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.story-phase.story-current { flex-shrink: 0; }
+.story-strip { gap: 0.35rem; }
+.story-num { border: 0; width: auto; min-width: 0.8rem; flex: none; color: inherit; opacity: 0.7; font-size: 0.75rem; }
+.story-phase[data-state="done"] { color: var(--accent-strong); border-color: transparent; background: transparent; }
+.story-phase[data-state="active"]:not(.story-current) { color: var(--accent); background: transparent; border-color: transparent; }
+.story-phase[data-state="waiting"],
+.story-phase[data-state="held"] { color: var(--warn); background: transparent; border-color: var(--warn); }
+.story-phase.story-current { color: #000; background: var(--accent); border-color: var(--accent); box-shadow: none; }
+.story-phase.story-current .story-num { opacity: 1; }
+.story-phase.story-current[data-state="waiting"],
+.story-phase.story-current[data-state="held"] { background: var(--warn); border-color: var(--warn); }
+.story-follow { flex: none; border: 0; padding: 0.2rem 0.3rem; font-size: 0.95rem; color: var(--muted); box-shadow: none; background: transparent; }
+
+/* Legend: a single line until you hover or tab to it */
+.map-legend { padding: 0.5rem 0.8rem; background: rgba(10, 10, 10, 0.6); }
+.map-legend .legend-row { display: none; }
+.map-legend .legend-header { margin: 0; padding: 0; border: 0; cursor: help; }
+.map-legend .legend-header::after { content: '  +'; color: var(--accent); }
+.map-legend:hover .legend-row,
+.map-legend:focus-within .legend-row,
+.map-legend:focus .legend-row { display: flex; }
+.map-legend:hover .legend-header,
+.map-legend:focus .legend-header { margin-bottom: 0.5rem; }
+.map-legend:hover .legend-header::after,
+.map-legend:focus .legend-header::after { content: ''; }
+
+/* Developer tools and stats fade back until hovered */
+.map-controls, .map-stats-badge, #asset-credits { opacity: 0.45; transition: opacity 150ms; }
+.map-controls:hover, .map-stats-badge:hover, #asset-credits:hover,
+.map-controls:focus-within { opacity: 1; }
+.map-title-badge { color: var(--muted); }
+
+/* Top bar: quieter status text, the title is the only bright item */
+#top-bar span { color: var(--muted); font-size: 1rem; }
+#budget-panel { color: var(--muted); }
+#top-bar span.offline, #budget-panel.over-budget, .over-budget { color: var(--danger); }
+#top-bar span.online { color: var(--ok); }
+
+/* Right panel: more air, smaller headings */
+#right-panel h2 { font-size: 0.55rem; margin-bottom: 0.9rem; }
+.permit-panel, #confidence-panel { margin-bottom: 2.25rem; }
+
+/* ---------- Utilitarian minimalism (adapted) ----------
+   Taken from the minimalist protocol: no Inter, a system sans with a
+   mono for metadata, no emojis (CSS-drawn icons), generous padding,
+   1px dividers, quiet entry motion, a faint ambient light spot.
+   Kept from ours on purpose: the dark palette and safety colours, the
+   retro pixel headings and buttons, and every control. */
+:root {
+  --sans: 'SF Pro Display', 'Geist Sans', 'Helvetica Neue', 'Switzer', system-ui, sans-serif;
+  --mono: 'Geist Mono', 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--sans);
+  line-height: 1.6;
+}
+body { font-family: var(--sans); }
+
+/* Metadata in mono: times, IDs, step counters, log meta */
+.permit-time, .evidence-time, #reasoning-log small, .story-num,
+#approval-meta, .story-card dd, #report-content pre {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  letter-spacing: 0;
+}
+.story-num { font-size: 0.8rem; }
+#reasoning-log { line-height: 1.6; }
+.evidence-title { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.65rem; }
+
+/* Generous padding inside dialogs and sections */
+dialog, .story-card { padding: 2rem 2.25rem; }
+.hardware-dialog { padding: 2rem 2.25rem; }
+
+/* Icons: simple CSS primitives instead of emoji */
+/* map.ts still writes an emoji into the icon; font-size 0 hides it and the pixel glyph is drawn instead */
+.banner-icon { display: inline-grid; place-items: center; width: 1.4rem; height: 1.4rem; font-size: 0; line-height: 1; border: 2px solid currentColor; }
+.banner-icon::before { font-family: var(--pixel-font); font-size: 0.6rem; }
+.aftershock-banner .banner-icon::before { content: '!'; }
+.replan-banner .banner-icon::before { content: '>'; }
+.replan-banner .banner-icon { color: var(--accent); }
+
+/* Legend toggle: sharp + and - */
+.map-legend:hover .legend-header::after,
+.map-legend:focus .legend-header::after,
+.map-legend:focus-within .legend-header::after { content: '  -'; }
+
+/* Quiet motion: panels fade up once on load, staggered; transform/opacity only */
+@keyframes av-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+#right-panel > * { animation: av-enter 600ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+#right-panel > *:nth-child(2) { animation-delay: 80ms; }
+#right-panel > *:nth-child(3) { animation-delay: 160ms; }
+#right-panel > *:nth-child(4) { animation-delay: 240ms; }
+#right-panel > *:nth-child(5) { animation-delay: 320ms; }
+#right-panel > *:nth-child(6) { animation-delay: 400ms; }
+#reasoning-log li { animation: av-enter 400ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.btn-sm:active:not(:disabled), .btn-topbar:active { transform: scale(0.98); }
+
+/* Faint ambient light, fixed and non-interactive, so the dark canvas is not flat */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(900px 500px at 15% 0%, rgba(255, 220, 170, 0.035), transparent 70%);
+}
+#app { position: relative; z-index: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  #right-panel > *, #reasoning-log li { animation: none; }
+}
+
+/* Readable text that style.css hard-codes for dark */
+.permit-reason { color: var(--text); }
+#reasoning-log small { color: var(--muted); }
+
+/* ---------- Stage ring (replaces the visible 10-step strip) ----------
+   The strip stays in the DOM for story.ts and its tests, but only the current
+   stage and a thin loading ring are shown next to the LIVE badge. */
+#story .story-strip { display: none; }
+@property --p { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+.stage-ring { display: flex; flex: 1; align-items: center; gap: 0.7rem; min-width: 0; }
+.ring-wrap { display: block; position: relative; flex: none; width: 26px; height: 26px; }
+.ring {
+  --c: var(--accent);
+  display: block; width: 26px; height: 26px; border-radius: 50%;
+  background: conic-gradient(var(--c) var(--p, 0%), var(--border) 0);
+  -webkit-mask: radial-gradient(circle, transparent 10.5px, #000 11px);
+          mask: radial-gradient(circle, transparent 10.5px, #000 11px);
+  transition: --p 0.4s;
+}
+.ring-wrap::after {
+  /* the loading sweep: a short bright arc circling slowly while the stage runs */
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(rgba(255, 255, 255, 0.85) 0 8%, transparent 8%);
+  -webkit-mask: radial-gradient(circle, transparent 10.5px, #000 11px);
+          mask: radial-gradient(circle, transparent 10.5px, #000 11px);
+  animation: ring-spin 3s linear infinite;
+}
+@keyframes ring-spin { to { transform: rotate(1turn); } }
+.stage-ring.is-waiting .ring { --c: var(--warn); }
+.stage-ring.is-waiting .ring-wrap::after,
+.stage-ring.is-idle .ring-wrap::after,
+.ring-wrap.is-ticked::after,
+.ring-wrap.is-filling::after { display: none; }
+.ring-stage { font-family: var(--pixel-font); font-size: 0.7rem; color: var(--accent-soft); text-transform: uppercase; white-space: nowrap; }
+.stage-ring.is-waiting .ring-stage { color: var(--warn); }
+.stage-ring.is-idle .ring-stage { color: var(--muted); }
+.tick { position: absolute; inset: 0; width: 26px; height: 26px; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: square; stroke-dasharray: 18; stroke-dashoffset: 18; opacity: 0; transition: stroke-dashoffset 450ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms; }
+.ring-wrap.is-ticked .tick { stroke-dashoffset: 0; opacity: 1; }
+.ring-wrap, .ring-stage { transition: opacity 280ms ease, transform 280ms cubic-bezier(0.16, 1, 0.3, 1); }
+.stage-ring.is-leaving .ring-wrap, .stage-ring.is-leaving .ring-stage { opacity: 0; transform: translateY(-6px); }
+.stage-ring.is-entering .ring-wrap, .stage-ring.is-entering .ring-stage { opacity: 0; transform: translateY(6px); transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ring-wrap::after { animation: none; }
+  .tick, .ring, .ring-wrap, .ring-stage { transition: none; }
+}
