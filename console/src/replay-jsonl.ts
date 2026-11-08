@@ -1,5 +1,6 @@
 // Replay a real sim recording in the console (ref S1): the runs/*.jsonl written by SIM_RECORD
 // (sim/recorder.py) or the integration runner (tools/run_rescue.py), one {"t","topic","data"} per line.
+// The descent runner's logs (tools/run_b2.py: {"t","kind",...}) replay as topic run/<kind>.
 //
 // Pure module: no DOM, no WebSocket, nothing runs on import. The console wires it in (c1):
 //   const parsed = parseJsonl(await (await fetch(url)).text());
@@ -66,12 +67,18 @@ export function parseJsonl(text: string): ParsedRecording {
       return;
     }
     if (!isRecord(value)) return void issues.push({ line, reason: 'not an object' });
-    const { t, topic, data, wall } = value;
+    let rec: Record<string, unknown> = value;
+    // tools/run_b2.py logs are {"t", "kind", ...} records: replay each as topic run/<kind>, data = the record.
+    if (!('topic' in rec) && typeof rec.kind === 'string' && rec.kind) {
+      const { kind, ...rest } = rec;
+      rec = { t: rec.t, topic: `run/${kind}`, data: rest };
+    }
+    const { t, topic, data, wall } = rec;
     if (typeof topic !== 'string' || !topic) return void issues.push({ line, reason: 'missing topic' });
     if (typeof t !== 'number' || !Number.isFinite(t) || t < 0) {
       return void issues.push({ line, reason: 'missing or invalid t' });
     }
-    if (!('data' in value)) return void issues.push({ line, reason: 'missing data' });
+    if (!('data' in rec)) return void issues.push({ line, reason: 'missing data' });
     if (t < lastT) issues.push({ line, reason: `time goes back (${t} after ${lastT}); kept in file order` });
     lastT = Math.max(lastT, t);
     if (topic === META_TOPIC) {

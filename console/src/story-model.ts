@@ -20,7 +20,8 @@ export const PHASES: { id: PhaseId; label: string }[] = [
 ];
 
 export const BELOW_GROUND_Z = -0.5;
-const SIM_TIMED = new Set(['sensors/scout', 'responder/pose', 'world/change']);     // a robot below this is in the basement (B1 and down)
+const SIM_TIMED = new Set(['sensors/scout', 'responder/pose', 'world/change']);
+const isRun = (topic: string) => topic.startsWith('run/');      // tools/run_b2.py records, all in sim seconds     // a robot below this is in the basement (B1 and down)
 
 export type Phase = { state: PhaseState; t: number | null; note: string };
 export type StoryFacts = {
@@ -85,7 +86,8 @@ export class StoryModel {
 
   apply(topic: string, data: unknown): PhaseId | null {
     // Some lanes stamp payloads with their own clocks; only these carry sim time.
-    if (SIM_TIMED.has(topic) && isRec(data) && num(data.t) !== null) this.setTime(num(data.t)!);
+    if ((SIM_TIMED.has(topic) || isRun(topic)) && isRec(data) && num(data.t) !== null) this.setTime(num(data.t)!);
+    if (isRun(topic)) return this.applyRun(topic.slice(4), isRec(data) ? data : {});
     switch (topic) {
       case 'scene/loaded': {
         if (!isRec(data)) return null;
@@ -189,6 +191,73 @@ export class StoryModel {
         if (!isRec(data)) return null;
         this.facts.reportMarkdown = typeof data.markdown === 'string' ? data.markdown : null;
         return this.set('report', 'done', 'handover report ready', null);
+      default:
+        return null;
+    }
+  }
+
+  private shiftAt: number | null = null;   // run logs: when the slab landed
+  private stopped = false;                  // ... and the Scout has stopped for it
+
+  /** tools/run_b2.py records (B1-B3 descents with a slab shift): the same phases, from that log's kinds. */
+  private applyRun(kind: string, r: Rec): PhaseId | null {
+    switch (kind) {
+      case 'level': {
+        const level = String(r.level ?? '');
+        if (this.phase('quake').state === 'pending') {
+          this.facts.scene = 'levels';
+          return this.set('quake', 'done', `levels scene: the Scout starts on ${level}`, null);
+        }
+        if (/^B\d$/.test(level)) return this.set('descend', 'done', `reached ${level}`, this.scout);
+        return this.set('search', 'active', `Scout on ${level}`, this.scout);
+      }
+      case 'pose': {
+        const pos = vec3(r.pos);
+        const moved = this.pose(pos, 'scout');
+        if (this.shiftAt !== null && !this.stopped && r.state === 'blocked') {
+          this.stopped = true;
+          this.facts.stops += 1;
+          return this.set('recheck', 'held', 'Scout stopped short of the slab', pos);
+        }
+        return moved;
+      }
+      case 'plan': {
+        const target = vec3(r.target);
+        if (this.shiftAt !== null && this.stopped && r.status === 'ok' && this.phase('recheck').state !== 'done') {
+          this.facts.rechecks += 1;
+          return this.set('recheck', 'done', 're-planned around the slab from a fresh scan', target);
+        }
+        if (this.phase('search').state === 'pending') return this.set('search', 'active', `Scout ${r.why ?? 'exploring'}`, target);
+        return null;
+      }
+      case 'shift': {
+        this.shiftAt = num(r.t);
+        this.facts.shifts += 1;
+        const xy = Array.isArray(r.xy) ? r.xy : [0, 0];
+        const z = vec3(r.scout)?.[2] ?? 0;
+        return this.set('shift', 'done', `slab dropped on ${r.level} at [${xy.join(', ')}]`,
+                        [Number(xy[0]) || 0, Number(xy[1]) || 0, z]);
+      }
+      case 'mapped':
+        if (this.shiftAt === null) return null;
+        if (!this.stopped) { this.stopped = true; this.facts.stops += 1; }
+        return this.set('recheck', 'held', `slab mapped from the Scout's own ${Array.isArray(r.sources) ? r.sources.join(' + ') : 'scan'}`,
+                        this.scout);
+      case 'summary': {
+        if (r.reached !== true) return null;
+        const pos = vec3(r.final_pos);
+        const id = `c${String(r.floor ?? '').replace('B', '')}`;
+        if (pos) this.facts.casualties[id] = { pos, confidence: 1 };
+        if (this.phase('search').state !== 'pending') this.phase('search').state = 'done';
+        return this.set('found', 'done', `Scout reached ${id} on ${r.final_level}`, pos);
+      }
+      case 'verdict': {
+        const steps = isRec(r.steps) ? Object.entries(r.steps).filter(([, v]) => isRec(v)) as [string, Rec][] : [];
+        const ok = steps.filter(([, v]) => v.ok === true).length;
+        this.facts.reportMarkdown = [`# Run checks: ${ok}/${steps.length} passed`,
+          ...steps.map(([k, v]) => `- ${v.ok === true ? 'ok' : 'FAIL'} ${k}${v.detail ? `: ${v.detail}` : ''}`)].join('\n');
+        return this.set('report', 'done', `${ok}/${steps.length} run checks passed`, null);
+      }
       default:
         return null;
     }
