@@ -1,14 +1,14 @@
 """RESCUE-RUNNER: chain the real basement rescues B1 > B2 > B3, each with a slab shift, into one log.
 
-    GEMINI_MODE=off python tools/run_rescue.py            # prints each leg, writes runs/rescue-<seed>.jsonl
-    GEMINI_MODE=off python tools/run_rescue.py --floors B1,B2
+    GEMINI_MODE=off python tools/run_chain.py            # prints each leg, writes runs/chain-<seed>.jsonl
+    GEMINI_MODE=off python tools/run_chain.py --floors B1,B2
 
 Each leg is tools/run_b2.py's real run for that floor (run(floor=...)), unchanged: the Scout finds its
 own way down from L1 to the floor's casualty, a slab lands on its planned route there, and the leg's
 nine checks (stop short, slab mapped from the Scout's own measurements, re-plan avoids it, casualty
 reached, no teleport, ...) are evaluated by run_b2.evaluate. This runner adds no physics or planning.
 
-runs/rescue-<seed>.jsonl: a "meta" line, then every record of every leg in order with "leg": floor
+runs/chain-<seed>.jsonl: a "meta" line, then every record of every leg in order with "leg": floor
 added and "t" made cumulative across legs (chain time; the leg's own sim time is kept as "leg_t"),
 a "leg" record when each leg ends (casualty, reached, passed/failed counts), then one "step" record
 per check named "<floor>: <check>", and a "summary". tools/rescue_report.py reads it as is.
@@ -38,7 +38,7 @@ def leg_records(path):
 def chain(legs, seed=0):
     """legs: [(floor, records, verdict)] -> one list of chained records (pure; testable)."""
     out = [{"t": 0.0, "kind": "meta", "seed": seed, "legs": [f for f, _, _ in legs],
-            "source": "tools/run_rescue.py"}]
+            "source": "tools/run_chain.py"}]
     offset, steps = 0.0, []
     for floor, records, verdict in legs:
         end = max((r.get("t") or 0.0 for r in records), default=0.0)
@@ -76,7 +76,7 @@ def main(argv=None):
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--floors", default=",".join(FLOORS), help="comma list, in order (default B1,B2,B3)")
     p.add_argument("--max-t", type=float, default=500.0, help="sim seconds allowed per leg")
-    p.add_argument("--out", default=None, help="default runs/rescue-<seed>.jsonl")
+    p.add_argument("--out", default=None, help="default runs/chain-<seed>.jsonl")
     p.add_argument("-v", "--verbose", action="store_true")
     a = p.parse_args(argv)
     floors = [f.strip() for f in a.floors.split(",") if f.strip()]
@@ -84,7 +84,7 @@ def main(argv=None):
     if bad:
         raise SystemExit(f"unknown floor(s): {bad}; choose from {list(FLOORS)}")
     records = run(a.seed, floors, a.max_t, a.verbose)
-    out = pathlib.Path(a.out or ROOT / "runs" / f"rescue-{a.seed}.jsonl")
+    out = pathlib.Path(a.out or ROOT / "runs" / f"chain-{a.seed}.jsonl")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in records))
     s = records[-1]
