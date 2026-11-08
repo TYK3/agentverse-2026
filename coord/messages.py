@@ -241,6 +241,62 @@ class StatusGemini(Message):
     stand_ins: list[Text]
 
 
+TokenCount = Annotated[int, Field(ge=0)]
+
+
+class GeminiAttempt(Message):
+    attempt: Annotated[int, Field(ge=1)]
+    sdk_called: bool
+    outcome: Literal["ok", "error"]
+    error_type: Text | None
+
+
+class GeminiCacheOrigin(Message):
+    id: Text | None
+    provider_id: Text | None
+    model_requested: Text | None
+    model_reported: Text | None
+    usage: dict[str, TokenCount] | None
+
+
+class GeminiReceipt(Message):
+    id: Text
+    schema_version: Literal[1]
+    started_at: Text
+    feature: Text
+    model_key: Text
+    model_requested: Text | None
+    model_reported: Text | None
+    mode: Literal["off", "replay", "live"]
+    source: Literal["none", "disabled", "cache", "live"]
+    outcome: Literal["ok", "off", "error", "cap_reached"]
+    route: Text | None
+    evidence_ids: list[Text]
+    provider_id: Text | None
+    source_call_id: Text | None
+    usage: dict[str, TokenCount] | None
+    attempts: list[GeminiAttempt]
+    live_attempts: TokenCount
+    request_sha256: Text | None
+    output_sha256: Text | None
+    cache_write_error: Text | None
+    elapsed_ms: Nonnegative
+    cache_origin: GeminiCacheOrigin | None = None
+    error_type: Text | None = None
+
+    @model_validator(mode="after")
+    def source_matches_activity(self):
+        if self.live_attempts != sum(attempt.sdk_called for attempt in self.attempts):
+            raise ValueError("live_attempts must count actual SDK attempts")
+        if self.source != "live" and self.live_attempts:
+            raise ValueError("non-live sources cannot claim SDK attempts")
+        if self.source in ("cache", "disabled") and (self.usage is not None or self.provider_id is not None):
+            raise ValueError("cached/disabled calls cannot claim current provider usage or ID")
+        if self.source == "disabled" and self.outcome != "off":
+            raise ValueError("disabled calls must have an off outcome")
+        return self
+
+
 class Say(Message):
     to: Literal["casualty", "operator"]
     intent: Literal["first_aid", "guide_exit", "reassure"]
@@ -280,6 +336,7 @@ TOPICS: dict[str, type[BaseModel]] = {
     "status/link": StatusLink,
     "status/budget": StatusBudget,
     "status/gemini": StatusGemini,
+    "gemini/receipt": GeminiReceipt,
     "say": Say,
     "report/handover": ReportHandover,
 }
