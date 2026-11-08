@@ -85,14 +85,16 @@
     <!-- Responder as in backup.xml: mocap, centre 0.05 m above the floor, geoms in group 3. It starts in L1's
          north-west corner facing east, out of the Scout's way (its forward rays see every group); sim/responder.py follows the floor under it (z and pitch) down the ramps. Its kit,
          radio and water are free bodies held by the carry_* welds; they are group 3 too, so the Scout's
-         LiDAR and floor probe never see them and its runs stay as before. -->
-    <body name="responder" mocap="true" pos="0.2 2.25 0.65">
+         LiDAR and floor probe never see them and its runs stay as before. Its start (0.225, 2.175) is a 5 cm
+         cell centre, 0.225 m from wall_n: a route that begins at its own cell then pulls it nowhere (at
+         0.2, 2.25, on a cell corner 0.15 m from the wall, the first cell centre steered it into wall_n). -->
+    <body name="responder" mocap="true" pos="0.225 2.175 0.65">
       <geom name="responder_chassis" type="box" size="0.16 0.07 0.05" group="3" contype="0" conaffinity="0" rgba="0.95 0.6 0.1 1"/>
       <geom name="responder_gripper" type="box" size="0.02 0.06 0.015" pos="0.17 0 0.03" group="3" contype="0" conaffinity="0" rgba="0.15 0.15 0.15 1"/>
     </body>
-    <body name="water" pos="0.1 2.25 0.76"><freejoint/><geom name="water_supply" type="cylinder" size="0.035 0.06" mass="0.5" group="3" rgba="0.2 0.55 1 1"/></body>
-    <body name="first_aid_kit" pos="0.2 2.25 0.73"><freejoint/><geom name="first_aid_kit_supply" type="box" size="0.05 0.035 0.03" mass="0.4" group="3" rgba="0.9 0.15 0.15 1"/></body>
-    <body name="radio" pos="0.3 2.25 0.745"><freejoint/><geom name="radio_supply" type="box" size="0.025 0.02 0.045" mass="0.3" group="3" rgba="0.15 0.15 0.15 1"/></body>
+    <body name="water" pos="0.125 2.175 0.76"><freejoint/><geom name="water_supply" type="cylinder" size="0.035 0.06" mass="0.5" group="3" rgba="0.2 0.55 1 1"/></body>
+    <body name="first_aid_kit" pos="0.225 2.175 0.73"><freejoint/><geom name="first_aid_kit_supply" type="box" size="0.05 0.035 0.03" mass="0.4" group="3" rgba="0.9 0.15 0.15 1"/></body>
+    <body name="radio" pos="0.325 2.175 0.745"><freejoint/><geom name="radio_supply" type="box" size="0.025 0.02 0.045" mass="0.3" group="3" rgba="0.15 0.15 0.15 1"/></body>
     <camera name="overview" pos="2.5 -3.5 3.2" xyaxes="1 0 0 0 0.6 0.8"/>
   </worldbody>
   <equality>
