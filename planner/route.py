@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from heapq import heappop, heappush
 from math import ceil, hypot, isfinite, sqrt
 from typing import Any, Protocol
@@ -171,11 +172,19 @@ def find_route(map_cells: dict, hazards: list[dict], start: Cell, goal: Cell) ->
     return failure
 
 
+# sim/responder.py: where its collision ray stopped it (log/decision outcome "ray_hit").
+_RAY_HIT = re.compile(r"^robot responder route \S+ hit \S+ at \[[^\]]*\] cell \[(-?\d+), (-?\d+), (-?\d+)\]$")
+
+
 class RoutePlanner:
     """Latest perception snapshots and publication of local route proposals.
 
     The caller supplies grid start/goal; pose and intent handling are outside
     T12. Failed searches never publish route/proposed.
+
+    Cells where the Responder's collision ray hit something (sim `log/decision` outcome "ray_hit") are
+    occupied for every later route, whatever later map updates say: the Scout's map can show them seen
+    and free (low rubble under its LiDAR), and re-proposing through them only gets blocked again.
     """
 
     def __init__(self, bus: Bus):
@@ -183,6 +192,25 @@ class RoutePlanner:
         self.map_cells: dict | None = None
         self.hazards: list[dict] = []
         self._route_number = 0
+        self.ray_blocked: set[Cell] = set()
+        subscribe = getattr(bus, "subscribe", None)
+        if callable(subscribe):
+            subscribe("log/decision", self.on_decision)
+
+    def on_decision(self, data: dict) -> None:
+        if data.get("model") != "sim" or data.get("outcome") != "ray_hit":
+            return
+        hit = _RAY_HIT.match(data.get("reason", ""))
+        if hit:
+            self.ray_blocked.add(tuple(int(n) for n in hit.groups()))
+
+    def _routing_map(self) -> dict:
+        """The merged map with every ray-blocked cell occupied (added as seen if the map lacks it)."""
+        if not self.ray_blocked:
+            return self.map_cells
+        cells = [record for record in self.map_cells["cells"] if tuple(record["cell"]) not in self.ray_blocked]
+        cells += [{"cell": list(c), "state": "seen", "occupied": True} for c in sorted(self.ray_blocked)]
+        return {**self.map_cells, "cells": cells}
 
     def update_map(self, data: dict) -> None:
         # Perception sends deltas between full snapshots. Unlisted cells
@@ -204,7 +232,7 @@ class RoutePlanner:
     ) -> dict:
         if self.map_cells is None:
             return {"status": "no_verified_route", "needs": "re-look", "cells": []}
-        result = find_route(self.map_cells, self.hazards, start, goal)
+        result = find_route(self._routing_map(), self.hazards, start, goal)
         if result["status"] == "ok":
             self._route_number += 1
             proposal = {
