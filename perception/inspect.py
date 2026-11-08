@@ -72,18 +72,24 @@ def pixel_ray(pose, u, v):
 
 
 def ground(origin, ray, points):
-    """(distance along the ray, point) of the first depth point lying on the ray, or None."""
+    """(distance along the ray, point) of the depth point best aligned with the ray, or None.
+
+    Best aligned (smallest angle off the ray), not nearest: a ray grazing the floor passes within a
+    few centimetres of floor points well before it reaches the surface it points at. A depth camera
+    sees no further than the first surface along a pixel, so the best-aligned point is that surface."""
     best = None
     for p in points:
         rel = (p[0] - origin[0], p[1] - origin[1], p[2] - origin[2])
         t = rel[0] * ray[0] + rel[1] * ray[1] + rel[2] * ray[2]
         if not MIN_RANGE_M <= t <= MAX_RANGE_M:
             continue
-        perp2 = sum((rel[i] - t * ray[i]) ** 2 for i in range(3))
-        tol = max(RAY_TOL_MIN_M, t * math.tan(RAY_TOL_RAD))
-        if perp2 <= tol * tol and (best is None or t < best[0]):
-            best = (t, tuple(p))
-    return best
+        perp = math.sqrt(max(0.0, sum((rel[i] - t * ray[i]) ** 2 for i in range(3))))
+        if perp > max(RAY_TOL_MIN_M, t * math.tan(RAY_TOL_RAD)):
+            continue
+        angle = math.atan2(perp, t)
+        if best is None or angle < best[0]:
+            best = (angle, t, tuple(p))
+    return None if best is None else best[1:]
 
 
 def parse_points(text):

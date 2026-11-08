@@ -226,3 +226,13 @@ def test_ray_starts_where_the_depth_camera_was(world):
     for origin in (low, high):
         assert math.isclose(depth_from(origin), I.ground(origin, ray, pts)[0], abs_tol=0.005)
     assert abs(depth_from(low) - depth_from(high)) > 0.05, "a higher camera grounds the pixel elsewhere"
+
+
+def test_a_ray_grazing_the_floor_grounds_on_the_surface_it_points_at():
+    """Floor points a centimetre under a shallow ray must not win over the wall the ray reaches."""
+    origin, ray = (0.0, 0.0, 0.1), (math.cos(0.1), 0.0, -math.sin(0.1))   # 5.7 degrees down
+    wall_t = 0.8
+    wall = tuple(origin[i] + ray[i] * wall_t for i in range(3))
+    floor = [(x / 100, 0.0, max(0.0, 0.1 - math.tan(0.1) * x / 100) - 0.012) for x in range(20, 80, 2)]
+    t, p = I.ground(origin, ray, [*floor, wall])
+    assert math.isclose(t, wall_t, abs_tol=1e-6) and p == wall
