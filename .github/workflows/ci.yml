@@ -153,8 +153,12 @@ jobs:
           python -m ruff check coord
           python -m pytest coord/tests -q
       - name: Baseline harness metrics and artifacts
+        # requirements.txt brings mujoco and numpy: without them every real-run test in tools/tests
+        # (importorskip("mujoco")) skipped on every PR, so the e2e rescue checks never ran in CI.
+        env:
+          GEMINI_MODE: "off"
         run: |
-          python -m pip install matplotlib pytest
+          python -m pip install -r requirements.txt pytest
           python -m ruff check tools/eval.py tools/eval_grid.py tools/eval_metrics.py tools/eval_sim.py tools/eval_compare.py tools/tests
           python -m pytest tools/tests -q
       - name: board scripts and hooks parse
