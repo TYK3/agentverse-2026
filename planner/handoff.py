@@ -18,7 +18,8 @@ Three jobs, all local (no Gemini call):
 3. Re-split when one robot is blocked.
    - Responder blocked (sim `log/decision` outcome "blocked"): the Scout takes over the spot,
      re-looking where the Responder stopped; the casualty goes back in the queue and is tried again
-     once the map has been re-scanned (MAX_ATTEMPTS in all).
+     once the map has been re-scanned (MAX_ATTEMPTS in all). A freeze (a world change revoked the
+     permit) is retried the same way but does not use up a try.
    - Scout blocked (`sensors/scout` motion.state "blocked"): perception's Explorer already drops the
      blocked target and picks the Scout's next frontier, so the handoff does not send a competing
      scout/goto; its part is to log the block and keep the Responder working its casualty queue.
@@ -304,6 +305,11 @@ class Handoff:
             await self.bus.publish("scout/goto", {"target": [round(x, 3), round(y, 3), 0.075],
                                                   "reason": f"re-split: Responder blocked near [{x:.2f}, {y:.2f}], "
                                                             f"Scout re-scans it"})
+        elif self.attempts.get(self.active, 0) > 0:
+            # "frozen" = the world changed under the route (a shift revoked the permit, T13 re-plans).
+            # That is not the Responder failing, so it gives the try back (#52 E2E: the shift used
+            # up try 1 and the first real block after it skipped the casualty for good).
+            self.attempts[self.active] -= 1
         await self.give_up_or_retry(f"Responder {outcome}: {reason}")
 
     async def give_up_or_retry(self, why):
