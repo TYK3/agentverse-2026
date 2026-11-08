@@ -22,6 +22,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SUITES = ["coord/tests", "tools/tests", "sim/tests", "perception/tests", "planner", "voice/tests"]
 DEMOS = [("sim.demo_descent", []), ("sim.demo_responder", ["--headless"]),
          ("sim.demo_aftershock", ["--no-viewer"])]
+DESCENT_ROWS = [("descent B2 (strict)", ["tools/seed_sweep.py", "--descent-child", "B2", "--seed", "0"]),
+                ("seed sweep B2 (seeds 0-4)", ["tools/seed_sweep.py", "--floor", "B2", "--seeds", "0-4"])]
 RESCUE = "tools/run_rescue.py"
 TAIL_LINES = 25
 _SUMMARY = re.compile(r"^=*\s*(\d+ (?:passed|failed|errors?|skipped|deselected)\b.*?) in [\d.]+s",
@@ -77,6 +79,12 @@ def plan(root, suites, seed, rescue_timeout, demos=True):
             jobs.append((name, [sys.executable, "-m", module, *flags], rescue_timeout))
         else:
             jobs.append((name, None, "module not on this checkout"))
+    for name, args in DESCENT_ROWS if demos else []:
+        if (root / "sim/demo_descent.py").exists() and (root / args[0]).exists():
+            timeout = rescue_timeout * (5 if "--floor" in args else 1)
+            jobs.append((name, [sys.executable, *args], timeout))
+        else:
+            jobs.append((name, None, "sim/demo_descent.py or tools/seed_sweep.py not on this checkout"))
     if (root / RESCUE).exists():
         jobs.append((f"e2e rescue (seed {seed})",
                      [sys.executable, RESCUE, "--auto-approve", "--seed", str(seed)],
@@ -103,6 +111,18 @@ def report(results, started):
         lines += ["", f"## {r['name']}: {r['status']}", "", f"`{r['cmd']}`", "",
                   "```", r["tail"] or "(no output)", "```"]
     return "\n".join(lines) + "\n"
+
+
+_SECTION = re.compile(r"<!-- ([A-Z0-9-]+):BEGIN -->.*?<!-- \1:END -->\n?", re.DOTALL)
+
+
+def kept_sections(path):
+    """Sweep sections (SEED-SWEEP, SEED-SWEEP-B2, FAULT-SWEEP...) already in the report survive
+    a rewrite, and the B2 sweep row writes its section during this run."""
+    if not path.exists():
+        return ""
+    found = [m.group(0).rstrip("\n") + "\n" for m in _SECTION.finditer(path.read_text())]
+    return "".join("\n" + f for f in found)
 
 
 def parse(argv=None):
@@ -134,7 +154,7 @@ def main(argv=None, root=ROOT):
     out = pathlib.Path(args.output)
     out = out if out.is_absolute() else root / out
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(report(results, started))
+    out.write_text(report(results, started) + kept_sections(out))
     print(f"wrote {out}")
     return 0 if all(r["status"] in ("pass", "skipped") for r in results) else 1
 
