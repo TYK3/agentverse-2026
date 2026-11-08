@@ -27,6 +27,7 @@ LOOK = 1.0            # metres: close enough to a re-scan target for the LiDAR t
 VISIT_HOLD = 15.0     # seconds one re-scan visit may take before the next
 AHEAD = 0.18          # metres sim keeps clear ahead before it moves (CLEARANCE 0.15 + one 0.03 m step)
 HALF_WIDTH = 0.08     # Scout chassis half width; with AHEAD this mirrors sim/world.py's _free_ahead
+ZONE = "re-scan keep-out zone"   # reason prefix of a visit that stays in view until the zone lifts
 
 SIDES = ((1, 0), (-1, 0), (0, 1), (0, -1))
 DISK = tuple((di, dj) for di in range(-CLEAR, CLEAR + 1) for dj in range(-CLEAR, CLEAR + 1)
@@ -44,6 +45,7 @@ class Explorer:
         self.grid = grid
         self.pose = None          # Scout position from sensors/scout
         self.bad = set()          # (i, j) of at_risk or collapsed hazard cells
+        self.zone = set()         # (i, j) of keep-out (exclusion) cells in the last map/hazards
         self.hold = None          # (target, until, reason, radius) of a re-look, visit or planner scout/goto
         self.visits = []          # [(cell, reason)] still to re-scan after a change, nearest first
         self.visited = set()      # re-scan cells already queued since the last change
@@ -76,6 +78,14 @@ class Explorer:
 
     def on_hazards(self, data):
         self.bad = {(h["cell"][0], h["cell"][1]) for h in data if h["status"] in ("at_risk", "collapsed")}
+        zone = {(h["cell"][0], h["cell"][1]) for h in data if h.get("exclusion")}
+        new = zone - self.zone
+        self.zone = zone
+        if new:
+            # A keep-out zone lifts only after fresh scans of the moved voxels (perception/motion.py), so go
+            # back and look, even where a re-scan visit already passed: nobody else will.
+            self.visited -= {v for v in self.visited if any(math.dist(v, c) * RES < LOOK / 2 for c in new)}
+            self._queue(new, f"{ZONE} until it settles: cell")
 
     def on_goto(self, data, t):
         if data is not self.sent:
@@ -118,13 +128,19 @@ class Explorer:
         """The scout/goto to publish now, or None (nothing to do, or a hold is in force)."""
         if self.pose is None:
             return None
+        self.visits = [v for v in self.visits if not v[1].startswith(ZONE) or v[0][:2] in self.zone]
         if self.hold is None and self.visits:
             cell, reason = self.visits.pop(0)
             self.hold = (cell, t + VISIT_HOLD, reason, LOOK)
         if self.hold:
             target, until, reason, radius = self.hold
             here = centre(target, self.pose[2]) if isinstance(target, tuple) else target
-            if t > until or math.dist(here[:2], self.pose[:2]) < radius:
+            near = math.dist(here[:2], self.pose[:2]) < radius
+            if reason and reason.startswith(ZONE) and t <= until and tuple(target[:2]) in self.zone:
+                if near:
+                    return None                   # stay in view of the zone until fresh scans lift it
+                return self._goto(target, reason)
+            if t > until or near:
                 self.hold = None
                 if self.visits:
                     return self.tick(t)
