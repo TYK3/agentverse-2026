@@ -121,6 +121,12 @@ def find_route(map_cells: dict, hazards: list[dict] | None, start, goal) -> dict
     lv = Levels(map_cells, hazards)
     s = lv.floor(*start, band=SNAP_DK) or tuple(start)
     lv._walk[s] = True          # the robot stands here: it is floor, and keep-out is for where it goes
+    if lv.occupied_near(s, lv.keep) and next(lv.neighbours(s), None) is None:
+        # Boxed in inside keep-out (driven into a pocket): the free floor around it is the way out.
+        for di, dj in lv._discs[lv.keep]:
+            n = lv.floor(s[0] + di, s[1] + dj, s[2], band=0)
+            if n is not None and n not in lv.blocked:
+                lv._walk[n] = True
     g = lv.floor(*goal, band=SNAP_DK)
     target = tuple(goal)
     costs, parents = {s: 0.0}, {}

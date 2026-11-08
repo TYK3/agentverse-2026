@@ -104,8 +104,10 @@ class GridLevels:
                 cx, cy = (ci + di + 0.5) * self.res, (cj + dj + 0.5) * self.res
                 if math.hypot(cx - x, cy - y) <= HALF_WIDTH:
                     self._trail_cell(ci + di, cj + dj, k)
-        rise, _ = self.slope()
+        rise, heading = self.slope()
         up = self._uphill(ci, cj, k)
+        if up is not None and rise >= FLAT and heading is not None:
+            up = heading           # driving on the ramp: its slope runs the way the Scout climbs or descends
         flat = rise < FLAT and up is None
         if flat or up is not None:
             self._scan((x, y), k, data["lidar"], None if flat else up)
