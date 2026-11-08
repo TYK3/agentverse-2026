@@ -21,15 +21,15 @@ Proposals for the lead to log in `coord/CONTEXT.md` (decisions log) before lanes
 
 ## How we use Gemini (read this before building)
 
-Claude Code and Codex build most of it. Gemini agents are welcome on the board like any other agent (join, report in, chat, review, suggest under `AGENTS.md`) and are assigned only the tasks labelled `fit:gemini`, where the Builder Guide says Gemini excels. Inside the product, Gemini only runs for jobs that need it or were made for it. Antigravity is kept for at most two named jobs (T27). This saves credits (the temporary hackathon account is rate-limited and heavy use can get a team disqualified) and keeps the build fast.
+Codex build most of it. Gemini agents are welcome on the board like any other agent (join, report in, chat, review, suggest under `AGENTS.md`) and are assigned only the tasks labelled `fit:gemini`, where the Builder Guide says Gemini excels. Inside the product, Gemini only runs for jobs that need it or were made for it. Antigravity is kept for at most two named jobs (T27). This saves credits (the temporary hackathon account is rate-limited and heavy use can get a team disqualified) and keeps the build fast.
 
-1. **Building:** Claude Code and Codex write the tasks that are not labelled `fit:gemini`. A Gemini agent is only assigned `fit:gemini` tasks, the ones that lean on what the guide says Gemini does best: T07 photo to MuJoCo scene (the guide's "photo-to-simulation" blueprint: MuJoCo scenes, URDF, Three.js and a visual self-critique loop), T18 and T19 the Three.js 3D map and route visuals (guide: Three.js and WebGPU scenes), T21 and T22 live voice, speech and translation (Gemini 3.8 Live, TTS, Live Translate), T10 vision on the Scout camera frame, and T27 the Antigravity test-suite job. If no Gemini agent is on the roster, a Claude or Codex agent builds these tasks and calls Gemini at runtime through `coord/gem.py`. A Gemini agent that has no `fit:gemini` task free does not take other tasks; it reports in and reviews. It uses its own subscription for building; the shared hackathon account stays for the runtime calls and the two Antigravity jobs. In each coding agent install the official Gemini skills once so it writes current Gemini 4 and Interactions API code instead of retired parameters: `npx skills add google-gemini/gemini-skills --skill gemini-api-dev` and `npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev`.
+1. **Building:** Codex write the tasks that are not labelled `fit:gemini`. A Gemini agent is only assigned `fit:gemini` tasks, the ones that lean on what the guide says Gemini does best: T07 photo to MuJoCo scene (the guide's "photo-to-simulation" blueprint: MuJoCo scenes, URDF, Three.js and a visual self-critique loop), T18 and T19 the Three.js 3D map and route visuals (guide: Three.js and WebGPU scenes), T21 and T22 live voice, speech and translation (Gemini 3.8 Live, TTS, Live Translate), T10 vision on the Scout camera frame, and T27 the Antigravity test-suite job. If no Gemini agent is on the roster, a Codex agent builds these tasks and calls Gemini at runtime through `coord/gem.py`. A Gemini agent that has no `fit:gemini` task free does not take other tasks; it reports in and reviews. It uses its own subscription for building; the shared hackathon account stays for the runtime calls and the two Antigravity jobs. In each coding agent install the official Gemini skills once so it writes current Gemini 4 and Interactions API code instead of retired parameters: `npx skills add google-gemini/gemini-skills --skill gemini-api-dev` and `npx skills add google-gemini/gemini-skills --skill gemini-live-api-dev`.
 2. **Runtime Gemini jobs (the only ones):**
 
 | Job | Model ID | Task | Why Gemini |
 |---|---|---|---|
 | Photos to MuJoCo scene, with a render-and-critique loop | `gemini-4-argon` | T07 | Multimodal generation plus self-critique; the guide's robotics blueprint |
-| Operator voice with mid-sentence changes | `gemini-3.8-live` | T21 | Real-time two-way voice; Claude and Codex do not do live audio |
+| Operator voice with mid-sentence changes | `gemini-3.8-live` | T21 | Real-time two-way voice; Codex do not do live audio |
 | Spoken guidance | `gemini-3.8-flash-tts` | T22 | Speech output |
 | Casualty and operator translation | `gemini-3.5-live-translate-preview` | T22 | Streaming speech translation |
 | Read the Scout camera frame for a person | `gemini-3.8-flash` | T10 | Vision on a sensor frame; at most 1 call per second, only when thermal or sound already hints at a casualty |
@@ -393,7 +393,7 @@ Depends on: T17. Lane: `console/`.
 ---
 
 ## T21 | voice | Operator voice commands with mid-sentence changes
-Depends on: T02, T14 (fixtures meanwhile), T26. Lane: `voice/`. Gemini job: `gemini-3.8-live`, the one thing Claude and Codex cannot do. Install the `gemini-live-api-dev` skill in your coding agent first. Build the typed twin and the intent parser with `GEMINI_MODE=off`; the live session is switched on at integration. No faked live calls in the demo.
+Depends on: T02, T14 (fixtures meanwhile), T26. Lane: `voice/`. Gemini job: `gemini-3.8-live`, the one thing Codex cannot do. Install the `gemini-live-api-dev` skill in your coding agent first. Build the typed twin and the intent parser with `GEMINI_MODE=off`; the live session is switched on at integration. No faked live calls in the demo.
 
 **How:** `voice/operator.py`: open a `gemini-3.8-live` session with `google-genai` (read the Builder Guide and the SDK's live session docs for the exact connect call; do not guess its shape), stream microphone audio (`sounddevice` 16 kHz mono) into it, and ask the model to return the FINAL intent only, as JSON `{"goal":"deliver","item":"water","place":"back room"}`, resolving self-corrections ("left room, no, the back room"). Publish `operator/command {"text":"send water to the back room","source":"voice"}`. A typed twin: `voice/typed.py` reads stdin lines and publishes the same message; the console's typed bar (T20) already does this. Provide push-to-talk (hold space) so noise cannot trigger it.
 
@@ -442,7 +442,7 @@ Depends on: T23, T24. Owner: lead. Brief: one-page technical summary PDF, a simu
 ## T26 | shared | The one Gemini door: `coord/gem.py`, modes, call cap, badge
 Depends on: T01. Owner: lead. Merge this right after T02: every Gemini task depends on it.
 
-**What:** one module all Gemini calls pass through, so we build with Claude and Codex at zero Gemini cost and still show real calls in the demo.
+**What:** one module all Gemini calls pass through, so we build with Codex at zero Gemini cost and still show real calls in the demo.
 
 **How:** `coord/gem.py`:
 ```python
@@ -515,6 +515,6 @@ interaction = client.interactions.create(
     environment="remote")
 open("docs/antigravity_report.md", "w").write(interaction.output_text)
 ```
-Read the report and have the sim owner fix anything real with Claude or Codex, not with Antigravity. Quote the result in the one-page summary as independent verification. If the sandbox cannot install MuJoCo, say so in the report and drop A1; do not retry in a loop.
+Read the report and have the sim owner fix anything real with Codex, not with Antigravity. Quote the result in the one-page summary as independent verification. If the sandbox cannot install MuJoCo, say so in the report and drop A1; do not retry in a loop.
 
 **Done when:** `docs/antigravity_report.md` exists with the sandbox's own test results, or the task is closed on the board as "skipped, local tests are enough" with the reason.
