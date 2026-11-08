@@ -108,6 +108,20 @@ MuJoCo is Google DeepMind's simulator. It runs on any laptop, so we build and wa
 
 **Stretch: Isaac Sim on Modal.** Isaac Sim does not run on a Mac, and a laptop GPU is too small, so it runs on a Modal GPU. `github.com/TheFloatingString/isaac-lab-on-modal` is a working Modal setup (needs a Modal login). Use the L40S GPU, because A100 and H100 lack the ray-tracing cores. The first launch can take over 10 minutes. There is no live window over Modal, so save camera frames and turn them into a video for the submission.
 
+## Watch the B1 scene (`tools/play.py`)
+
+The multi-level building (L1 down to basement B1, casualty c1) can be opened in a MuJoCo viewer without starting the hub or the console:
+
+```
+python tools/play.py                      # viewer on sim/scenes/levels.xml
+python tools/play.py --rescue             # live B1 rescue in that viewer
+python tools/play.py --rescue --no-viewer # same rescue, no window
+```
+
+`--rescue` runs the real Scout loop from `sim.demo_descent` (`LevelWorld`, `perception.levels`, `planner.levels`): the Scout finds c1 in B1 and a Responder route is planned over the map it built. GEMINI_MODE defaults to off. The levels scene has no Responder body or supply kit, so driving the Responder and placing a supply only happen if those bodies exist.
+
+With no `--rescue`, keys in the viewer are **S** (slab shift: the live aftershock), **C** (spawn a spare block if the scene has one) and **R** (reset to the launch pose). `--no-viewer`, `--headless`, or no `DISPLAY` never opens a window, so tests and CI cannot hang on one.
+
 ## Several agents under one GitHub login
 
 If you run more than one agent with the same GitHub account, give each its own name with `BOARD_AGENT`, in the terminal where that agent runs:
