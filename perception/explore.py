@@ -51,6 +51,7 @@ class Explorer:
         self.given_up = set()     # frontiers reached, or not reachable, that stayed frontiers
         self.progress = (None, math.inf, 0)   # (target, closest so far, decisions since closer)
         self.sent = None          # our last scout/goto, to tell it from the planner's
+        self.routed_hold = False  # unsafe external goals need a checked path around observed walls
         self.blocked = False      # sim refused to drive toward our last scout/goto
 
     # ---- bus callbacks ----------------------------------------------------------
@@ -78,12 +79,18 @@ class Explorer:
         self.bad = {(h["cell"][0], h["cell"][1]) for h in data if h["status"] in ("at_risk", "collapsed")}
 
     def on_goto(self, data, t):
-        if data is not self.sent:
-            self.hold = (data["target"], t + HOLD, None, REACHED)
+        if data != self.sent:  # the validated hub delivers a copy of our waypoint
+            target = data["target"]
+            self.routed_hold = self.pose is not None and not (self._straight(target) and self._clear_ahead(target))
+            if self.routed_hold:
+                self.hold = (cell_of(target), t + HOLD, data.get("reason") or "planner re-look", REACHED)
+            else:
+                self.hold = (target, t + HOLD, None, REACHED)
 
     def on_decision(self, data, t):
         m = _CELL.search(data.get("reason", ""))
         if data.get("outcome") == "relook" and m:
+            self.routed_hold = False
             cell = tuple(int(v) for v in m.groups())
             self.hold = (cell, t + HOLD, f"re-look at cell {list(cell)} (planner: {data['reason']})", REACHED)
 
@@ -126,6 +133,7 @@ class Explorer:
             here = centre(target, self.pose[2]) if isinstance(target, tuple) else target
             if t > until or math.dist(here[:2], self.pose[:2]) < radius:
                 self.hold = None
+                self.routed_hold = False
                 if self.visits:
                     return self.tick(t)
             elif reason is None:
@@ -225,11 +233,18 @@ class Explorer:
     def _send(self, path, reason):
         """scout/goto to the farthest path cell, at most CARROT ahead, the Scout can drive to straight."""
         z = self.pose[2]
-        pick = path[0]
-        for c in path[1:CARROT + 1]:
-            if not (self._straight(centre(c, z)) and self._clear_ahead(centre(c, z))):
-                break
-            pick = c
+        if self.routed_hold:
+            visible = [c for c in path[:CARROT + 1]
+                       if self._straight(centre(c, z)) and self._clear_ahead(centre(c, z))]
+            if not visible:
+                return None
+            pick = visible[-1]
+        else:
+            pick = path[0]
+            for c in path[1:CARROT + 1]:
+                if not (self._straight(centre(c, z)) and self._clear_ahead(centre(c, z))):
+                    break
+                pick = c
         self.sent = {"target": centre(pick, z), "reason": reason}
         return self.sent
 

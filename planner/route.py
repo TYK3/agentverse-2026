@@ -12,6 +12,19 @@ NEIGHBOURS = tuple(
 )
 CLEARANCE_M = 0.15
 CLEARANCE_COST = 5.0
+# The Responder's body is 0.14 m wide (sim/responder.py HALF_WIDTH 0.07): a route cell whose centre is
+# strictly closer than KEEP_OUT_M to an occupied cell's centre would put its side into the obstacle, so
+# it is a wall, not a cost. On the 0.05 m grid that leaves at least 0.075 m from a route cell's centre
+# to the obstacle's face (5 mm clear). Strict, so a cell exactly 0.10 m away stays usable: the scene's
+# 0.2 m breach (pile x -0.6, wall b4 x -0.4) is passable only through such cells. Cells within KEEP_OUT_M of the start and of the goal are exempt: the robot is
+# already at the start and must be able to back out, and the goal is beside a casualty (whose body the
+# LiDAR maps as occupied) that it must reach. It applies to maps finer than
+# the robot's half-width (perception's 0.05 m map): on a coarser map a free cell is already a
+# robot-sized place.
+KEEP_OUT_M = 0.10
+ROBOT_HALF_WIDTH_M = 0.07
+ROBOT_FRONT_M = 0.19  # 0.16 m half-length + 0.03 m collision-guard gap (sim/responder.py)
+WAYPOINT_TOLERANCE_M = 0.005
 # X1 predictive hazards: an at_risk cell is a predicted failure, not a wall. Entering one costs as much
 # as a 50 m detour, so any real detour wins; a route that still needs one goes to the human gate
 # (enter_at_risk). Cells near a predicted failure cost a little extra, so routes keep a margin.
@@ -42,13 +55,18 @@ def _distance(a: Cell, b: Cell, res: float) -> float:
     return res * (max(dx, dy) + (sqrt(2) - 1) * min(dx, dy))
 
 
-def _clearance_cells(occupied: set[Cell], res: float, metres: float = CLEARANCE_M) -> set[Cell]:
+def _clearance_cells(
+    occupied: set[Cell], res: float, metres: float = CLEARANCE_M, strict: bool = False
+) -> set[Cell]:
+    """Cells whose centre is within `metres` (or strictly closer, if `strict`) of an occupied centre."""
     radius = ceil(metres / res)
+
+    def near(dx: int, dy: int) -> bool:
+        d = hypot(dx, dy) * res
+        return d < metres - 1e-12 if strict else d <= metres + 1e-12
+
     offsets = [
-        (dx, dy)
-        for dx in range(-radius, radius + 1)
-        for dy in range(-radius, radius + 1)
-        if hypot(dx, dy) * res <= metres + 1e-12
+        (dx, dy) for dx in range(-radius, radius + 1) for dy in range(-radius, radius + 1) if near(dx, dy)
     ]
     return {(x + dx, y + dy, 0) for x, y, _ in occupied for dx, dy in offsets}
 
@@ -63,6 +81,36 @@ def _neighbours(cell: Cell, safe: set[Cell]):
         if dx and dy and ((x + dx, y, 0) not in safe or (x, y + dy, 0) not in safe):
             continue
         yield other, hypot(dx, dy)
+
+
+def _blocked_moves(occupied: set[Cell], res: float) -> dict[tuple[int, int], set[Cell]]:
+    """Forbidden edge origins for the swept forward footprint, using measured occupied cells only.
+
+    Width inflation alone misses a wall in front while rounding a corner. The rectangle extends
+    from the current centre through the next centre and another chassis half-length + guard gap.
+    Grid squares and the rectangle are tested on all four separating axes. No sim geometry is read.
+    """
+    blocked = {}
+    half_cell = res / 2
+    width = ROBOT_HALF_WIDTH_M + WAYPOINT_TOLERANCE_M
+    radius = ceil((ROBOT_FRONT_M + width) / res) + 2
+    for dx, dy in NEIGHBOURS:
+        step = hypot(dx, dy) * res
+        ux, uy = dx * res / step, dy * res / step
+        length = step + ROBOT_FRONT_M + WAYPOINT_TOLERANCE_M
+        half_length = length / 2
+        margin = half_cell * (abs(ux) + abs(uy))
+        offsets = []
+        for i in range(-radius, radius + 1):
+            for j in range(-radius, radius + 1):
+                x, y = i * res - ux * half_length, j * res - uy * half_length
+                if (abs(x * ux + y * uy) < half_length + margin - 1e-12
+                        and abs(-x * uy + y * ux) < width + margin - 1e-12
+                        and abs(x) < abs(ux) * half_length + abs(uy) * width + half_cell - 1e-12
+                        and abs(y) < abs(uy) * half_length + abs(ux) * width + half_cell - 1e-12):
+                    offsets.append((i, j))
+        blocked[dx, dy] = {(x-i, y-j, 0) for x, y, _ in occupied for i, j in offsets}
+    return blocked
 
 
 def _frontier(
@@ -114,7 +162,8 @@ def find_route(map_cells: dict, hazards: list[dict], start: Cell, goal: Cell) ->
     """Find the least-cost safe route, or request a re-look at the frontier.
 
     Cost is step length in metres plus 5 per entered cell whose centre is
-    within 0.15 m of an occupied ground cell, 50 per entered at-risk cell and
+    within 0.15 m of an occupied ground cell (cells closer than 0.10 m are walls:
+    the Responder is 0.14 m wide), 50 per entered at-risk cell and
     5 per cell within 0.15 m of one (X1: predicted failures are avoided before
     the aftershock, and entering one goes to the human gate). Missing,
     inferred, unknown, occupied and collapsed cells, and hazards marked
@@ -144,7 +193,11 @@ def find_route(map_cells: dict, hazards: list[dict], start: Cell, goal: Cell) ->
         return failure
 
     occupied = {c for c, r in records.items() if c[2] == 0 and r["occupied"]}
+    if res < ROBOT_HALF_WIDTH_M:
+        exempt = _clearance_cells({start, goal}, res, KEEP_OUT_M, strict=True)
+        safe -= _clearance_cells(occupied, res, KEEP_OUT_M, strict=True) - exempt
     clearance = _clearance_cells(occupied, res)
+    blocked_moves = _blocked_moves(occupied, res) if res < ROBOT_HALF_WIDTH_M else {}
     margin = _clearance_cells(risky, res, RISK_MARGIN_M) - risky
     costs = {start: 0.0}
     parents: dict[Cell, Cell] = {}
@@ -161,6 +214,9 @@ def find_route(map_cells: dict, hazards: list[dict], start: Cell, goal: Cell) ->
                 path.append(parents[path[-1]])
             return {"status": "ok", "cells": [list(c) for c in reversed(path)], "cost": cost}
         for other, step in _neighbours(current, safe):
+            direction = (other[0] - current[0], other[1] - current[1])
+            if current in blocked_moves.get(direction, ()):
+                continue
             candidate_cost = (cost + step * res + (CLEARANCE_COST if other in clearance else 0)
                               + (RISK_COST if other in risky else RISK_MARGIN_COST if other in margin else 0))
             if candidate_cost < costs.get(other, float("inf")):

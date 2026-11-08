@@ -20,8 +20,8 @@ async def start(bus) -> RoutePlanner:
     bus.subscribe("map/cells", planner.update_map)
     bus.subscribe("map/hazards", planner.update_hazards)
     planner.reporter = ReportCollector(bus).attach()
-    lp = await loop.start(bus, planner)
+    lp = await loop.start(bus, planner, defer_approved_actions=True)
     planner.loop, planner.task = lp, lp.task
-    planner.handoff = handoff.start(bus, lp, planner)
+    planner.handoff = handoff.start(bus, lp, planner, require_triage=True)
     planner.permits = permit.start(bus)  # L1: move permits that only fresh observation re-earns
     return planner

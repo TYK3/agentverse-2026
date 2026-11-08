@@ -331,3 +331,53 @@ def test_exclusion_zone_is_never_entered_even_as_the_only_way(doorway):
     zone = {**hazard((3, 2, 0), "at_risk"), "exclusion": True}
     assert find_route(doorway, [zone], (0, 2, 0), (6, 2, 0))["status"] == "no_verified_route"
     assert find_route(doorway, [{**zone, "exclusion": False}], (0, 2, 0), (6, 2, 0))["status"] == "ok"
+
+
+# ---- the Responder's width on the real 0.05 m map ----
+
+def fine_room(width_cells, length=20, res=0.05):
+    """A corridor `width_cells` free cells wide between two occupied rows, at perception's resolution."""
+    cells = []
+    for x in range(length):
+        for y in range(-1, width_cells + 1):
+            cells.append({"cell": [x, y, 0], "state": "seen", "occupied": y in (-1, width_cells)})
+    return {"res": res, "cells": cells}
+
+
+def test_route_keeps_the_responder_body_off_obstacles():
+    """0.14 m wide: no route cell centre closer than 0.10 m to an occupied cell (>= 0.075 m to its face)."""
+    room = fine_room(9)                                     # 0.45 m wide
+    result = find_route(room, [], (0, 4, 0), (19, 4, 0))
+    assert result["status"] == "ok"
+    assert all(1 <= c[1] <= 7 for c in result["cells"]), result["cells"]
+
+
+def test_gap_narrower_than_the_responder_has_no_route():
+    assert find_route(fine_room(2), [], (0, 0, 0), (19, 1, 0))["status"] == "no_verified_route"   # 0.10 m
+    assert find_route(fine_room(3), [], (0, 1, 0), (19, 1, 0))["status"] == "ok"                  # 0.15 m
+
+
+def test_breach_cells_exactly_ten_centimetres_from_rubble_stay_usable():
+    """A 0.2 m breach (4 cells): its only usable cells are exactly 0.10 m from an occupied cell centre."""
+    room = fine_room(9)
+    for c in room["cells"]:                    # a wall across x=10 with a 4-cell breach at y 3..6
+        if c["cell"][0] == 10 and not 3 <= c["cell"][1] <= 6:
+            c["occupied"] = True
+    result = find_route(room, [], (0, 4, 0), (19, 4, 0))
+    assert result["status"] == "ok"
+    crossing = [c for c in result["cells"] if c[0] == 10]
+    assert crossing and all(c[1] in (4, 5) for c in crossing), crossing
+
+
+def test_responder_parked_against_a_wall_can_back_out():
+    result = find_route(fine_room(9), [], (0, 0, 0), (19, 4, 0))
+    assert result["status"] == "ok" and result["cells"][0] == [0, 0, 0]
+
+
+def test_responder_holds_when_goal_would_overlap_an_occupied_casualty():
+    room = fine_room(9)
+    room["cells"] = [c if c["cell"] != [19, 5, 0] else {**c, "occupied": True} for c in room["cells"]]
+    result = find_route(room, [], (0, 4, 0), (19, 4, 0))   # the casualty's body is mapped at [19, 5]
+    assert result["status"] == "no_verified_route"  # 0.05 m offset cannot fit the 0.14 m chassis
+    result = find_route(room, [], (0, 4, 0), (14, 4, 0))  # stop short; the arm places the supply ahead
+    assert result["status"] == "ok" and result["cells"][-1] == [14, 4, 0]

@@ -56,15 +56,22 @@ Scout watches from room 2 opens a zone over b10 (seen up to 0.47 m), and 6 s of 
 
 ## Injury triage and first-aid gate (Y3, `perception/triage.py`)
 
+External Scout re-look goals that cannot be driven to straight use the existing
+seen-free path router. The intermediate waypoint is checked against occupied
+cells and forward clearance. Validated hub copies of the Explorer's own
+waypoints keep the original external goal, rather than replacing it with a
+temporary waypoint hold. Ordinary frontier routing retains its prior behaviour.
+
 Assesses casualty condition and determines first-aid intervention:
 - Fuses multi-modal observations: thermal signature, acoustic clues / sound level, camera posture check, and voice dialogue responses (via `voice.GUIDE.summary(cid)` or `casualty/answer`).
 - Powered by `gemini-4-argon` through `coord/gem.py` (`lead_reasoning`) with `GEMINI_MODE=live`. In `GEMINI_MODE=off`, uses deterministic clinical triage rules.
 - Triage priority levels: `immediate` (critical life-threat), `urgent` (stabilization needed), `delayed` (minor / stable), `unknown`.
 - Matches injuries to Responder arm first-aid supply items: `water`, `first_aid_kit`, `radio`, `bandage`, `splint`, `thermal_blanket`.
 - **First-Aid Gate & Human Card**:
-  - High confidence (>= 0.8) and unambiguous condition: autonomous gate decision (`gate/decision` `outcome="act"`) triggers `responder/action`.
+  - High confidence (>= 0.8) and unambiguous condition: the existing automatic assessment accepts the supply choice and publishes `casualty/triage` for planner routing.
   - Unsure / ambiguous condition (< 0.8, conflicting clues, or severe multi-trauma): publishes `gate/decision` (`outcome="refer"`) and a needs-human triage card via `gate/request` (`kind="risky_move"`) with recommended supply options for operator approval.
-  - Upon operator `gate/answer` (`approved=True`), triggers `responder/action` with the selected first-aid item and logs to `log/decision`.
+  - Upon operator `gate/answer` (`approved=True`), publishes the accepted `casualty/triage {id,injuries,recommended_action}` and logs to `log/decision`. The planner waits for that choice, routes to the casualty, verifies physics, applies navigation/move gates and queues `move`, `place_supply`, `release` on the real route. Triage never publishes a physical arm command. The clinical gate's `route: none` grants no movement permission.
+  - A pending or resolved review is not replayed by later casualty observations; an answer is consumed before any re-entrant bus publication. Attaching the singleton to a new bus starts a fresh run.
 - Exposes `perception.triage.triage_summary(cid)` and `TRIAGE.summary(cid)` for integration with the Y6 remote paramedic report.
 
 ## Casualties (T10, `perception/casualties.py`)
