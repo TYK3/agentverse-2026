@@ -48,6 +48,39 @@ def _count_call() -> None:
         pass
 
 
+SAMPLE_RATE = 24000  # Gemini TTS returns 16-bit mono PCM at 24 kHz
+
+
+def _play_pcm(audio: bytes) -> tuple[bool, str]:
+    """Play 16-bit mono PCM at SAMPLE_RATE and wait until it ends (SPEAK-PLAY).
+
+    Returns (played, reason). Skips without raising when sounddevice is missing or there is no output
+    device (CI, a headless box), so the caller falls back to text.
+    """
+    try:
+        import sounddevice as sd
+    except (ImportError, OSError) as exc:          # OSError: PortAudio library missing
+        return False, f"sounddevice unavailable: {exc}"
+    try:
+        sd.query_devices(kind="output")             # raises when there is no default output device
+    except Exception as exc:  # noqa: BLE001 - PortAudioError is a bare Exception subclass
+        return False, f"no audio output device: {exc}"
+    usable = len(audio) - len(audio) % 2
+    if not usable:
+        return False, "empty audio"
+    try:
+        import numpy as np
+        samples: Any = np.frombuffer(audio[:usable], dtype=np.int16)
+    except ImportError:
+        samples = memoryview(audio[:usable]).cast("h")
+    try:
+        sd.play(samples, samplerate=SAMPLE_RATE)
+        sd.wait()
+    except Exception as exc:  # noqa: BLE001 - PortAudioError and device errors mid-play
+        return False, f"playback failed: {exc}"
+    return True, "played"
+
+
 def speak_text(text: str, to: str = "operator", allow_device: bool = True) -> dict[str, Any]:
     """Speak text using TTS or fall back to text-only output."""
     mode = get_mode()
@@ -82,15 +115,12 @@ def speak_text(text: str, to: str = "operator", allow_device: bool = True) -> di
                     logger.warning("TTS call failed, text-only for this line: %s", str(e)[:200])
 
         if audio_bytes and allow_device:
-            try:
-                import sounddevice as sd
-
-                sd.default.samplerate = 24000
-                logger.info("Playing TTS audio for %s: %d bytes", to, len(audio_bytes))
+            played, why = _play_pcm(audio_bytes)
+            if played:
+                logger.info("Played TTS audio for %s: %d bytes", to, len(audio_bytes))
                 return {"spoken": True, "mode": "audio", "bytes": len(audio_bytes), "text": text}
-            except (ImportError, OSError, RuntimeError) as sde:
-                logger.warning("Sounddevice playback unavailable: %s", sde)
-                _mark_stand_in()
+            logger.warning("Sounddevice playback skipped: %s", why)
+            _mark_stand_in()
 
         # If audio bytes generated but device wasn't allowed or failed
         if audio_bytes:
