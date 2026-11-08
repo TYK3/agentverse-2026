@@ -10,6 +10,11 @@ from sim.world import World
 
 RATE_HZ = 10
 RGBD_EVERY = 5   # ticks between depth frames: 2 Hz of sensors/scout.points (Y9)
+# SIM-SPEED: the 320x240 RGB JPEG is the costliest part of a tick on a CPU-only machine (software GL,
+# ~30-45 ms), and perception reads a frame at most once a second, so render it every CAMERA_EVERY ticks
+# (2 Hz). CAMERA_PHASE keeps it off the depth-frame tick so the two renders don't stack.
+CAMERA_EVERY = 5
+CAMERA_PHASE = 2
 CLOCKS = ("wall", "step")
 log = logging.getLogger("sim")
 
@@ -38,7 +43,7 @@ async def run(world, bus, rate_hz=RATE_HZ):
         if getattr(world, "relay", None) is not None:  # L3: move the radio, drop crumbs, re-route
             events += world.relay.step(world.t, world.pos)
             world.hw.source.transport.flush()
-        sensors = world.sensors_message()
+        sensors = world.sensors_message(camera=round(world.t / dt) % CAMERA_EVERY == CAMERA_PHASE)
         if getattr(world, "rgbd", None) is not None and round(world.t / dt) % RGBD_EVERY == 0:
             sensors.update(world.rgbd.frame(world.d) or {})   # Y9: measured depth points + camera position
         hw_robot = getattr(world, "hw", None)
