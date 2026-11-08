@@ -130,12 +130,18 @@ def run(seed=0, max_t=900.0, out_dir=None, verbose=False):
     with mock.patch.object(sim_levels, "LevelWorld", build):
         records = run_levels.run(seed, max_t, verbose)
     frames = made[0].frames if made else []
+    write_outputs(out_dir, seed, records, frames)
+    return records, frames
+
+
+def write_outputs(out_dir, seed, records, frames):
+    """The run log (levels-<seed>.jsonl, as run_levels writes it) and frames.json, into out_dir."""
+    out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"levels-{seed}.jsonl").write_text("".join(json.dumps(r, separators=(",", ":")) + "\n"
                                                           for r in records))
     (out_dir / "frames.json").write_text(json.dumps({"seed": seed, "source": "tools/levels_frames.py",
                                                      "frames": frames}, indent=1) + "\n")
-    return records, frames
 
 
 def main(argv=None):

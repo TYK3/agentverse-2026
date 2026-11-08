@@ -3,6 +3,7 @@
 import json
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from tools import levels_frames as lf
@@ -42,7 +43,9 @@ def test_saved_rgbd_round_trips(tmp_path):
 
 def test_the_real_world_captures_from_the_scout_camera_or_says_why_not(tmp_path):
     """A real LevelWorld (sim/scenes/levels.xml). With a GL context, an RGB-D pair is written; without one
-    (CI), the stop is still listed with the reason: both are checked, whichever this machine has."""
+    (no GL), the stop is still listed with the reason: both are checked, whichever this machine has.
+    Needs mujoco (not installed in CI's tools job, as for the real runs in test_run_b2 / test_run_levels)."""
+    pytest.importorskip("mujoco")
     world = lf.frame_world(tmp_path, GOALS)()
     entry = world.capture("B1")
     assert entry["floor"] == "B1" and entry["level"] == "L1" and entry["camera"] == world.camera_name
@@ -59,17 +62,11 @@ def test_the_real_world_captures_from_the_scout_camera_or_says_why_not(tmp_path)
     assert depth.dtype == np.uint16 and (depth > 0).mean() > 0.5
 
 
-def test_frames_json_lists_each_stop(tmp_path, monkeypatch):
-    """run() writes the log and frames.json; the run itself is stubbed here (the real one takes ~25 s)."""
-    def fake_run(seed, max_t, verbose):
-        from sim import levels as sim_levels
-        w = sim_levels.LevelWorld()
-        w.capture("B1")
-        return [{"t": 0.0, "kind": "meta", "seed": seed}, {"t": 1.0, "kind": "leg", "floor": "B1", "reached": True}]
-
-    monkeypatch.setattr(lf.run_levels, "run", fake_run)
-    records, frames = lf.run(seed=3, out_dir=tmp_path)
-    assert [f["floor"] for f in frames] == ["B1"]
-    saved = json.loads((tmp_path / "frames.json").read_text())
-    assert saved["seed"] == 3 and saved["frames"] == frames
-    assert (tmp_path / "levels-3.jsonl").read_text().count("\n") == len(records) == 2
+def test_outputs_are_the_log_and_frames_json(tmp_path):
+    records = [{"t": 0.0, "kind": "meta", "seed": 3}, {"t": 1.0, "kind": "leg", "floor": "B1", "reached": True}]
+    frames = [{"t": 1.0, "floor": "B1", "rgbd": None, "reason": lf.NO_GL}]
+    lf.write_outputs(tmp_path / "out", 3, records, frames)
+    saved = json.loads((tmp_path / "out" / "frames.json").read_text())
+    assert saved == {"seed": 3, "source": "tools/levels_frames.py", "frames": frames}
+    lines = (tmp_path / "out" / "levels-3.jsonl").read_text().splitlines()
+    assert [json.loads(line) for line in lines] == records
