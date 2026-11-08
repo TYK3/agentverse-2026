@@ -4,9 +4,9 @@ On levels.xml the Responder drives east down ramp_r2 (L1 -> ground) with its col
 ramp's full slope. At (2.775, 2.075) the B1 rescue route jogs 45 degrees north-east; along that heading
 the ramp drops less steeply, so a ray still tilted for the old heading dives into ramp_r2 itself and the
 Responder stopped "blocked" there with every supply still carried. The rays must tilt along the heading
-they are cast on. Strict xfail until RAMP-RAY-FIX (sim/responder.py) lands; then drop
-the marks. The drive test also needs the Responder to leave the ramp at its foot (x 3.5), where on main a
-nose-down ray meets the ground floor and stops it even on a straight run.
+they are cast on (RAMP-RAY-FIX, #425: each ray rides the ground under it). The drive test also needs the
+Responder to leave the ramp at its foot (x 3.5), where before #425 a nose-down ray met the ground floor
+and stopped it even on a straight run.
 """
 
 import math
@@ -19,9 +19,6 @@ from sim.levels import LevelWorld
 # The B1 rescue route's waypoints over ramp_r2 (tools/play.py run_rescue on main): east along y 2.075
 # down the ramp, the 45 degree jog at x 2.775, then east along y 2.175 off the ramp onto the ground floor.
 ROUTE = [(0.5, 2.075), (2.775, 2.075), (2.875, 2.175), (3.9, 2.175)]
-
-
-RAMP_RAY_FIX = pytest.mark.xfail(strict=True, reason="RAMP-RAY-FIX: rays tilted for the old heading hit ramp_r2")
 
 
 @pytest.fixture(scope="module")
@@ -37,7 +34,6 @@ def drive(world, r, seconds=60):
             break
 
 
-@RAMP_RAY_FIX
 def test_turn_on_ramp_r2_is_not_a_block(world):
     r = R.Responder(world.m, world.d, clock=lambda: world.t)
     r.floor_z = 0.6
@@ -54,7 +50,6 @@ def test_turn_on_ramp_r2_is_not_a_block(world):
     assert abs(r.floor_z) < 0.01, f"ended at floor z {r.floor_z:.3f}, not on the ground floor"
 
 
-@RAMP_RAY_FIX
 def test_ray_tilt_follows_the_heading_it_is_cast_on(world):
     """Mid-ramp, facing east at ramp slope: the way north-east is clear (the ramp under it is no block)."""
     r = R.Responder(world.m, world.d, clock=lambda: world.t)
