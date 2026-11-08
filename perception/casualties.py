@@ -22,6 +22,13 @@ sim's casualty marker colour; a real robot would run a local person detector her
 only if it is in the same direction as the thermal peak (within AGREE_DEG) and big enough; lying
 (wider than tall) scores 1.0, otherwise 0.7. A red object with no heat behind it (the Responder's
 first aid kit) does not count. So thermal + sound + camera agreeing reach >= 0.8 with Gemini off.
+Per floor (FIND-FLOOR-FIX): in a multi-level scene the casualties on B1 and B3 can be 0.1 m apart in plan
+view. Every frame is fused in the context of the Scout's floor (its height binned by FLOOR_H; a ramp frame
+goes to the nearest floor), tracks only match within their floor, and a casualty's z is that floor's height
+(LEVEL_RIDE above it), so a find never names a ramp height or another floor. Sound passes through floors and
+a frame carries one bearing that may come from another floor's casualty, so a crossing of a sound ray with a
+thermal ray is kept only if it lands within MERGE of a thermal LiDAR point on this floor (thermal needs line
+of sight, so those points are this floor's). Thermal-thermal crossings are kept as before.
 """
 
 import json
@@ -41,6 +48,9 @@ AVERAGE = 5           # acoustic samples in the moving average
 BASELINE = 1.0        # metres between two Scout poses before their rays are intersected
 MIN_ANGLE = math.radians(30.0)   # rays crossing at a shallower angle amplify bearing noise
 MERGE = 0.6           # metres: points this close are the same casualty
+FLOOR_H = 0.6         # metres between floors in the multi-level scene (sim/scenes/levels.xml)
+LEVEL_RIDE = 0.075    # the Scout's sensor height above the floor (sim.levels RIDE)
+ON_FLOOR = 0.02       # metres: a sensor height this close to a floor's is on that floor, not a ramp
 VISION_PERIOD = 1.0   # seconds between vision calls
 VITALS = {"breathing_rate": 14, "simulated": True}
 CAM_FOVY = math.radians(60.0)   # sim/scenes/backup.xml scout_cam; horizontal FOV follows the frame's aspect
@@ -117,11 +127,8 @@ class Casualties:
         self.vision_on = vision_on if vision_on is not None else (lambda: ask is not None or gem_on())
         self.clock = clock
         self.sound = deque(maxlen=AVERAGE)      # (scene bearing, level)
-        self.thermal_rays = deque(maxlen=100)   # (xy, scene bearing)
-        self.sound_rays = deque(maxlen=100)     # (xy, scene bearing), only loud, averaged samples
-        self.crossings = deque(maxlen=300)      # triangulated points
-        self.points = deque(maxlen=200)         # thermal + LiDAR range points
-        self.found = []                         # [{"pos", "z", "thermal", "sound", "vision", "supported"}]
+        self.floors = {}                        # floor key -> {"thermal_rays", "crossings", "points"}
+        self.found = []                         # [{"pos", "z", "thermal", "sound", "vision", "supported", "floor"}]
         self.last_vision = -math.inf
         self.vision_stand_in = False            # True once vision was skipped (Gemini off): flag it
         self.suggested = False                  # the last frame had a thermal or sound clue
@@ -135,6 +142,10 @@ class Casualties:
         pos, yaw = data["pose"]["pos"], data["pose"].get("yaw", 0.0)
         xy = tuple(pos[:2])
         thermal_score = sound_score = 0.0
+        floor, z = floor_of(pos[2])
+        ctx = self._ctx = self.floors.setdefault(floor, {
+            "thermal_rays": deque(maxlen=100), "sound_rays": deque(maxlen=100),
+            "crossings": deque(maxlen=300), "points": deque(maxlen=200)})
 
         hot = thermal_region(data["thermal"]) if data.get("thermal") else None
         self.thermal_rel = None
@@ -143,11 +154,12 @@ class Casualties:
             thermal_score = min(1.0, (peak - BACKGROUND) / (0.8 - BACKGROUND))
             self.thermal_rel = column_bearing(col, len(data["thermal"][0]))
             bearing = wrap(yaw + self.thermal_rel)
-            self._cross((xy, bearing), list(self.thermal_rays) + list(self.sound_rays))
-            self.thermal_rays.append((xy, bearing))
+            self._cross(ctx, (xy, bearing), list(ctx["thermal_rays"]))
+            self._cross(ctx, (xy, bearing), list(ctx["sound_rays"]), seen=True)
+            ctx["thermal_rays"].append((xy, bearing))
             r = _range_at(data.get("lidar"), bearing)
             if r is not None and r < THERMAL_MAX_RANGE:
-                self.points.append((xy[0] + r * math.cos(bearing), xy[1] + r * math.sin(bearing)))
+                ctx["points"].append((xy[0] + r * math.cos(bearing), xy[1] + r * math.sin(bearing)))
 
         ac = data.get("acoustic")
         if ac:
@@ -158,17 +170,22 @@ class Casualties:
                 if level >= SOUND_FULL:      # faint sound bearings are too noisy to triangulate
                     bearing = math.atan2(sum(math.sin(b) for b, _ in self.sound),
                                          sum(math.cos(b) for b, _ in self.sound))
-                    self._cross((xy, bearing), list(self.thermal_rays))
-                    self.sound_rays.append((xy, bearing))
+                    self._cross(ctx, (xy, bearing), list(ctx["thermal_rays"]), seen=True)
+                    ctx["sound_rays"].append((xy, bearing))
 
         self.suggested = bool(thermal_score or sound_score)
-        estimate = self._estimate()
+        estimate = self._estimate(ctx)
         if estimate is None:
             return False
-        changed = self._update(estimate, pos[2], thermal_score, sound_score, supported=bool(self.crossings))
-        return self._local_vision(data, estimate) or changed
+        changed = self._update(estimate, z, thermal_score, sound_score, supported=bool(ctx["crossings"]), floor=floor)
+        return self._local_vision(data, estimate, floor) or changed
 
-    def _local_vision(self, data, estimate):
+    @property
+    def crossings(self):
+        """Triangulated points on the floor of the last frame."""
+        return self._ctx["crossings"] if getattr(self, "_ctx", None) else deque()
+
+    def _local_vision(self, data, estimate, floor=None):
         """Offline camera check (Z3), only while Gemini vision is off; True if a casualty's score rose."""
         camera = data.get("camera")
         vision_on = self.vision_on() if callable(self.vision_on) else bool(self.vision_on)
@@ -179,7 +196,8 @@ class Casualties:
         score = local_person(camera["b64"] if isinstance(camera, dict) else camera, self.thermal_rel)
         if not score:
             return False
-        c = min(self.found, key=lambda f: math.dist(f["pos"], estimate), default=None)
+        here = [f for f in self.found if f.get("floor", floor) == floor]
+        c = min(here, key=lambda f: math.dist(f["pos"], estimate), default=None)
         if c is None or math.dist(c["pos"], estimate) >= MERGE or score <= c["vision"]:
             return False
         c["vision"] = score
@@ -229,37 +247,40 @@ class Casualties:
             changed = self.on_vision(answer) or changed
         return changed
 
-    def _cross(self, ray, others):
-        """Triangulate a new ray against stored rays from Scout poses at least BASELINE away."""
+    def _cross(self, ctx, ray, others, seen=False):
+        """Triangulate a new ray against stored rays (same floor) from Scout poses at least BASELINE away.
+        `seen`: a sound-thermal pair, kept only near a thermal LiDAR point on this floor (sound passes floors)."""
         p, a = ray
         for q, b in others:
             if math.dist(p, q) >= BASELINE:
                 x = intersect(p, a, q, b)
-                if x:
-                    self.crossings.append(x)
+                if x and (not seen or any(math.dist(x, pt) < MERGE for pt in ctx["points"])):
+                    ctx["crossings"].append(x)
 
-    def _estimate(self):
-        """Median triangulated point, else median thermal point, else None."""
-        pts = list(self.crossings) or list(self.points)
+    @staticmethod
+    def _estimate(ctx):
+        """Median triangulated point on this floor, else its median thermal point, else None."""
+        pts = list(ctx["crossings"]) or list(ctx["points"])
         if not pts:
             return None
         return (statistics.median(x for x, _ in pts), statistics.median(y for _, y in pts))
 
-    def _update(self, xy, z, thermal, sound, supported=True):
+    def _update(self, xy, z, thermal, sound, supported=True, floor=None):
         """Fold one estimate into the tracks; True if map/casualties changed.
 
         Supported (triangulated) estimates merge into the supported track within MERGE, else take over
         the provisional track, else start a new one. Unsupported estimates only ever move the single
         provisional track: the median thermal point drifting is one hypothesis moving, not a new casualty.
         """
-        provisional = next((c for c in self.found if not c.get("supported", True)), None)
+        here = [c for c in self.found if c.get("floor", floor) == floor]   # tracks on this floor only
+        provisional = next((c for c in here if not c.get("supported", True)), None)
         target = None
         if supported:
-            target = next((c for c in self.found if c.get("supported", True) and math.dist(c["pos"], xy) < MERGE),
+            target = next((c for c in here if c.get("supported", True) and math.dist(c["pos"], xy) < MERGE),
                           None) or provisional
         elif provisional is not None:
             target = provisional
-        elif any(math.dist(c["pos"], xy) < MERGE for c in self.found):
+        elif any(math.dist(c["pos"], xy) < MERGE for c in here):
             return False      # a stray thermal point beside a supported casualty: nothing new
         if target is not None:
             before = self._entry(target, 0)
@@ -272,7 +293,7 @@ class Casualties:
         if thermal == 0:
             return False      # sound alone gives a bearing, not a place
         self.found.append({"pos": xy, "z": z, "thermal": thermal, "sound": sound, "vision": 0.0,
-                           "supported": supported})
+                           "supported": supported, "floor": floor})
         return True
 
     @staticmethod
@@ -285,6 +306,14 @@ class Casualties:
     def message(self):
         """The map/casualties list, exactly the contract shape."""
         return [self._entry(c, n) for n, c in enumerate(self.found)]
+
+
+def floor_of(z):
+    """(floor key, find height) for a Scout sensor height: the nearest floor, and its height if the Scout
+    is on a ramp (so a find always names a floor), else the measured height unchanged."""
+    key = round((z - LEVEL_RIDE) / FLOOR_H)
+    floor_z = key * FLOOR_H + LEVEL_RIDE
+    return key, (z if abs(z - floor_z) < ON_FLOOR else floor_z)
 
 
 def _range_at(lidar, bearing):
