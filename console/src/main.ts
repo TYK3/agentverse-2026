@@ -11,6 +11,7 @@ import {
   type RouteVerifiedPayload,
   type WorldChangePayload
 } from './map';
+import { setupInterior } from './interior';
 import { setupPanels } from './panels';
 import { setupHardwarePanel } from './hardware';
 
@@ -111,6 +112,8 @@ setupPanels();
 
 // Setup robot hardware specification panel (Y7c)
 setupHardwarePanel();
+
+setupInterior(mapViewer);
 
 // Initial boot
 if (isFakeMode) {
