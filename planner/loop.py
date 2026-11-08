@@ -432,6 +432,8 @@ class Loop:
         """operator/command -> a mission. The local model (or keywords) only reads the goal."""
         text = data["text"]
         low = text.lower().strip()
+        if low in ("report", "handover report", "generate report"):
+            return  # ReportCollector handles this command; it must not become a navigation goal.
         if low in ("stop", "hold"):
             await self.cancel_request("operator stopped the mission")
             self.verified_route = None
