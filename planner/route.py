@@ -118,7 +118,8 @@ def find_route(map_cells: dict, hazards: list[dict], start: Cell, goal: Cell) ->
     5 per cell within 0.15 m of one (X1: predicted failures are avoided before
     the aftershock, and entering one goes to the human gate). Missing,
     inferred, unknown, occupied and collapsed cells, and hazards marked
-    "blocked" (physics-rejected), are never traversed. The route includes
+    "blocked" (physics-rejected) or "exclusion" (L5: debris motion sensed
+    nearby), are never traversed. The route includes
     both start and goal. No Gemini call or physics claim is made.
     """
     start, goal = _cell(start), _cell(goal)
@@ -130,8 +131,8 @@ def find_route(map_cells: dict, hazards: list[dict], start: Cell, goal: Cell) ->
             raise ValueError("invalid hazard status")
         if hazard["status"] != "stable":
             blocked.add(cell)                     # never a re-look target
-        if hazard["status"] == "collapsed" or hazard.get("blocked") is True:
-            impassable.add(cell)                  # collapsed, or rejected by the physics check
+        if hazard["status"] == "collapsed" or hazard.get("blocked") is True or hazard.get("exclusion") is True:
+            impassable.add(cell)                  # collapsed, rejected by the physics check, or a keep-out zone
         elif hazard["status"] == "at_risk":
             risky.add(cell)
     safe = {
