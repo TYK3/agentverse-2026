@@ -67,7 +67,8 @@ STEPS = (
 
 # ---- scene -------------------------------------------------------------------------------------
 def scene_with_slab(out_dir):
-    """Path of a copy of levels.xml with one parked spare slab body 'x1' (no collisions, gravity off)."""
+    """Path of a fresh per-run copy of levels.xml in out_dir with one parked spare slab body 'x1' (no collisions,
+    gravity off); removed at exit."""
     from sim.levels import LEVELS
 
     xml = LEVELS.read_text(encoding="utf-8")
@@ -78,8 +79,16 @@ def scene_with_slab(out_dir):
     xml, n = re.subn(r"\s*</worldbody>", "\n" + slab, xml, count=1)
     if n != 1:
         raise ValueError("levels.xml has no </worldbody>")
-    out = pathlib.Path(out_dir) / "levels_with_slab.xml"
-    out.write_text(xml, encoding="utf-8")
+    # one file per run, so parallel runs sharing out_dir don't overwrite each other's scene
+    import atexit
+    import os
+    import tempfile
+
+    fd, name = tempfile.mkstemp(prefix="levels_with_slab-", suffix=".xml", dir=out_dir)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(xml)
+    out = pathlib.Path(name)
+    atexit.register(out.unlink, missing_ok=True)
     return out
 
 
