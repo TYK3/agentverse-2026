@@ -13,6 +13,7 @@ import {
 } from './map';
 import { setupPanels } from './panels';
 import { setupHardwarePanel } from './hardware';
+import { setupDemoAssets } from './assets';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);
@@ -111,6 +112,9 @@ setupPanels();
 
 // Setup robot hardware specification panel (Y7c)
 setupHardwarePanel();
+
+// Free 3D assets: tower model, robot models, HDRI lighting, credits card (A1)
+setupDemoAssets(mapViewer);
 
 // Initial boot
 if (isFakeMode) {
