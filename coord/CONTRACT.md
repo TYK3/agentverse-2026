@@ -84,6 +84,24 @@ run started. These are first drafts: the owning lane refines them by PR.
   "stand_ins":[]}`. The hub publishes `coord.gem.status()` every 2 s once T26 is available; it
   makes no model calls. Until T26 merges, the publisher is skipped with a logged warning.
 
+## Triage supply choices (Y3, e2e-15)
+
+`casualty/triage` is produced by perception and consumed by planner, console and
+report collectors. Its payload is `{"id":"c1","injuries":["reported symptom"],
+"recommended_action":"water"}`. The accepted item is one of `water`,
+`first_aid_kit`, `radio`, `bandage`, `splint`, or `thermal_blanket`; no extra
+fields are allowed. The fixture is a development example, not a live assessment.
+
+Perception publishes this choice after the required triage approval, or after
+its existing automatic assessment accepts the supply choice. A pending or denied
+human triage review publishes no accepted choice. The human triage gate selects
+a supply; its `route: "none"` is not a movement permission. The planner waits for
+the accepted choice, constructs a real route to the casualty, verifies it through
+physics, and applies the confidence, risky-move and move-permit gates before
+dispatching `move`, `place_supply`, `release` with that route ID. Perception
+never publishes a physical `responder/action` in response to a triage answer.
+This assessment contains estimates, not a diagnosis or proof of treatment.
+
 ## G1 Gemini receipts
 
 `gemini/receipt` has `id` (unique `gem-...` invocation ID), `schema_version: 1`,
