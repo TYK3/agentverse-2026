@@ -6,10 +6,11 @@
 The Scout starts on L1 and finds its own way down to casualty c2 in basement B2 (L1 -> ground -> B1 -> B2
 on ramps R2, R1, R3) with the same closed loop as sim.demo_descent: LevelWorld physics (height only from
 the floor under it), the multi-level map (perception.levels) and the multi-level A* (planner.levels).
-Nothing about the route is scripted. The runner adds one unscripted change: once the Scout is in B2 and
-driving its route to c2 (a route the planner found to the goal, not an explore path), a slab lands on it
-SHIFT_AHEAD ahead of the Scout. Not on an explore path: there it can land in the only passage (R3's
-foot, seen in a run) and test a dead end instead of a stop and recheck. Then it checks that:
+Nothing about the route is scripted. The runner adds one unscripted change: once the Scout is on the
+target floor and driving its way to the casualty (an "ok" route to it, or an explore path ending within
+NEAR_GOAL of it: on B1 c1 stays unknown until close, so every plan there is explore), a slab lands on it
+SHIFT_AHEAD ahead of the Scout. Not on any other explore path: there it can land in the only passage
+(R3's foot, seen in a run) and test a dead end instead of a stop and recheck. Then it checks that:
   - the Scout stops short of the slab (stops or re-plans within STOP_WINDOW; never driven through),
   - the slab gets into the map from what the Scout measured (LiDAR hits or a refused step), not from
     sim truth,
@@ -20,10 +21,12 @@ foot, seen in a run) and test a dead end instead of a stop and recheck. Then it 
 The slab is a spare free body added to a copy of sim/scenes/levels.xml under runs/ (the sim's scene
 files are not edited) and placed on the B2 floor by this runner; World.add_block assumes ground at z 0.
 
-runs/b2-<seed>.jsonl: one record per line {"t": sim seconds, "kind": ..., ...}: "pose" (1 Hz),
-"level" (each level reached), "plan" (each re-plan: status, why, target), "shift", "step" (each
-check, ok or FAIL) and "summary". evaluate() turns the records into the verdict, so the same log
-always gives the same result. Exit 0 only if every step passed.
+runs/b2-<seed>.jsonl: one record per line {"t": sim seconds, "kind": ..., ...}: "pose" (every 0.1 s tick),
+"level" (each level reached), "plan" (each re-plan: status, why, target), "shift", "relook" (after a
+hit, before the next plan: a fresh scan where the Scout stands, cause "blocked" or "refused", and how
+many cells that scan updated), "step" (each check, ok or FAIL) and "summary". The summary record and
+the verdict record each carry `seed`, the value passed to run(). evaluate() turns the records into the
+verdict, so the same log always gives the same result. Exit 0 only if every step passed.
 """
 
 import argparse
@@ -46,6 +49,7 @@ CASUALTY = {"B1": "c1", "B2": "c2", "B3": "c3"}
 SLAB_HALF = (0.12, 0.12, 0.05)     # metres: a 0.24 m x 0.24 m x 0.1 m slab
 SHIFT_AHEAD = 0.3                  # metres along the route to c2 ahead of the Scout
 MIN_LEFT = 0.6                     # only shift if this much of that route is left (room to go round)
+NEAR_GOAL = 0.75                   # an explore path ending this close to the casualty counts as its route
 MAX_JUMP = 0.035                   # metres per 0.1 s tick: 0.3 m/s plus a ramp's rise
 STOP_WINDOW = 3.0                  # sim seconds after the shift for the Scout to stop or turn away
 
@@ -102,6 +106,18 @@ def footprint(xy, margin=0.0):
     sx, sy = SLAB_HALF[0] + margin, SLAB_HALF[1] + margin
     return {(i, j) for i in range(math.floor((xy[0] - sx) / RES), math.floor((xy[0] + sx) / RES) + 1)
             for j in range(math.floor((xy[1] - sy) / RES), math.floor((xy[1] + sy) / RES) + 1)}
+
+
+def toward_casualty(plan, goal):
+    """True if the plan is the way to the casualty: an "ok" route to it, or an "explore" path whose end is
+    within NEAR_GOAL of it. On B1 c1's cell stays unknown until the Scout is almost there, so every plan is
+    "explore"; an explore path elsewhere (R3's foot on B2, say) could land the slab in the only passage."""
+    if plan["status"] == "ok":
+        return True
+    if plan["status"] != "explore" or not plan["cells"]:
+        return False
+    end = plan["cells"][-1]
+    return math.dist(((end[0] + 0.5) * RES, (end[1] + 0.5) * RES), goal[:2]) < NEAR_GOAL
 
 
 def point_ahead(cells, here, ahead=SHIFT_AHEAD):
@@ -195,6 +211,44 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
         if verbose and kind not in ("pose",):
             print(json.dumps(r)[:160])
 
+    def apply_sensors(msg):
+        """One GridLevels update, the same call as the SCAN_EVERY path. Returns how many cells changed."""
+        before = {c: (v["state"], v["occupied"], v["source"]) for c, v in gl.cells.items()}
+        gl.add_sensors(msg)
+        updated = sum(1 for c, v in gl.cells.items()
+                      if before.get(c) != (v["state"], v["occupied"], v["source"]))
+        updated += sum(1 for c in before if c not in gl.cells)
+        return updated
+
+    def grid_snap():
+        cells = {c: (v["state"], v["occupied"], v["source"]) for c, v in gl.cells.items()}
+        return cells, list(gl.poses), dict(gl.trail), set(gl.changed)
+
+    def grid_restore(snap):
+        cells, poses, trail, changed = snap
+        gl.cells.clear()
+        gl.cells.update({c: {"state": state, "occupied": occupied, "source": source}
+                         for c, (state, occupied, source) in cells.items()})
+        gl.poses = list(poses)
+        gl.trail.clear()
+        gl.trail.update(trail)
+        gl.changed = set(changed)
+
+    def slab_mapped():
+        """(sources, hit cause or None, cell count) when the slab is occupied in the map, else None.
+
+        A hit cause is refused, collision, contact or bump. LiDAR alone is the mapped update, not a hit.
+        """
+        if shift is None or mapped_done:
+            return None
+        hit = [(c, v["source"]) for c, v in gl.cells.items()
+               if v["occupied"] and (c[0], c[1]) in shift["area"] and abs(c[2] - shift["k"]) <= 3]
+        if not hit:
+            return None
+        sources = sorted({s for _, s in hit})
+        cause = next((s for s in ("refused", "collision", "contact", "bump") if s in sources), None)
+        return sources, cause, len(hit)
+
     rec("level", level=w.level())
     last_level = w.level()
     probing, plan, frame, next_pose = None, None, 0, 0.0
@@ -202,18 +256,47 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
     while w.t < max_t:
         stopped = w.state != "moving"
         frame += 1
-        if stopped or frame % SCAN_EVERY == 0:
-            gl.add_sensors(w.sensors_message(camera=False))
-        if shift and not mapped_done:
-            hit = [(c, v["source"]) for c, v in gl.cells.items()
-                   if v["occupied"] and (c[0], c[1]) in shift["area"] and abs(c[2] - shift["k"]) <= 3]
-            if hit:
-                rec("mapped", cells=len(hit), sources=sorted({s for _, s in hit}))
-                mapped_done = True
-        if w.t >= next_pose:
+        pose_due = w.t >= next_pose
+        blocked_hit = pose_due and w.state == "blocked"
+        need_scan = stopped or frame % SCAN_EVERY == 0
+        seeking = shift is not None and not mapped_done
+        # One sensor read per scan frame. On a hit, keep it out of the map until the hit is logged:
+        # the relook below is the GridLevels update the next find_route snapshot includes.
+        msg = None
+        mapped = None
+        if need_scan and (seeking or blocked_hit):
+            msg = w.sensors_message(camera=False)
+            if seeking:
+                snap = grid_snap()
+                apply_sensors(msg)
+                mapped = slab_mapped()
+                grid_restore(snap)
+        elif need_scan:
+            apply_sensors(w.sensors_message(camera=False))
+        elif seeking:
+            mapped = slab_mapped()
+        mapped_cause = None
+        if mapped is not None:
+            sources, mapped_cause, n_cells = mapped
+            rec("mapped", cells=n_cells, sources=sources)
+            mapped_done = True
+        # A moving pose means the Scout has moved on, so a mapped hit is re-scanned before that record.
+        if mapped_cause and pose_due and w.state == "moving":
+            if msg is None:
+                msg = w.sensors_message(camera=False)
+            rec("relook", cause=mapped_cause, cells=apply_sensors(msg))
+            msg = None
+            mapped_cause = None
+        if pose_due:
             rec("pose", pos=[round(float(v), 3) for v in w.pos], state=w.state, level=w.level(),
                 cell=cell(w.pos[0], w.pos[1], w.floor_z))
-            next_pose += 1.0
+            next_pose = round(w.t + DT, 6)   # next tick; += 0.1 drifts off World.tick's clock
+        if blocked_hit or mapped_cause:
+            if msg is None:
+                msg = w.sensors_message(camera=False)
+            rec("relook", cause="blocked" if blocked_hit else mapped_cause, cells=apply_sensors(msg))
+        elif msg is not None:
+            apply_sensors(msg)
         if stopped:
             here = w.pos
             if math.hypot(here[0] - goal[0], here[1] - goal[1]) < 0.15 and w.level() == floor:
@@ -245,7 +328,7 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
             w.goto({"target": target, "reason": f"b2 {why}"})
         # The unscripted change: once, on the target floor, on the route the Scout is driving.
         if (shift is None and w.level() == floor and w.state == "moving" and plan
-                and plan["status"] == "ok" and len(plan["cells"]) > 2):
+                and len(plan["cells"]) > 2 and toward_casualty(plan, goal)):
             xy = point_ahead(plan["cells"], w.pos[:2])
             if xy is not None:
                 drop_slab(w, xy, w.floor_z)
@@ -265,13 +348,14 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
     route = find_route(final, [], cell(start[1], start[2], start[3] - 0.075), cell(here[0], here[1], w.floor_z))
     ks = [c[2] for c in route.get("cells", [])]
     rec("summary", floor=floor, reached=reached, final_pos=[round(float(v), 3) for v in here], final_level=w.level(),
-        max_jump=round(max_jump(w.trace), 4), route=route["status"], route_k=[max(ks), min(ks)] if ks else None)
+        max_jump=round(max_jump(w.trace), 4), route=route["status"], route_k=[max(ks), min(ks)] if ks else None,
+        seed=seed)
     path = out_dir / f"{floor.lower()}-{seed}.jsonl"
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(json.dumps(r) + "\n" for r in records)
     verdict = evaluate(records)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"t": round(w.t, 2), "kind": "verdict", **verdict}) + "\n")
+        f.write(json.dumps({"t": round(w.t, 2), "kind": "verdict", **verdict, "seed": seed}) + "\n")
     return verdict, path
 
 

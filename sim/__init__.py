@@ -10,12 +10,26 @@ from sim.world import World
 
 RATE_HZ = 10
 RGBD_EVERY = 5   # ticks between depth frames: 2 Hz of sensors/scout.points (Y9)
+CLOCKS = ("wall", "step")
 log = logging.getLogger("sim")
 
 
+def clock():
+    """SIM_CLOCK=wall (default): pace ticks to real time. step: fixed dt, no wall-clock wait."""
+    name = os.environ.get("SIM_CLOCK", "wall").strip().lower() or "wall"
+    if name not in CLOCKS:
+        raise ValueError(f"SIM_CLOCK={name!r}: expected one of {', '.join(CLOCKS)}")
+    return name
+
+
 async def run(world, bus, rate_hz=RATE_HZ):
-    """Tick the world in real time; publish its events and sensors/scout at rate_hz."""
+    """Tick the world; publish its events and sensors/scout at rate_hz of sim time.
+
+    With SIM_CLOCK=step each tick advances exactly dt and only yields to the other lanes, so a run
+    no longer depends on how busy the machine is; the default keeps the real-time pace.
+    """
     dt = 1.0 / rate_hz
+    step = clock() == "step"
     while True:
         started = time.monotonic()
         if world.responder is not None:
@@ -39,7 +53,7 @@ async def run(world, bus, rate_hz=RATE_HZ):
                 await bus.publish(topic, data)
             except Exception:  # a rejected message must not stop the world
                 log.exception("publish %s failed", topic)
-        await asyncio.sleep(max(0.0, dt - (time.monotonic() - started)))
+        await asyncio.sleep(0.0 if step else max(0.0, dt - (time.monotonic() - started)))
 
 
 def _walls(world):

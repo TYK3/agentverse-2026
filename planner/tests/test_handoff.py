@@ -161,6 +161,29 @@ def test_responder_blocked_resplits_to_the_scout_and_retries_after_a_rescan():
     assert w.handoff_logs("requeued") and w.handoff_logs("skipped")
 
 
+def test_a_shift_freeze_does_not_use_up_a_try():
+    """#52 E2E: the aftershock shift revokes the permit and freezes the Responder (T13 re-plans).
+    That is the world changing, not the Responder failing, so it must not cost c1 a try: the first
+    real collision-ray block after it is try 1 of MAX_ATTEMPTS, not the last one."""
+    async def go():
+        w = await World().start()
+        await w.bus.publish("map/casualties", [casualty()])
+        await w.bus.publish("log/decision", sim_log(
+            "frozen", "move permit for r1 revoked (revoked: LiDAR hit inside the route at 1 cell(s)): "
+                      "stopped, dropped 3 queued action(s)"))
+        frozen_attempts = w.handoff.attempts["c1"]
+        w.handoff.blocked_at -= H.RETRY_AFTER_S
+        await w.bus.publish("map/cells", map_cells())                 # re-scanned: retry
+        await w.bus.publish("log/decision", sim_log("blocked", "collision ray: block ahead on route r2, stopped"))
+        return w, frozen_attempts
+
+    w, frozen_attempts = run(go())
+    assert frozen_attempts == 0, "the shift freeze gave the try back"
+    assert w.handoff.attempts["c1"] == 1
+    assert "c1" not in w.handoff.skipped, "one real block after a shift is not MAX_ATTEMPTS"
+    assert len(w.handoff_logs("requeued")) == 2 and not w.handoff_logs("skipped")
+
+
 def test_scout_blocked_is_left_to_the_explorer_and_noted_once():
     """No competing scout/goto (in a real-lane run one alternated with the Explorer every tick)."""
     async def go():

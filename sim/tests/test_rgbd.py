@@ -60,9 +60,20 @@ def test_robots_are_not_in_the_cloud(world):
     world.tick(0.1)
     pts = np.array(camera(world, noise=0).frame(world.d)["points"])
     rx, ry = -0.5, -1.77
-    # chassis height only: the supplies riding on its deck (z > 0.1) are ordinary objects and stay visible
     inside = (np.abs(pts[:, 0] - rx) < 0.07) & (np.abs(pts[:, 1] - ry) < 0.16) & (pts[:, 2] > 0.01) & (pts[:, 2] < 0.095)
     assert not inside.any(), "the Responder's body (group 3) is hidden from the depth camera"
+
+
+def test_cargo_on_the_responder_is_not_in_the_cloud(world):
+    # The supplies stacked on its deck (up to ~0.22 m) are what it carries (group 3). Seen over floor the
+    # LiDAR passes through the chassis to, they read as a slab floating over open floor: a false overhang
+    # that revoked every route next to the Responder in #52's seed-4 run.
+    world._set_pose((-0.5, -1.3), -math.pi / 2)
+    world.tick(0.1)
+    pts = np.array(camera(world, noise=0).frame(world.d)["points"])
+    rx, ry = -0.5, -1.77
+    deck = (np.abs(pts[:, 0] - rx) < 0.07) & (np.abs(pts[:, 1] - ry) < 0.16) & (pts[:, 2] > 0.095)
+    assert not deck.any(), f"{deck.sum()} depth points on the Responder's cargo"
 
 
 def test_noise_is_small_and_repeatable(world):

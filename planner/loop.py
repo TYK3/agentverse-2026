@@ -14,6 +14,7 @@ import re
 import time
 
 from planner.paramedic import is_report_command
+from planner.permit import RELOOK_EVERY_S
 from planner.route import RoutePlanner
 from planner.supply import KIT
 
@@ -24,6 +25,7 @@ REVIEW_TIMEOUT_S = 5.0
 GATE_TIMEOUT_S = 60.0
 REPLAN_EVERY_S = 1.0  # while waiting for a re-scan, try a new route at most once a second
 MODEL = "local-astar"
+PERMIT_RELOOK = "re-look to re-earn move permission"  # planner/permit.py scout/goto reason prefix
 
 
 def gate_outcome(confidence: float) -> str:
@@ -78,6 +80,8 @@ class Loop:
         self.verified_route: str | None = None
         self.review = "not run"
         self._n = {"d": 0, "g": 0}
+        self.permit_relook: tuple[str, float] | None = None  # (route, when) of permit.py's pending re-look
+        self.last_route: str | None = None  # id of the last route proposed; only its re-look holds the goal one
 
     # ---- wiring -------------------------------------------------------------------------------
 
@@ -85,7 +89,9 @@ class Loop:
         for topic, fn in (("route/verified", self.on_verified), ("world/change", self.on_world_change),
                           ("map/cells", self.on_map), ("map/hazards", self.on_hazards),
                           ("map/casualties", self.on_casualties), ("gate/answer", self.on_answer),
-                          ("status/link", self.on_link), ("operator/command", self.on_command)):
+                          ("status/link", self.on_link), ("operator/command", self.on_command),
+                          ("log/decision", self.on_responder_decision),
+                          ("scout/goto", self.on_scout_goto), ("permit/route", self.on_permit_route)):
             self.bus.subscribe(topic, fn)
         return self
 
@@ -132,6 +138,7 @@ class Loop:
             result = await self.router.propose(m["start"], m["goal"], goal_text=m["goal_text"], publish=False)
         if result["status"] == "ok":
             self.route, self.state, self.waiting_scan = result["proposal"], PROPOSED, None
+            self.last_route = self.route["id"]
             await self.log(why, "proposed", f"route {self.route['id']}: {len(self.route['cells'])} seen cells "
                            f"to {m['goal_text']}, waiting for the physics check")
             # A sim subscriber may answer inside publish(), so register the route first.
@@ -140,8 +147,15 @@ class Loop:
         # No route over seen cells: re-look at the frontier and try again when the map changes.
         self.route, self.state = None, IDLE
         targets = result.get("cells") or [list(m["goal"])]
-        await self.decide("relook", 0.0, f"no route over seen cells ({why}); scanning cell {targets[0]}")
-        await self.goto(targets[0], f"re-look at cell {targets[0]}: no verified route yet")
+        pending = self.permit_relook
+        if pending and pending[0] == self.last_route and self.clock() - pending[1] < RELOOK_EVERY_S:
+            # permit.py sent the Scout to re-scan a revoked route: a goal re-look now would pull it away
+            # before that route is seen again, so the permit could never be re-earned.
+            await self.log(why, "relook", f"no route over seen cells; goal re-look held while the Scout "
+                           f"re-scans revoked route {pending[0]}")
+        else:
+            await self.decide("relook", 0.0, f"no route over seen cells ({why}); scanning cell {targets[0]}")
+            await self.goto(targets[0], f"re-look at cell {targets[0]}: no verified route yet")
         await self.wait_for_scan(self.waiting_scan or "no route over seen cells")  # keep the first trigger
         return result
 
@@ -149,6 +163,15 @@ class Loop:
         res = (self.router.map_cells or {}).get("res", 0.05)
         target = [round((n + 0.5) * res, 3) for n in cell]  # cell centre; cell = floor(pos / res)
         await self.bus.publish("scout/goto", {"target": target, "reason": reason})
+
+    def on_scout_goto(self, data):
+        reason = str(data.get("reason", ""))
+        if reason.startswith(PERMIT_RELOOK):
+            self.permit_relook = (reason[len(PERMIT_RELOOK):].removeprefix(" on route ").strip(), self.clock())
+
+    def on_permit_route(self, data):
+        if data.get("granted") and self.permit_relook and data.get("route") == self.permit_relook[0]:
+            self.permit_relook = None
 
     async def wait_for_scan(self, why):
         self.waiting_scan, self.scan_from_version = why, self.map_version
@@ -395,6 +418,25 @@ class Loop:
         if self.mission_args:
             await self.wait_for_scan(f"{data['kind']} moved {moved}")
             self.last_try = float("-inf")
+
+    async def on_responder_decision(self, data):
+        """sim/responder.py stops on its collision ray and drops the queued place/release; re-plan.
+
+        Only a sim "blocked" naming the route being executed counts; once handled the loop is IDLE,
+        so a repeat or a stale block for an older route is ignored."""
+        if data.get("model") != "sim" or data.get("outcome") != "blocked" or not self.mission_args:
+            return
+        if not self.route or self.state != EXECUTING or not re.search(rf"\broute {re.escape(self.route['id'])}\b", data.get("reason", "")):
+            return
+        old = self.route["id"]
+        start = self.start_cell() if callable(self.start_cell) else None
+        if start is not None:
+            self.mission_args["start"] = tuple(start)   # re-plan from where the Responder stopped
+        self.state, self.route, self.request, self.verified_route = IDLE, None, None, None
+        await self.wait_for_scan(f"Responder blocked on {old}")
+        self.last_try = float("-inf")
+        await self.log(f"Responder blocked on route {old}", "replanning",
+                       "queued place/release were dropped; waiting for the next map update, then a new route")
 
     async def on_map(self, data):
         # The router subscribed to map/cells first (planner.start or start below), so it already merged it.
