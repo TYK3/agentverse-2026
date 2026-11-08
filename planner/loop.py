@@ -77,6 +77,7 @@ class Loop:
         self._gate_timer = None
         self._gate_deadline = None
         self._gate_tasks = set()
+        self._answers_wired = False   # gate/answer is subscribed at the first gate/request
         self.verified_route: str | None = None
         self.review = "not run"
         self._n = {"d": 0, "g": 0}
@@ -88,12 +89,22 @@ class Loop:
     def attach(self):
         for topic, fn in (("route/verified", self.on_verified), ("world/change", self.on_world_change),
                           ("map/cells", self.on_map), ("map/hazards", self.on_hazards),
-                          ("map/casualties", self.on_casualties), ("gate/answer", self.on_answer),
+                          ("map/casualties", self.on_casualties),
                           ("status/link", self.on_link), ("operator/command", self.on_command),
                           ("log/decision", self.on_responder_decision),
                           ("scout/goto", self.on_scout_goto), ("permit/route", self.on_permit_route)):
             self.bus.subscribe(topic, fn)
         return self
+
+    def _listen_for_answers(self):
+        """GATE-ORDER: subscribe to gate/answer at the first gate/request, not at attach.
+
+        The hub awaits a topic's callbacks in subscription order, and on_answer dispatches the move.
+        Subscribing late puts every lane started by then (the sim's Responder, which unlocks a risky
+        route on gate/answer) ahead of the planner, whatever order the lanes were started in."""
+        if not self._answers_wired:
+            self._answers_wired = True
+            self.bus.subscribe("gate/answer", self.on_answer)
 
     def _id(self, kind):
         self._n[kind] += 1
@@ -324,6 +335,7 @@ class Loop:
         await self.decide("refer", conf, why)
         await self.log(why, "refer", f"a human decides on {rid}", physics=physics)
         if self.request:
+            self._listen_for_answers()
             await self.bus.publish("gate/request", dict(self.request))
 
     async def prepare_emergency_call(self, summary):
@@ -338,6 +350,7 @@ class Loop:
         request = dict(self.request)
         self._arm_timeout()
         await self.log(summary, "refer", "emergency message prepared for operator approval; no call placed")
+        self._listen_for_answers()
         await self.bus.publish("gate/request", request)
         return request
 
