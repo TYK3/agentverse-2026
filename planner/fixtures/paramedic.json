@@ -1,0 +1,19 @@
+{
+  "development_example": true,
+  "dialogue": {
+    "c1": {"casualty":"c1","answers":{"hear":"yes","hurt":"yes","breathing":"no","bleeding":"unsure","move":"yes","walk":"no"},"hurt_parts":["arm"]},
+    "c10": {"casualty":"c10","answers":{"hear":"none"},"hurt_parts":[]}
+  },
+  "events": [
+    {"topic":"map/casualties","data":[{"id":"c1","pos":[2,1,0.1],"confidence":0.85,"clues":["thermal","sound"],"vitals":{"breathing_rate":14,"simulated":true}},{"id":"c10","pos":[1,2,1.1],"confidence":0.6,"clues":["sound"],"vitals":{"breathing_rate":16,"simulated":true}}]},
+    {"topic":"route/proposed","data":{"id":"r1","robot":"responder","cells":[[0,0,0],[1,0,0]],"goal":"deliver water to c1","model":"local-astar"}},
+    {"topic":"route/verified","data":{"id":"r1","ok":true,"unstable_cells":[],"detail":"development fixture"}},
+    {"topic":"responder/action","data":{"action":"move","route":"r1","item":"water"}},
+    {"topic":"responder/action","data":{"action":"place_supply","route":"r1","item":"water"}},
+    {"topic":"log/decision","data":{"t":5,"perception":"responder at [0.0, 0.0], move r1","model":"sim","physics":"mujoco","outcome":"act","reason":"following route r1, 2 cells"}},
+    {"topic":"log/decision","data":{"t":6,"perception":"responder at [0.1, 0.0], place_supply water","model":"sim","physics":"mujoco","outcome":"done","reason":"placed water at [0.20, 0.00]"}},
+    {"topic":"route/proposed","data":{"id":"r10","robot":"responder","cells":[[0,0,0]],"goal":"deliver first_aid_kit to c10","model":"local-astar"}},
+    {"topic":"gate/request","data":{"id":"g10","kind":"risky_move","summary":"Low-confidence casualty needs a human review","route":"r10"}},
+    {"topic":"gate/answer","data":{"id":"g10","approved":false,"by":"operator"}}
+  ]
+}
