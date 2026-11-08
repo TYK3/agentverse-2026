@@ -4,6 +4,7 @@ import asyncio
 import time
 
 from perception.casualties import PROMPT, Casualties
+from perception.cloud import Cloud
 from perception.explore import Explorer
 from perception.grid import Grid
 from perception.hazards import Hazards
@@ -16,7 +17,12 @@ _tasks = set()        # keeps the publish loop from being garbage collected
 
 
 async def start(bus):
-    """Map sensors/scout into map/cells (changes at 2 Hz, everything every 5 s) and drive the Scout."""
+    """Map sensors/scout into map/cells (changes at 2 Hz, everything every 5 s) and drive the Scout.
+
+    Hazards come from the Scout's own scans (Z1): depth points (sensors/scout.points) for pile
+    stability before a shake, and the LiDAR scan diff after one. scene/loaded block poses and
+    world/change moved_blocks are sim truth and are not read.
+    """
     grid = Grid()
     explorer = Explorer(grid)
     t0 = time.monotonic()
@@ -39,22 +45,18 @@ async def start(bus):
             _spawn(vision(b64))      # the frame lives only until this call returns
 
     bus.subscribe("sensors/scout", sensors)
-    hazards = Hazards()
+    hazards = Hazards(grid, Cloud(grid.res))
+    bus.subscribe("sensors/scout", hazards.on_sensors)
 
-    async def scene(data):
-        await bus.publish("map/hazards", hazards.on_scene(data))
+    def change(data):
+        hazards.on_change(data)     # timed on the sensors clock, like the scan diff
+        explorer.on_change(data)    # after hazards: it re-visits what was predicted at_risk
 
-    async def change(data):
-        await bus.publish("map/hazards", hazards.on_change(data))
-
-    bus.subscribe("scene/loaded", explorer.on_scene)
-    bus.subscribe("scene/loaded", scene)
     bus.subscribe("world/change", change)
     bus.subscribe("map/hazards", explorer.on_hazards)
-    bus.subscribe("world/change", explorer.on_change)
     bus.subscribe("scout/goto", lambda d: explorer.on_goto(d, now()))
     bus.subscribe("gate/decision", lambda d: explorer.on_decision(d, now()))
-    _spawn(_publish(bus, grid, explorer, casualties, now))
+    _spawn(_publish(bus, grid, explorer, casualties, hazards, now))
     return grid
 
 
@@ -65,8 +67,8 @@ def _spawn(coro):
     return task
 
 
-async def _publish(bus, grid, explorer, casualties, now):
-    tick = 0
+async def _publish(bus, grid, explorer, casualties, hazards, now):
+    tick, diffs = 0, 0
     while True:
         await asyncio.sleep(PERIOD)
         tick += 1
@@ -75,6 +77,13 @@ async def _publish(bus, grid, explorer, casualties, now):
             await bus.publish("map/cells", grid.snapshot(t))
         elif grid.changed:
             await bus.publish("map/cells", grid.delta(t))
+        changed = list(grid.appeared) + list(grid.cleared)
+        if len(changed) != diffs:          # the scan diff found something new: look closer
+            explorer.on_diff(changed[diffs:] if len(changed) > diffs else changed)
+            diffs = len(changed)
+        msg = hazards.update(grid.t)
+        if msg is not None:
+            await bus.publish("map/hazards", msg)
         if casualties.dirty:
             casualties.dirty = False
             await bus.publish("map/casualties", casualties.message())
