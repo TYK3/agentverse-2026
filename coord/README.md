@@ -18,10 +18,22 @@ Missing packages or start hooks are logged and skipped; broken installed depende
 raise rather than silently disabling a lane. Subscriber exceptions are logged while
 other subscribers continue.
 
+The hub starts D1's measured point publisher alongside the lanes. It projects
+only Scout depth `points` and optional `points_from` to browser-read-only
+`map/points {t,res,points,points_from?}`. At most 2048 measured points are kept per
+frame, with actual xyz preserved (including basement heights), deduplicated on
+a 0.05 m voxel grid. The newest pending frame is sent at most twice per second.
+Missing/null points do nothing; an explicit empty batch clears the cloud.
+The source timestamp is preserved when present; recordings without one use
+elapsed time since publisher startup. No image, thermal or acoustic data is copied.
+
 The browser connects to `ws://localhost:8000/ws` using `{ "topic": "...", "data": ... }`.
 Only `operator/command`, `gate/answer` and the offline toggle `status/link` may be sent from the browser. Invalid
 messages close with code 1008 before dispatch. Arrays stay arrays. The latest 200
-forwarded events are replayed in order. This event history is not a map snapshot;
+forwarded events are replayed in order. Point frames use a separate latest-only
+slot: new clients receive only the newest cloud after the event replay, without
+point traffic evicting logs or permits. Scene changes clear pending/reconnect
+clouds. This event history is not a map snapshot;
 perception supplies periodic full snapshots. `sensors/scout` goes only to local
 subscribers and is never retained or forwarded to browsers.
 

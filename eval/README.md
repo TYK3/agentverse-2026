@@ -9,6 +9,20 @@ simulation limit. See `results.csv`, `summary.json`, `safe_success.png` and
 `measured-runtime-sources.zip` preserves their exact source files and backup scene.
 The published driver differs from the measured source only in import ordering.
 
+To reproduce X2's comparison table from that measured dataset, without another
+simulation run:
+
+```sh
+python -m tools.eval_compare --traces eval/measured-traces.zip
+```
+
+`eval/comparison/comparison.md` and `.json` report casualties matched within 0.5 m
+for scoring, reported track IDs, detection/arrival times, unsafe entries, physics checks and
+replans. Missing pairs, mixed source snapshots and incomplete telemetry fail.
+The baseline disables aftershock-triggered invalidation and physics verification;
+its collision stop remains active. This compares bundled policies and does not
+isolate the causal effect of one switch. Non-arrivals have no arrival-time value.
+
 ```sh
 python -m pip install -r requirements.txt -r coord/requirements.txt
 python tools/eval.py --runs 30

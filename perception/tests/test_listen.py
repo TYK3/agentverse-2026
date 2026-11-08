@@ -103,3 +103,44 @@ def test_intersect_and_uncertainty():
     sharp = listen.uncertainty((0, 0), (2, 0), (1, 1), math.radians(90))
     shallow = listen.uncertainty((0, 0), (2, 0), (1, 1), math.radians(20))
     assert shallow > 2 * sharp
+
+
+RELOOK = {"target": [0.2, -0.3, 0.075], "reason": "re-look to re-earn move permission on route r2"}
+
+
+def _listen_until_move_due(lis, pos=(0.6, 0.6)):
+    """Call, hear tapping for one window; returns (t, messages) at the moment the 2nd spot is due."""
+    rng, t, out = np.random.default_rng(1), 0.0, []
+    out += lis.on_sensors(frame(pos, level=0.6, rng=rng), t)        # heard -> call
+    lis.on_goto(RELOOK, 0.5)                                         # the permit planner takes the Scout
+    while t < listen.LISTEN_S + 0.2:
+        t = round(t + 0.1, 1)
+        out += lis.on_sensors(frame(pos, level=0.6, rng=rng), t)
+    return t, out
+
+
+def test_second_spot_waits_for_a_permit_relook_then_goes():
+    lis = listen.Listener()
+    t, out = _listen_until_move_due(lis)
+    assert [topic for topic, _ in out] == ["say"], "no 2nd-spot goto while the re-look has the Scout"
+    assert lis.state == "waiting"
+    assert lis.on_sensors(frame((0.4, 0.2)), t + 1) == []           # still driving to the re-look
+    moved = lis.on_sensors(frame((0.2, -0.3), motion="arrived"), t + 2)   # re-look reached
+    assert [topic for topic, _ in moved] == ["scout/goto"] and moved[0][1]["reason"].startswith(listen.OWN)
+
+
+def test_a_relook_that_never_clears_ends_the_dialogue_without_overriding_it():
+    lis = listen.Listener()
+    t, _ = _listen_until_move_due(lis)
+    for k in range(0, int(listen.WAIT_MAX_S), 8):                    # the permit re-sends its re-look
+        lis.on_goto(RELOOK, t + k)
+        assert lis.on_sensors(frame((0.4, 0.2)), t + k + 0.1) == []
+    out = lis.on_sensors(frame((0.4, 0.2)), t + listen.WAIT_MAX_S + 0.1)
+    assert [topic for topic, _ in out] == ["say"] and out[0][1]["text"] == listen.FOUND
+    assert lis.state == "idle" and all(topic != "scout/goto" for topic, _ in out)
+
+
+def test_its_own_goto_does_not_make_it_wait():
+    lis = listen.Listener()
+    lis.on_goto({"target": [1.0, 1.0, 0.075], "reason": "listen again from a 2nd spot: tapping heard"}, 0.0)
+    assert not lis._scout_busy(0.1)

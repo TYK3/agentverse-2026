@@ -7,6 +7,7 @@ Owns:
 - Cited first aid guidance steps (voice/firstaid.py, voice/firstaid.json)
 - Emergency call report preparation and gate/request publishing (voice/emergency.py)
 - Bounded live casualty contact (G3: voice/contact.py)
+- Spoken approval of the planner's gate: "approve" / "hold" (G7: voice/approve.py)
 
 The hub (coord/hub.py) calls `async def start(bus)` on startup.
 """
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from voice import contact, emergency, firstaid, speak, translate
+from voice import approve, contact, emergency, firstaid, speak, translate
 
 try:
     from voice import intent, operator, typed  # T21 components
@@ -33,8 +34,10 @@ async def start(bus: Any) -> dict[str, Any]:
 
     bus.subscribe("say", _on_say)
     talk = contact.start(bus)  # G3: talks with each located casualty, one at a time
+    approval = approve.attach(bus)  # G7: "approve" / "hold" answers gate/request by voice
     return {
         "contact": talk,
+        "approval": approval,
         "status": "ready",
         "demo_language": translate.DEMO_CASUALTY_LANGUAGE,
         "firstaid_steps_loaded": len(firstaid.get_steps()),
@@ -42,6 +45,7 @@ async def start(bus: Any) -> dict[str, Any]:
 
 
 __all__ = [
+    "approve",
     "contact",
     "emergency",
     "firstaid",

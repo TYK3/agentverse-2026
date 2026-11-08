@@ -89,3 +89,12 @@ Owner: see the owner table in `AGENTS.md`. Only this lane's agent edits files he
   is that point, 0.26 m up), its `depth_cam` for frames, and its footprint for the drive check.
 - The Responder model is the true-scale one, but `sim/responder.py` still uses the small robot's
   dimensions for its collision rays (a follow-up in responder.py).
+## Recording a real run (ref S1)
+- `SIM_RECORD=runs/live.jsonl uvicorn coord.hub:app` writes the run as JSONL, one
+  `{"t": sim s, "wall": s, "topic": ..., "data": ...}` per line (the #52 runner's format): a
+  `record/meta` line, then every contract topic as delivered (`scene/loaded` first, maps, casualties,
+  permits, Gemini receipts, routes, `world/change`, ...), and `sim/truth` after every world tick (10 Hz
+  of sim time): Scout and Responder `pos` [x, y, z] and `yaw`, the Scout's sensor origin and state, the
+  Responder's state and route, true casualty positions, whether the ground is shaking.
+- Camera frames and depth points are dropped from `sensors/scout`; `SIM_RECORD_FULL=1` keeps them.
+- `python -m sim.recorder summary runs/live.jsonl`: topics, counts, sim-time span, truth rate.

@@ -6,7 +6,10 @@ the moment the robots *sense* a change on it, never on sim truth:
 - perception reports a hazard (`at_risk`, `collapsed`, or an L5 exclusion) on a route cell.
 It is re-earned only by fresh observation: every route cell must be crossed by a LiDAR ray that ends
 beyond it (seen free) after the shift, with no new hit and no hazard on the route. There is no timer.
-While revoked, the planner sends the Scout to re-look at the shifted cells.
+While revoked, the planner sends the Scout to re-look: at the shifted cells, else the hazard, else
+the nearest route cell not yet seen free again. The newest revoked route re-sends its re-look every
+RELOOK_EVERY_S until it is re-earned, because other Scout moves (the Explorer's frontiers, L2) can
+take the Scout away before it gets there (#52: a permit was never re-earned and the Responder froze).
 
 Every change goes out as `permit/route` with its evidence list, and as `log/decision` so the
 reasoning panel shows it. `Permits.on_*` return the (topic, payload) pairs to publish.
@@ -21,6 +24,7 @@ RES = 0.05             # perception's grid (cell = floor(coordinate / RES)); rou
 HITS_TO_REVOKE = 2     # LiDAR hits inside the route needed to call it a shift (one can be noise)
 MISS_AT = 6.0          # a LiDAR range at or past this is "no return" (sim/sensors.py MAX_RANGE)
 BAD_HAZARDS = ("at_risk", "collapsed")
+RELOOK_EVERY_S = 8.0   # a revoked route re-sends its re-look this often until it is re-earned
 
 
 def columns(cells) -> list[tuple[int, int]]:
@@ -82,6 +86,7 @@ class Permit:
         self.hazards: dict[tuple[int, int], str] = {}   # column -> why
         self.reseen: set[tuple[int, int]] = set()       # columns seen free since the shift
         self.evidence: list[dict[str, Any]] = []
+        self.relook_at = -math.inf                      # when its last re-look scout/goto went out
 
     def message(self, t: float, reason: str) -> dict[str, Any]:
         return {"route": self.route, "granted": self.granted, "t": round(t, 2), "reason": reason,
@@ -115,7 +120,7 @@ class Permits:
             p.hazards = on_route
             p.evidence.append(_ev("hazard", _hazard_text(on_route), t))
             p.revoked_at = t
-            return self._out(p, t, "a sensed hazard is on the route") + self._relook(p)
+            return self._out(p, t, "a sensed hazard is on the route") + self._relook(p, t)
         p.granted = True
         p.evidence.append(_ev("clear", "no sensed hazard on the route", t))
         return self._out(p, t, "verified and clear")
@@ -164,13 +169,23 @@ class Permits:
                 p.shift.update({c: p.shift.get(c, 0) + h for c, h in inside.items()})
             p.reseen |= (free & p.colset) - set(inside)
             out += self._try_regrant(p, t)
-        return out
+        return out + self._keep_relooking(t, (x0, y0))
+
+    def _keep_relooking(self, t: float, scout_xy) -> list:
+        """The newest revoked route re-sends its re-look until it is re-earned (one route drives the Scout)."""
+        waiting = [p for p in self.permits.values() if p.verified and not p.granted and p.revoked_at is not None]
+        if not waiting:
+            return []
+        p = waiting[-1]
+        if t - p.relook_at < RELOOK_EVERY_S:
+            return []
+        return self._relook(p, t, scout_xy)
 
     # ---- decisions -------------------------------------------------------------------------
     def _revoke(self, p: Permit, t: float, why: dict) -> list:
         p.granted, p.revoked_at, p.reseen = False, t, set()
         p.evidence.append(why)
-        return self._out(p, t, f"revoked: {why['detail']}") + self._relook(p)
+        return self._out(p, t, f"revoked: {why['detail']}") + self._relook(p, t)
 
     def _try_regrant(self, p: Permit, t: float) -> list:
         if p.granted or not p.verified or p.revoked_at is None or p.hazards:
@@ -183,12 +198,19 @@ class Permits:
         p.revoked_at = None
         return self._out(p, t, "re-earned by a fresh scan")
 
-    def _relook(self, p: Permit) -> list:
-        """Send the Scout to look at the first problem cell again."""
+    def _relook(self, p: Permit, t: float, scout_xy=None) -> list:
+        """Send the Scout to look again: the first shifted cell, else the first hazard cell, else the route
+        cell not yet seen free again nearest the Scout."""
         target = sorted(p.shift) or sorted(p.hazards)
-        if not target:
-            return []
-        i, j = target[0]
+        if target:
+            i, j = target[0]
+        else:
+            unseen = [c for c in p.cols if c not in p.reseen]
+            if not unseen:
+                return []
+            sx, sy = scout_xy if scout_xy else ((unseen[0][0] + 0.5) * self.res, (unseen[0][1] + 0.5) * self.res)
+            i, j = min(unseen, key=lambda c: math.hypot((c[0] + 0.5) * self.res - sx, (c[1] + 0.5) * self.res - sy))
+        p.relook_at = t
         return [("scout/goto", {"target": [round((i + 0.5) * self.res, 3), round((j + 0.5) * self.res, 3), 0.075],
                                 "reason": f"re-look to re-earn move permission on route {p.route}"})]
 
