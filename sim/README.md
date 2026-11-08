@@ -66,5 +66,7 @@ Owner: see the owner table in `AGENTS.md`. Only this lane's agent edits files he
 - Aftershock: the loose slabs b26 (leaning on the east wall) and b27 (on the floor-1 ledge, leaning on the
   storey-2 wall) fall into the east room; nothing else moves. The structure, the void slabs and the piers
   are braced to the plate so the voids survive. Loose slabs use friction 0.4 with contact priority and
-  elliptic cones (impratio 10): no creep at rest (0.2 mm in 60 s), and both fall at 0.012-0.018 m.
+  elliptic cones (impratio 10): no creep at rest over 60 s, and both fall at 0.012-0.018 m.
+- Speed: braced pieces are gravity-compensated and do not collide with each other or the plate
+  (collision bits in the generator), so a 0.1 s tick takes about 18 ms (it was 226 ms, slower than real time).
 - Light debris the Responder can clear: b19 (lean-to closure) and b24 (in the breach), both under 2 kg.

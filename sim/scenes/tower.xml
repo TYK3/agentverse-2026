@@ -10,8 +10,14 @@
     <global offwidth="1280" offheight="960"/>
   </visual>
 
+  <!-- Collision bits: braced pieces (contype 2, conaffinity 0) never touch each other or the plate (they are
+       welded anyway; their resting contacts made the scene 2x slower than real time) but everything else
+       (contype 1, conaffinity 3) still hits them. -->
   <default>
-    <geom friction="1 0.005 0.0001"/>
+    <geom friction="1 0.005 0.0001" contype="1" conaffinity="3"/>
+    <default class="braced">
+      <geom contype="2" conaffinity="0"/>
+    </default>
   </default>
 
   <custom>
@@ -35,29 +41,29 @@
       <geom name="floor" type="box" size="4.5 4.5 0.05" pos="0 0 -0.05" density="100" rgba="0.5 0.5 0.5 1"/>
     </body>
 
-    <body name="b1" pos="-2 0 0.5"><freejoint/><geom name="b1_wall" type="box" size="0.05 1.55 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- west -->
-    <body name="b2" pos="0 1.5 0.5"><freejoint/><geom name="b2_wall" type="box" size="1.945 0.05 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- north -->
-    <body name="b3" pos="2 0 0.5"><freejoint/><geom name="b3_wall" type="box" size="0.05 1.55 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- east -->
-    <body name="b4" pos="-1.2725 -1.5 0.5"><freejoint/><geom name="b4_wall" type="box" size="0.6725 0.05 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- south, west of the entrance -->
-    <body name="b5" pos="0.6 -1.5 0.5"><freejoint/><geom name="b5_wall" type="box" size="0.6 0.05 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- south, between entrance and breach -->
-    <body name="b6" pos="1.8225 -1.5 0.5"><freejoint/><geom name="b6_wall" type="box" size="0.1225 0.05 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- south, east of the breach -->
-    <body name="b7" pos="0.4 -0.4725 0.5"><freejoint/><geom name="b7_wall" type="box" size="0.05 0.9725 0.5" rgba="0.75 0.65 0.45 1"/></body>   <!-- interior, south of the door -->
-    <body name="b8" pos="0.4 1.2725 0.5"><freejoint/><geom name="b8_wall" type="box" size="0.05 0.1725 0.5" rgba="0.75 0.65 0.45 1"/></body>   <!-- interior, north of the door -->
-    <body name="b9" pos="-0.575 0 1.052"><freejoint/><geom name="b9_slab" type="box" size="1.475 1.55 0.05" rgba="0.6 0.6 0.62 1"/></body>   <!-- floor 1; juts to x=0.9 over the east room (broken ledge) -->
-    <body name="b10" pos="-2 0 1.604"><freejoint/><geom name="b10_wall" type="box" size="0.05 1.55 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- west -->
-    <body name="b11" pos="-0.8 1.5 1.604"><freejoint/><geom name="b11_wall" type="box" size="1.145 0.05 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- north -->
-    <body name="b12" pos="-0.8 -1.5 1.604"><freejoint/><geom name="b12_wall" type="box" size="1.145 0.05 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- south -->
-    <body name="b13" pos="0.4 0 1.604"><freejoint/><geom name="b13_wall" type="box" size="0.05 1.55 0.5" rgba="0.8 0.7 0.5 1"/></body>   <!-- east face of the standing part -->
-    <body name="b14" pos="-0.8 0 2.156"><freejoint/><geom name="b14_slab" type="box" size="1.25 1.55 0.05" rgba="0.6 0.6 0.62 1"/></body>   <!-- floor 2 -->
-    <body name="b15" pos="-2 0 2.608"><freejoint/><geom name="b15_wall" type="box" size="0.05 1.55 0.4" rgba="0.75 0.65 0.45 1"/></body>   <!-- west -->
-    <body name="b16" pos="-0.8 1.5 2.608"><freejoint/><geom name="b16_wall" type="box" size="1.145 0.05 0.4" rgba="0.75 0.65 0.45 1"/></body>   <!-- north -->
-    <body name="b17" pos="1.425 0.9 0.48" euler="0 -40.6 0"><freejoint/><geom name="b17_slab" type="box" size="0.66 0.5 0.03" rgba="0.6 0.6 0.62 1"/></body>   <!-- lean-to slab over c2, wedged against the east wall -->
-    <body name="b18" pos="1.25 0.33 0.15"><freejoint/><geom name="b18_rubble" type="box" size="0.35 0.06 0.15" density="600" rgba="0.55 0.5 0.45 1"/></body>   <!-- lean-to closure, heavy -->
+    <body name="b1" pos="-2 0 0.5" gravcomp="1"><freejoint/><geom name="b1_wall" type="box" size="0.05 1.55 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- west -->
+    <body name="b2" pos="0 1.5 0.5" gravcomp="1"><freejoint/><geom name="b2_wall" type="box" size="1.945 0.05 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- north -->
+    <body name="b3" pos="2 0 0.5" gravcomp="1"><freejoint/><geom name="b3_wall" type="box" size="0.05 1.55 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- east -->
+    <body name="b4" pos="-1.2725 -1.5 0.5" gravcomp="1"><freejoint/><geom name="b4_wall" type="box" size="0.6725 0.05 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- south, west of the entrance -->
+    <body name="b5" pos="0.6 -1.5 0.5" gravcomp="1"><freejoint/><geom name="b5_wall" type="box" size="0.6 0.05 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- south, between entrance and breach -->
+    <body name="b6" pos="1.8225 -1.5 0.5" gravcomp="1"><freejoint/><geom name="b6_wall" type="box" size="0.1225 0.05 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- south, east of the breach -->
+    <body name="b7" pos="0.4 -0.4725 0.5" gravcomp="1"><freejoint/><geom name="b7_wall" type="box" size="0.05 0.9725 0.5" class="braced" rgba="0.75 0.65 0.45 1"/></body>   <!-- interior, south of the door -->
+    <body name="b8" pos="0.4 1.2725 0.5" gravcomp="1"><freejoint/><geom name="b8_wall" type="box" size="0.05 0.1725 0.5" class="braced" rgba="0.75 0.65 0.45 1"/></body>   <!-- interior, north of the door -->
+    <body name="b9" pos="-0.575 0 1.052" gravcomp="1"><freejoint/><geom name="b9_slab" type="box" size="1.475 1.55 0.05" class="braced" rgba="0.6 0.6 0.62 1"/></body>   <!-- floor 1; juts to x=0.9 over the east room (broken ledge) -->
+    <body name="b10" pos="-2 0 1.604" gravcomp="1"><freejoint/><geom name="b10_wall" type="box" size="0.05 1.55 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- west -->
+    <body name="b11" pos="-0.8 1.5 1.604" gravcomp="1"><freejoint/><geom name="b11_wall" type="box" size="1.145 0.05 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- north -->
+    <body name="b12" pos="-0.8 -1.5 1.604" gravcomp="1"><freejoint/><geom name="b12_wall" type="box" size="1.145 0.05 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- south -->
+    <body name="b13" pos="0.4 0 1.604" gravcomp="1"><freejoint/><geom name="b13_wall" type="box" size="0.05 1.55 0.5" class="braced" rgba="0.8 0.7 0.5 1"/></body>   <!-- east face of the standing part -->
+    <body name="b14" pos="-0.8 0 2.156" gravcomp="1"><freejoint/><geom name="b14_slab" type="box" size="1.25 1.55 0.05" class="braced" rgba="0.6 0.6 0.62 1"/></body>   <!-- floor 2 -->
+    <body name="b15" pos="-2 0 2.608" gravcomp="1"><freejoint/><geom name="b15_wall" type="box" size="0.05 1.55 0.4" class="braced" rgba="0.75 0.65 0.45 1"/></body>   <!-- west -->
+    <body name="b16" pos="-0.8 1.5 2.608" gravcomp="1"><freejoint/><geom name="b16_wall" type="box" size="1.145 0.05 0.4" class="braced" rgba="0.75 0.65 0.45 1"/></body>   <!-- north -->
+    <body name="b17" pos="1.425 0.9 0.48" euler="0 -40.6 0" gravcomp="1"><freejoint/><geom name="b17_slab" type="box" size="0.66 0.5 0.03" class="braced" rgba="0.6 0.6 0.62 1"/></body>   <!-- lean-to slab over c2, wedged against the east wall -->
+    <body name="b18" pos="1.25 0.33 0.15" gravcomp="1"><freejoint/><geom name="b18_rubble" type="box" size="0.35 0.06 0.15" density="600" class="braced" rgba="0.55 0.5 0.45 1"/></body>   <!-- lean-to closure, heavy -->
     <body name="b19" pos="1.7525 0.33 0.125"><freejoint/><geom name="b19_rubble" type="box" size="0.1475 0.06 0.125" mass="1.2" rgba="0.6 0.45 0.35 1"/></body>   <!-- lean-to closure, light (G2): the Responder can clear it -->
-    <body name="b20" pos="0.7 -1.2 0.15"><freejoint/><geom name="b20_rubble" type="box" size="0.08 0.08 0.15" density="600" rgba="0.55 0.5 0.45 1"/></body>   <!-- pier under the pancake slab -->
-    <body name="b21" pos="1.4 -1.2 0.15"><freejoint/><geom name="b21_rubble" type="box" size="0.08 0.08 0.15" density="600" rgba="0.55 0.5 0.45 1"/></body>   <!-- pier under the pancake slab -->
-    <body name="b22" pos="1.05 -0.5 0.15"><freejoint/><geom name="b22_rubble" type="box" size="0.08 0.08 0.15" density="600" rgba="0.55 0.5 0.45 1"/></body>   <!-- pier under the pancake slab -->
-    <body name="b23" pos="1.05 -0.85 0.352"><freejoint/><geom name="b23_slab" type="box" size="0.45 0.45 0.05" rgba="0.6 0.6 0.62 1"/></body>   <!-- pancake slab over c3, on three piers -->
+    <body name="b20" pos="0.7 -1.2 0.15" gravcomp="1"><freejoint/><geom name="b20_rubble" type="box" size="0.08 0.08 0.15" density="600" class="braced" rgba="0.55 0.5 0.45 1"/></body>   <!-- pier under the pancake slab -->
+    <body name="b21" pos="1.4 -1.2 0.15" gravcomp="1"><freejoint/><geom name="b21_rubble" type="box" size="0.08 0.08 0.15" density="600" class="braced" rgba="0.55 0.5 0.45 1"/></body>   <!-- pier under the pancake slab -->
+    <body name="b22" pos="1.05 -0.5 0.15" gravcomp="1"><freejoint/><geom name="b22_rubble" type="box" size="0.08 0.08 0.15" density="600" class="braced" rgba="0.55 0.5 0.45 1"/></body>   <!-- pier under the pancake slab -->
+    <body name="b23" pos="1.05 -0.85 0.352" gravcomp="1"><freejoint/><geom name="b23_slab" type="box" size="0.45 0.45 0.05" class="braced" rgba="0.6 0.6 0.62 1"/></body>   <!-- pancake slab over c3, on three piers -->
     <body name="b24" pos="1.38 -1.48 0.08"><freejoint/><geom name="b24_rubble" type="box" size="0.08 0.12 0.08" mass="1.5" rgba="0.6 0.45 0.35 1"/></body>   <!-- light block in the breach (G1): the Responder can clear it -->
     <body name="b25" pos="2.05 -2 0.04"><freejoint/><geom name="b25_rubble" type="box" size="0.3 0.1 0.04" density="600" rgba="0.55 0.5 0.45 1"/></body>   <!-- fallen south-wall section lying outside, east of the breach -->
     <body name="b26" pos="1.724 -0.15 0.3614" euler="0 -60 0"><freejoint/><geom name="b26_rubble" type="box" size="0.4 0.15 0.03" density="600" friction="0.4 0.005 0.0001" priority="1" rgba="0.55 0.5 0.45 1"/></body>   <!-- LS_a: loose slab leaning on the east wall -->

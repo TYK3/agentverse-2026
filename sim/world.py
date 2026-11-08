@@ -101,8 +101,8 @@ class World:
         b = spare[0]
         g = self.m.body_geomadr[b]
         self.m.body_gravcomp[b] = 0
-        self.m.geom_contype[g] = self.m.geom_conaffinity[g] = 1
-        self.m.body_contype[b] = self.m.body_conaffinity[b] = 1      # the broad phase filters on these too
+        self.m.geom_contype[g], self.m.geom_conaffinity[g] = 1, 3       # 3: also hits braced pieces (tower)
+        self.m.body_contype[b], self.m.body_conaffinity[b] = 1, 3      # the broad phase filters on these too
         adr = self.m.jnt_qposadr[self.m.body_jntadr[b]]
         vadr = self.m.jnt_dofadr[self.m.body_jntadr[b]]
         z = max(float(pos[2]), float(self.m.geom_size[g][2]) + 0.005)

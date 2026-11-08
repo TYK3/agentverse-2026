@@ -62,7 +62,10 @@ def add(label, pos, size, rgba, braced, euler=None, mass=None, density=None, not
         m += f' friction="{friction} 0.005 0.0001" priority="1"'  # priority: its friction wins at contacts
     f = lambda v: " ".join(f"{x:.4f}".rstrip("0").rstrip(".") for x in v)
     comment = f"   <!-- {note} -->" if note else ""
-    xml = (f'    <body name="{name}" pos="{f(pos)}"{rot}><freejoint/>'
+    if braced:
+        m += ' class="braced"'
+    grav = ' gravcomp="1"' if braced else ""     # held by its weld; no weight, so no sag
+    xml = (f'    <body name="{name}" pos="{f(pos)}"{rot}{grav}><freejoint/>'
            f'<geom name="{name}_{label}" type="box" size="{f(size)}"{m} rgba="{rgba}"/></body>{comment}')
     blocks.append((name, label, xml, braced))
     return name
@@ -176,8 +179,14 @@ def xml():
     <global offwidth="1280" offheight="960"/>
   </visual>
 
+  <!-- Collision bits: braced pieces (contype 2, conaffinity 0) never touch each other or the plate (they are
+       welded anyway; their resting contacts made the scene 2x slower than real time) but everything else
+       (contype 1, conaffinity 3) still hits them. -->
   <default>
-    <geom friction="1 0.005 0.0001"/>
+    <geom friction="1 0.005 0.0001" contype="1" conaffinity="3"/>
+    <default class="braced">
+      <geom contype="2" conaffinity="0"/>
+    </default>
   </default>
 
   <custom>
