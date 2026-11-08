@@ -92,3 +92,8 @@ voice (spoken commands) --> planner        planner (say) --> voice (operator, ca
   Replay is explicitly cached, token usage stays unknown when unavailable, and
   each real retry consumes the hourly cap. Receipts do not grant movement; the
   shared API is for human review and L1/G5 linkage alignment before merge.
+- Sun 8 Nov: D1 adopts Y4's `map/points {t,res,points}` frame with optional
+  `points_from`, <=2048 measured xyz points and <=2 Hz. The hub coalesces source
+  bursts, preserves measured coordinates, and retains only the latest reconnect
+  cloud separately from event history. Raw sensor frames stay local; scene
+  changes clear cloud state. Interface is proposed in PR #133 for human review.
