@@ -24,7 +24,7 @@ class Block(Message):
 
 
 class SceneLoaded(Message):
-    scene: Literal["backup", "photo", "tower"]
+    scene: Literal["backup", "photo", "tower", "building"]
     blocks: list[Block]
 
 
@@ -112,6 +112,16 @@ class MapHazards(RootModel[list[Hazard]]):
 class ScoutGoto(Message):
     target: Vec3
     reason: Text
+
+
+class ResponderPose(Message):
+    """E2: the Responder's actual pose from the sim, every tick (10 Hz), so viewers never snap it to a route end."""
+    t: Nonnegative
+    pos: Vec3
+    yaw: Number
+    state: Literal["idle", "moving", "arrived", "blocked", "frozen"]
+    route: Text | None = None
+    carrying: list[Text]
 
 
 class RouteProposed(Message):
@@ -349,6 +359,7 @@ TOPICS: dict[str, type[BaseModel]] = {
     "gate/request": GateRequest,
     "gate/answer": GateAnswer,
     "responder/action": ResponderAction,
+    "responder/pose": ResponderPose,
     "operator/command": OperatorCommand,
     "world/change": WorldChange,
     "world/debris": WorldDebris,

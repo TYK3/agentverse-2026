@@ -148,3 +148,26 @@ def test_handoff_fetches_a_found_board_when_the_kit_splint_is_gone():
     h = w.handoff
     assert h.served == {"c1"} and h.active is None and h.holding_block is None
     assert "b16" in h.finder.taken and "splint" not in h.kit
+
+
+def test_what_the_casualty_said_brings_a_second_delivery():
+    """G3 -> Y2: water goes first; when the casualty tells the robot their leg is broken, a splint follows."""
+    async def go():
+        w = await World().start()
+        await w.bus.publish("map/casualties", [casualty(confidence=0.9)])
+        await w.bus.publish("log/decision", sim_log("done", "placed water at [1.50, 1.30]", at=(1.5, 1.1)))
+        assert w.handoff.served == {"c1"}
+        before = len(w.topics("responder/action"))
+        contact = {"id": "c1", "t": 30, "status": "talking", "turns": 3, "max_turns": 8,
+                   "facts": {"responsive": True, "hurt": ["leg"], "can_move": False},
+                   "injuries": ["Yes, my left leg. I think it's broken."], "receipts": []}
+        await w.bus.publish("casualty/contact", contact)
+        assert len(w.topics("responder/action")) == before, "no new mission while still talking"
+        await w.bus.publish("casualty/contact", {**contact, "status": "done", "t": 45})
+        return w, w.topics("responder/action")[before:]
+
+    w, second = run(go())
+    assert [a["action"] for a in second] == ["move", "place_supply", "release"]
+    assert {a["item"] for a in second} == {"splint"}
+    assert w.handoff.active == "c1" and "c1" not in w.handoff.served
+    assert any(d["outcome"] == "requeued" and "splint" in d["reason"] for d in w.handoff_logs())
