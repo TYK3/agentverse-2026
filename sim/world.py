@@ -12,7 +12,7 @@ import re
 import mujoco
 import numpy as np
 
-from sim import aftershock, scene, sensors
+from sim import aftershock, persona, scene, sensors
 
 SPEED = 0.3            # m/s
 CLEARANCE = 0.15       # metres of free space the Scout needs ahead before it moves
@@ -22,6 +22,7 @@ LAND = 1.0             # seconds an injected block gets to fall and settle befor
 HEAR_CALL_M = 6.0      # the casualty hears the Scout calling within this range (L2)
 TAP_DELAY_S = 1.0      # reaction time before they start knocking
 TAP_S = 6.0            # how long they knock after each call
+REPLY_DELAY_S = 1.5    # G3: a casualty who can speak answers this long after the robot's line
 
 
 def casualties(m):
@@ -58,6 +59,7 @@ class World:
         self.events = []            # (topic, data) produced since the last tick
         self.landing = None         # (world time, name) when an injected block will have landed
         self.tapping = {}           # casualty name -> (from, until) world times they knock back (L2)
+        self.replies = []           # G3: (world time due, casualty/reply payload) still to be said
         self.refresh_unstable()
 
     # ---- physics route check ----------------------------------------------------
@@ -182,6 +184,10 @@ class World:
             name, self.landing = self.landing[1], None
             self.refresh_unstable()
             self.events.append(("world/change", {"kind": "block_added", "t": round(self.t, 2), "moved_blocks": [name]}))
+        due = [r for r in self.replies if self.t >= r[0] - 1e-9]
+        if due:
+            self.replies = [r for r in self.replies if self.t < r[0] - 1e-9]
+            self.events += [("casualty/reply", data) for _, data in due]
         events, self.events = self.events, []
         return events
 
@@ -190,12 +196,14 @@ class World:
         """A `say` to the casualty, spoken by the Scout: every casualty who can hear it taps back.
 
         Heard when the Scout is within HEAR_CALL_M and at most two walls away; they start after a
-        short reaction time and knock for TAP_S seconds.
+        short reaction time and knock for TAP_S seconds. G3: a casualty with a voice also answers in
+        words (sim/persona.py) as `casualty/reply`, REPLY_DELAY_S later; fainter through walls. A new line
+        before they answered replaces the pending answer: they answer the last thing they heard.
         """
         if msg.get("to") != "casualty":
             return
         origin = self.pos
-        for name, geom, _voice in self.casualties:
+        for name, geom, voice in self.casualties:
             casualty = self.d.geom_xpos[geom].copy()
             if float(np.linalg.norm((casualty - origin)[:2])) > HEAR_CALL_M:
                 continue
@@ -203,6 +211,13 @@ class World:
             walls = 0 if hit == geom else sensors.walls_between(self.m, self.d, origin, casualty, self.scout, geom)
             if walls <= 2:
                 self.tapping[name] = (self.t + TAP_DELAY_S, self.t + TAP_DELAY_S + TAP_S)
+                said = persona.answer(persona.persona(name), msg.get("text", "")) if voice > 0 else None
+                if said:
+                    # Two lines back to back get one answer, to the last one (as a person would).
+                    self.replies = [r for r in self.replies if r[1]["id"] != name]
+                    level = round(min(1.0, voice * (0.8 if walls == 0 else 0.45 / walls)), 2)
+                    self.replies.append((self.t + REPLY_DELAY_S, {"id": name, "t": round(self.t + REPLY_DELAY_S, 2),
+                                                                  "text": said, "source": "sim", "level": level}))
 
     def is_tapping(self, name=None):
         """Whether casualty `name` (any casualty when None) is knocking right now."""
