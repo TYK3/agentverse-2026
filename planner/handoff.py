@@ -36,9 +36,10 @@ SUPPLIES = ("water", "first_aid_kit", "radio")
 MAX_ATTEMPTS = 2          # Responder tries per casualty before the handoff gives up on it
 GOAL_RADIUS_M = 0.5       # the Responder stops on a free cell within this distance of the casualty
 SCOUT_NOTE_EVERY_S = 5.0  # log a Scout block at most this often (its blocked state repeats every frame)
+RETRY_AFTER_S = 5.0       # after a block, retry no sooner than this (time for the Scout to re-scan)
 LOOK_EVERY_S = 10.0       # ask the Scout to look beside a casualty at most this often (it is mid-route)
 START_SNAP_M = 0.35       # search from the nearest free cell this close if the Responder's own cell looks occupied
-RESPONDER_START = (-10, -42, 0)   # sim/scenes/backup.xml: the Responder starts at x -0.5, y -2.1
+RESPONDER_START = (-10, -36, 0)   # sim/scenes/backup.xml: the Responder starts at x -0.5, y -1.77
 MODEL = "local-handoff"
 _AT = re.compile(r"responder at \[(-?[\d.]+), (-?[\d.]+)\]")
 
@@ -58,6 +59,7 @@ class Handoff:
         self.waiting_scan = False  # after a block: wait for the next map/cells before retrying
         self.scout_blocked_at = None
         self.last_scout_note = float("-inf")
+        self.blocked_at = float("-inf")
         self.last_look = {}        # casualty id -> clock() of the last look request
         self.decisions = []        # every log/decision this module published
 
@@ -171,7 +173,8 @@ class Handoff:
         await self.dispatch()
 
     async def on_map(self, data):
-        if self.waiting_scan:
+        # Retry only once the Scout has had time to re-scan (a map update every 0.5 s is not a re-scan).
+        if self.waiting_scan and self.clock() - self.blocked_at >= RETRY_AFTER_S:
             self.waiting_scan = False
         await self.dispatch()
 
@@ -214,7 +217,7 @@ class Handoff:
             self.skipped.add(cid)
             await self.log(f"casualty {cid}", "skipped", f"{why}; {MAX_ATTEMPTS} tries used, next casualty")
             return await self.dispatch()
-        self.waiting_scan = True
+        self.waiting_scan, self.blocked_at = True, self.clock()
         await self.log(f"casualty {cid}", "requeued", f"{why}; retry after the Scout re-scans")
 
     async def on_world_change(self, data):

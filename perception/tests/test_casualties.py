@@ -109,3 +109,65 @@ def test_gemini_off_marks_vision_stand_in():
         c.step({**d, "camera": "FRAME"})
     assert asked == [] and c.vision_stand_in
     assert all("pose" not in e["clues"] for e in c.message())
+
+
+# ---- Z3: offline camera check, so thermal + sound + camera reach >= 0.8 with Gemini off ----------
+
+def _jpeg(blob_cols=None, w=320, h=240):
+    """A grey frame with a red, person-coloured blob spanning `blob_cols` (x from, x to), base64 JPEG."""
+    image = pytest.importorskip("PIL.Image")
+    import base64
+    import io
+
+    img = image.new("RGB", (w, h), (120, 120, 120))
+    if blob_cols:
+        for x in range(*blob_cols):
+            for y in range(110, 150):
+                img.putpixel((x, y), (200, 60, 60))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def test_local_person_needs_agreement_with_thermal():
+    from perception.casualties import local_person
+
+    centre = _jpeg((120, 200))                         # a lying blob in the middle of the frame
+    assert local_person(centre, 0.0) == 1.0            # thermal straight ahead: agrees
+    assert local_person(centre, math.radians(35)) == 0.0   # thermal far left: disagrees
+    assert local_person(_jpeg(None), 0.0) == 0.0       # nothing warm-coloured
+    assert local_person(_jpeg((150, 160)), 0.0) == 0.7  # small and upright: not lying
+
+
+def test_offline_camera_lifts_c1_to_0_8_with_gemini_off():
+    """Real sim frames facing c1: thermal + sound + the offline camera check give >= 0.8 (Gemini off)."""
+    pytest.importorskip("PIL.Image")
+    sim_world = pytest.importorskip("sim.world")
+    w = sim_world.World()
+    if w.renderer is None:
+        pytest.skip("no GL context for camera frames")
+    t = itertools.count()
+    c = Casualties(vision_on=lambda: False, clock=lambda: float(next(t)))
+    for x, y in [(0.8, 0.6), (1.0, 0.65), (1.2, 0.7), (1.45, 0.7), (1.45, 0.7), (1.45, 0.7), (1.45, 0.7)]:
+        w._set_pose((x, y), math.atan2(1.0 - y, 2.0 - x))
+        w.tick(0.1)
+        c.on_sensors(w.sensors_message())
+    out = c.message()
+    assert out and out[0]["confidence"] >= 0.8, out
+    assert set(out[0]["clues"]) == {"pose", "thermal", "sound"}
+
+
+def test_red_object_without_heat_is_not_a_casualty_clue():
+    """The Responder's red first aid kit in view, with no thermal peak, scores no vision."""
+    c = Casualties(vision_on=lambda: False)
+    c.found.append({"pos": (0.0, 0.0), "z": 0.0, "thermal": 1.0, "sound": 0.0, "vision": 0.0})
+    c.thermal_rel = None
+    assert not c._local_vision({"camera": {"format": "jpeg", "b64": _jpeg((120, 200))}}, (0.0, 0.0))
+    assert c.found[0]["vision"] == 0.0
+
+
+def test_local_check_is_off_while_gemini_vision_is_on():
+    c = Casualties(ask=lambda p, b: None, vision_on=lambda: True)
+    c.found.append({"pos": (0.0, 0.0), "z": 0.0, "thermal": 1.0, "sound": 0.0, "vision": 0.0})
+    c.thermal_rel = 0.0
+    assert not c._local_vision({"camera": {"format": "jpeg", "b64": "x"}}, (0.0, 0.0))
