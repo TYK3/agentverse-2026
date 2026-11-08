@@ -34,7 +34,7 @@ async def run(world, bus, rate_hz=RATE_HZ):
 
 
 async def start(bus, loop=True):
-    """Load the backup scene and wire the sim lane to the bus.
+    """Load the scene (SIM_SCENE, default backup) and wire the sim lane to the bus.
 
     Publishes scene/loaded; follows scout/goto; answers route/proposed with route/verified from a
     cached physics check; streams sensors/scout at 10 Hz and world/change after an aftershock or an
@@ -42,8 +42,10 @@ async def start(bus, loop=True):
     sim/responder.py, `world.responder`) follows route/proposed, gate/* and responder/action, freezes
     on world/change and reports every outcome as log/decision.
     """
-    world = World()
-    await bus.publish("scene/loaded", scene.scene_loaded(world.m, world.d))
+    name, path = scene.resolve()          # SIM_SCENE=backup (default) | tower | path to an MJCF file
+    world = World(path=path)
+    world.scene = name
+    await bus.publish("scene/loaded", scene.scene_loaded(world.m, world.d, scene=name))
     bus.subscribe("scout/goto", world.goto)
     bus.subscribe("say", world.on_say)  # L2: the casualty knocks back when the Scout calls out
 

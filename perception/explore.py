@@ -1,7 +1,11 @@
-"""Scout exploration: head for the nearest frontier, obey re-looks first, re-scan after a change (T09).
+"""Scout exploration: head for the nearest frontier, obey re-looks first, re-scan after a change (T09, Z1).
 
 The map is one LiDAR layer thick, so frontiers and paths live in the Scout's layer k and use the four
 in-layer neighbours (the layers above and below are always unknown).
+
+Only the Scout's own scans steer it (Z1): a frontier counts only inside the building as the LiDAR saw
+it (measured walls within ENCLOSED_M in at least 3 of the 4 grid directions), and after a shake it re-visits the cells it had predicted at_risk, then any
+cell the scan diff saw change, getting within LOOK of each so the LiDAR measures it again.
 """
 
 import math
@@ -18,10 +22,11 @@ CARROT = 12           # scout/goto targets at most this many path cells ahead (0
 REACHED = 0.15        # metres: a target this close counts as reached
 STALL = 5             # decisions without getting 5 cm closer before a frontier is given up
 HOLD = 20.0           # seconds a re-look or a planner scout/goto keeps priority at most
-RESCAN = 0.5          # metres around a moved block that become unknown again
+ENCLOSED_M = 4.0      # metres a frontier looks along each grid axis for a measured wall
+LOOK = 1.0            # metres: close enough to a re-scan target for the LiDAR to measure it again
+VISIT_HOLD = 15.0     # seconds one re-scan visit may take before the next
 AHEAD = 0.18          # metres sim keeps clear ahead before it moves (CLEARANCE 0.15 + one 0.03 m step)
 HALF_WIDTH = 0.08     # Scout chassis half width; with AHEAD this mirrors sim/world.py's _free_ahead
-NEW_BLOCK = (0.1, 0.1, 0.08)   # half-extents assumed for a block_added block (sim's spare rubble x1)
 
 SIDES = ((1, 0), (-1, 0), (0, 1), (0, -1))
 DISK = tuple((di, dj) for di in range(-CLEAR, CLEAR + 1) for dj in range(-CLEAR, CLEAR + 1)
@@ -38,12 +43,10 @@ class Explorer:
     def __init__(self, grid):
         self.grid = grid
         self.pose = None          # Scout position from sensors/scout
-        self.blocks = {}          # block id -> (pos, size) from scene/loaded
-        self.bounds = None        # (lo, hi) cells of the building's walls: frontiers stay inside
         self.bad = set()          # (i, j) of at_risk or collapsed hazard cells
-        self.hold = None          # (target, until, reason) of a re-look or a planner scout/goto
-        self.rescan = set()       # cells made unknown by the last world/change
-        self.change = ""          # what the last world/change did, for the reason string
+        self.hold = None          # (target, until, reason, radius) of a re-look, visit or planner scout/goto
+        self.visits = []          # [(cell, reason)] still to re-scan after a change, nearest first
+        self.visited = set()      # re-scan cells already queued since the last change
         self.target = None        # frontier cell we are heading for
         self.given_up = set()     # frontiers reached, or not reachable, that stayed frontiers
         self.progress = (None, math.inf, 0)   # (target, closest so far, decisions since closer)
@@ -56,52 +59,58 @@ class Explorer:
         self.pose = data["pose"]["pos"]
         self.blocked = data.get("motion", {}).get("state") == "blocked"
 
-    def on_scene(self, data):
-        """Remember the blocks, and explore only inside the walls (outside, misses leave it all unknown)."""
-        self.blocks = {b["id"]: (b["pos"], b["size"]) for b in data["blocks"]}
-        walls = [b for b in data["blocks"] if b.get("label") == "wall"]
-        if walls:
-            lo = cell_of([min(b["pos"][a] - b["size"][a] for b in walls) for a in (0, 1)] + [0])
-            hi = cell_of([max(b["pos"][a] + b["size"][a] for b in walls) for a in (0, 1)] + [0])
-            self.bounds = (lo, hi)
+    def _enclosed(self, i, j):
+        """True if measured occupied cells lie within ENCLOSED_M along at least 3 of +x, -x, +y, -y.
+
+        Inside a room walls surround a cell; outside the building at least two directions open onto
+        nothing (LiDAR misses leave no cells), so frontiers there are skipped.
+        """
+        k, n, walls = self._k(), int(ENCLOSED_M / RES), 0
+        for di, dj in SIDES:
+            for s in range(1, n + 1):
+                cur = self.grid.cells.get((i + di * s, j + dj * s, k))
+                if cur and cur["state"] == "seen" and cur["occupied"]:
+                    walls += 1
+                    break
+        return walls >= 3
 
     def on_hazards(self, data):
         self.bad = {(h["cell"][0], h["cell"][1]) for h in data if h["status"] in ("at_risk", "collapsed")}
 
     def on_goto(self, data, t):
         if data is not self.sent:
-            self.hold = (data["target"], t + HOLD, None)
+            self.hold = (data["target"], t + HOLD, None, REACHED)
 
     def on_decision(self, data, t):
         m = _CELL.search(data.get("reason", ""))
         if data.get("outcome") == "relook" and m:
             cell = tuple(int(v) for v in m.groups())
-            self.hold = (cell, t + HOLD, f"re-look at cell {list(cell)} (planner: {data['reason']})")
+            self.hold = (cell, t + HOLD, f"re-look at cell {list(cell)} (planner: {data['reason']})", REACHED)
 
     def on_change(self, data):
-        """Every cell within 0.5 m of a moved block becomes unknown, so the Scout re-scans it.
+        """A shake was felt (or a block injected): re-scan every cell predicted at_risk, nearest first.
 
-        A block_added change names a block scene/loaded never listed; with an optional "pos" it is
-        placed there (a NEW_BLOCK box), without one it is left for the LiDAR to find.
+        Which blocks moved (moved_blocks) is sim truth and is not read; the scan diff finds them.
         """
-        forget = set()
-        for b in data.get("moved_blocks", []):
-            if b not in self.blocks and data.get("pos"):
-                self.blocks[b] = (data["pos"], NEW_BLOCK)
-            if b not in self.blocks:
-                continue
-            pos, size = self.blocks[b]
-            lo = cell_of([p - s - RESCAN for p, s in zip(pos[:2], size[:2])] + [0])
-            hi = cell_of([p + s + RESCAN for p, s in zip(pos[:2], size[:2])] + [0])
-            forget |= {c for c in self.grid.cells if lo[0] <= c[0] <= hi[0] and lo[1] <= c[1] <= hi[1]}
-        self.grid.forget(forget)
-        self.rescan |= forget
-        moved = ", ".join(data.get("moved_blocks", []))
-        if data.get("kind") == "block_added":
-            self.change = f"re-scan where {moved} was dropped"
-        else:
-            self.change = f"re-scan after the {data.get('kind', 'change')} moved {moved}"
+        kind = "aftershock" if data.get("kind", "aftershock") == "aftershock" else "injected block"
+        self.visits, self.visited = [], set()
+        self._queue(self.bad, f"re-scan after the {kind}: predicted at-risk cell")
         self.target = None
+
+    def on_diff(self, cells):
+        """The scan diff saw cells change: go and look at them closer."""
+        self._queue({(c[0], c[1]) for c in cells}, "re-scan where the scan changed: cell")
+
+    def _queue(self, cells, reason):
+        """Queue one visit per LOOK-sized patch of `cells`, nearest the Scout first."""
+        for ij in sorted(cells):
+            if any(math.dist(ij, v) * RES < LOOK / 2 for v in self.visited):
+                continue
+            self.visited.add(ij)
+            self.visits.append(((*ij, GROUND), f"{reason} {[ij[0], ij[1], GROUND]}"))
+        if self.pose is not None:
+            here = cell_of(self.pose)[:2]
+            self.visits.sort(key=lambda v: math.dist(v[0][:2], here))
 
     # ---- one decision a second --------------------------------------------------
 
@@ -109,11 +118,16 @@ class Explorer:
         """The scout/goto to publish now, or None (nothing to do, or a hold is in force)."""
         if self.pose is None:
             return None
+        if self.hold is None and self.visits:
+            cell, reason = self.visits.pop(0)
+            self.hold = (cell, t + VISIT_HOLD, reason, LOOK)
         if self.hold:
-            target, until, reason = self.hold
+            target, until, reason, radius = self.hold
             here = centre(target, self.pose[2]) if isinstance(target, tuple) else target
-            if t > until or math.dist(here[:2], self.pose[:2]) < REACHED:
+            if t > until or math.dist(here[:2], self.pose[:2]) < radius:
                 self.hold = None
+                if self.visits:
+                    return self.tick(t)
             elif reason is None:
                 return None                       # the planner's own scout/goto is driving the Scout
             else:
@@ -128,20 +142,12 @@ class Explorer:
                 self.progress = (target, best, stuck + 1)
             if gap < REACHED or self.progress[2] >= STALL or self.blocked:
                 self.given_up.add(self.target)
-        self.rescan = {c for c in self.rescan if self.grid.state(c) == "unknown"}
         found = self._nearest_frontier()
-        if found is None and self.rescan:
-            self.rescan = set()
-            found = self._nearest_frontier()
         if found is None:
             self.target = None
             return None
         self.target, unknown, path = found
-        if self.rescan:
-            why = f"{self.change}: frontier at cell {self._plan(self.target)}"
-        else:
-            why = f"frontier at cell {self._plan(self.target)}"
-        return self._send(path, f"{why}, {unknown} unknown neighbours")
+        return self._send(path, f"frontier at cell {self._plan(self.target)}, {unknown} unknown neighbours")
 
     # ---- map helpers ------------------------------------------------------------
 
@@ -173,13 +179,9 @@ class Explorer:
 
     def _is_frontier(self, i, j):
         k = self._k()
-        if self.bounds and not (self.bounds[0][0] <= i <= self.bounds[1][0] and self.bounds[0][1] <= j <= self.bounds[1][1]):
-            return False
         if not any((i + di, j + dj, k) not in self.grid.cells for di, dj in SIDES):
             return False
-        if self.rescan and not any((i + di, j + dj, k) in self.rescan for di in range(-2, 3) for dj in range(-2, 3)):
-            return False
-        return self._unknown_near(i, j) >= MIN_UNKNOWN
+        return self._unknown_near(i, j) >= MIN_UNKNOWN and self._enclosed(i, j)
 
     def _bfs(self):
         """Parents of every passable cell reachable from the Scout, nearest first, in order."""

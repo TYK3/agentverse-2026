@@ -233,3 +233,23 @@ def test_startup_lanes_status_and_cleanup(clean_bus, monkeypatch):
 def test_docs(clean_bus):
     with TestClient(hub.app) as client:
         assert client.get("/docs").status_code == 200
+
+
+def test_scene_loaded_accepts_the_tower_scene():
+    """sim/scenes/tower.xml (ref Y1) publishes scene/loaded with scene "tower"."""
+    from coord.messages import validate_payload
+
+    payload = {"scene": "tower", "blocks": [{"id": "b1", "label": "slab", "pos": [0.0, 0.0, 1.05], "size": [1.0, 1.0, 0.05]}]}
+    assert validate_payload("scene/loaded", payload)["scene"] == "tower"
+
+
+def test_hazard_exclusion_and_points_from_are_optional():
+    hazard = {"cell": [1, 2, 0], "status": "at_risk", "why": "slab moved", "estimate": True}
+    assert validate_payload("map/hazards", [hazard]) == [hazard]
+    assert validate_payload("map/hazards", [dict(hazard, exclusion=True)]) == [dict(hazard, exclusion=True)]
+    with pytest.raises(ValueError):
+        validate_payload("map/hazards", [dict(hazard, exclusion="yes")])
+    example = next(item for item in EXAMPLES if item["topic"] == "sensors/scout")
+    data = dict(example["data"], points=[[0.1, 0.2, 0.3]], points_from=[0.0, 0.0, 0.18])
+    assert validate_payload("sensors/scout", data) == data
+

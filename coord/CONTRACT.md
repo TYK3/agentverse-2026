@@ -20,7 +20,7 @@ run started. These are first drafts: the owning lane refines them by PR.
 ## Messages
 | Name | Producer | Consumer | Shape |
 |---|---|---|---|
-| `scene/loaded` | sim | all | `{"scene":"backup"\|"photo","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
+| `scene/loaded` | sim | all | `{"scene":"backup"|"photo"|"tower",\|"photo","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
 | `sensors/scout` | sim | perception | LiDAR ranges, camera frame, thermal grid, acoustic `{"bearing":deg,"level":0..1}`, pose |
 | `map/cells` | perception | planner, console | `{"t":0,"res":0.05,"cells":[{"cell":[i,j,k],"state":"seen"\|"inferred"\|"unknown","occupied":true}]}` |
 | `map/casualties` | perception | planner, console | `[{"id":"c1","pos":[x,y,z],"confidence":0.8,"clues":["pose","thermal","sound"],"vitals":{"breathing_rate":14,"simulated":true}}]` |
@@ -59,6 +59,11 @@ run started. These are first drafts: the owning lane refines them by PR.
 - `sensors/scout` may include `points: [[x,y,z], ...]`: up to 2048 points from the Scout's depth
   camera (Y9), already in the scene frame (metres), downsampled. Perception (Z1) scores pile stability
   from them; without them it maps from the 2D LiDAR alone. Sending them in every other frame or less is enough.
+  `points_from: [x,y,z]` (optional) is where the camera was for that frame, so perception can mark
+  the space along each ray as free and tell moving debris from a new viewpoint (L5).
+- `map/hazards` cells may carry `exclusion: true`: a keep-out zone around debris whose motion the
+  Scout sensed (L5). Routes never pass through it. It is a precaution from observed motion, not a
+  collapse prediction, and it is lifted only after fresh scans of the zone show no further motion.
 - `scene/loaded` block `size` is MuJoCo half-extents in metres (T03); Three.js uses `2 * size`.
 - T05 publishes `world/change.kind="block_added"` after an operator-injected block lands.
   It carries the block id in `moved_blocks`, invalidates the prior route and triggers a re-scan

@@ -2,6 +2,7 @@
 
     python -m sim.demo_aftershock              # viewer; shake starts after 2 s
     python -m sim.demo_aftershock --no-viewer  # headless, prints the same result
+    python -m sim.demo_aftershock --scene tower   # the collapsed tower (ref Y1)
 
 Before the shake it prints which blocks the physics check predicts will move; after it, the
 world/change message the live run produces.
@@ -10,17 +11,18 @@ world/change message the live run produces.
 import argparse
 import time
 
-from sim import aftershock
+from sim import aftershock, scene
 from sim.world import World
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--no-viewer", action="store_true")
+    p.add_argument("--scene", default="backup", help="backup (default) or tower")
     p.add_argument("--delay", type=float, default=2.0, help="seconds before the shake")
     a = p.parse_args()
 
-    world = World(render=False)
+    world = World(path=scene.resolve(a.scene)[1], render=False)
     print(f"predicted by the physics check on a copy: {world.would_move}")
     viewer = None
     if not a.no_viewer:

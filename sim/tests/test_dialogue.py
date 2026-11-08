@@ -31,7 +31,7 @@ def run(start, seconds=40):
 
 def test_scout_locates_the_casualty_from_two_tapping_bearings():
     w, lis, said = run([0.6, 0.6])
-    casualty = w.d.geom_xpos[w.casualty_geom][:2]
+    casualty = w.d.geom_xpos[w.casualty_geom][:2]  # c1
     assert lis.estimate is not None, lis.log
     assert math.dist(lis.estimate["pos"], casualty) < 0.25
     assert lis.estimate["radius_m"] < 0.6 and lis.estimate["spots"] >= 2
@@ -42,18 +42,18 @@ def test_casualty_taps_only_when_the_call_is_heard():
     w = World(render=False)
     w._set_pose([0.6, 0.6], 0.0)
     w.on_say({"to": "operator", "intent": "reassure", "text": "status", "lang": "auto"})
-    assert w.tapping is None  # the operator's lines are not played inside
+    assert w.tapping == {}  # the operator's lines are not played inside
     w.on_say({"to": "casualty", "intent": "reassure", "text": "tap", "lang": "auto"})
-    assert w.tapping is not None and not w.is_tapping  # reaction time first
+    assert w.tapping and not w.is_tapping()  # reaction time first
     w.tick(1.1)
-    assert w.is_tapping
+    assert w.is_tapping()
     loud = np.mean([w.sensors_message(camera=False)["acoustic"]["level"] for _ in range(20)])
     w.tick(6.0)
-    assert not w.is_tapping
+    assert not w.is_tapping()
     quiet = np.mean([w.sensors_message(camera=False)["acoustic"]["level"] for _ in range(20)])
     assert loud > quiet
 
     far = World(render=False)
     far._set_pose([-1.0, -2.5], 0.0)  # outside the breach, more than 6 m of rubble away
     far.on_say({"to": "casualty", "intent": "reassure", "text": "tap", "lang": "auto"})
-    assert far.tapping is None
+    assert far.tapping == {}
