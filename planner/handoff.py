@@ -10,7 +10,9 @@ Three jobs, all local (no Gemini call):
    a board the Scout's depth points found: then the Responder first fetches the board (move + grip)
    and then carries it to the casualty. With no injury known it brings the next supply in turn
    (water, then first_aid_kit, then radio). If no such cell is mapped yet, the Scout is sent to
-   look (`scout/goto`).
+   look (`scout/goto`). The Responder's cell comes from the sim's `responder/pose` (every tick), so
+   the handoff plans from where it really is in any scene; if no seen free cell is near it yet, the
+   Scout is sent to map the Responder's own area first.
 2. Human gate only on low confidence. The handoff adds no gate of its own: the T13 loop already
    acts at confidence >= 0.8, re-looks from 0.5 and refers to a human below that (its confidence is
    min(casualty confidence, share of route cells seen)). So a confident casualty goes straight to
@@ -24,7 +26,7 @@ Three jobs, all local (no Gemini call):
      blocked target and picks the Scout's next frontier, so the handoff does not send a competing
      scout/goto; its part is to log the block and keep the Responder working its casualty queue.
 
-Inputs: map/cells (via the router), map/hazards, map/casualties, sensors/scout, log/decision (the
+Inputs: map/cells (via the router), map/hazards, map/casualties, sensors/scout, responder/pose, log/decision (the
 sim Responder's outcomes, model "sim"), world/change. Outputs: loop.mission calls, scout/goto and
 log/decision (model "local-handoff").
 """
@@ -46,7 +48,9 @@ SCOUT_NOTE_EVERY_S = 5.0  # log a Scout block at most this often (its blocked st
 RETRY_AFTER_S = 5.0       # after a block, retry no sooner than this (time for the Scout to re-scan)
 LOOK_EVERY_S = 10.0       # ask the Scout to look beside a casualty at most this often (it is mid-route)
 START_SNAP_M = 0.35       # search from the nearest free cell this close if the Responder's own cell looks occupied
-RESPONDER_START = (-10, -36, 0)   # sim/scenes/backup.xml: the Responder starts at x -0.5, y -1.77
+START_REACH_M = 1.0       # ... or this close when nothing near it is mapped at all: it stands on open ground
+                          # outside the building, where LiDAR rays get no return and leave no cells
+RESPONDER_START = (-10, -36, 0)   # sim/scenes/backup.xml start; used only until the first responder/pose
 MODEL = "local-handoff"
 _AT = re.compile(r"responder at \[(-?[\d.]+), (-?[\d.]+)\]")
 
@@ -82,7 +86,7 @@ class Handoff:
                           ("map/hazards", self.on_hazards), ("sensors/scout", self.on_sensors),
                           ("log/decision", self.on_log), ("world/change", self.on_world_change),
                           ("scene/loaded", self.finder.on_scene), ("casualty/triage", self.on_triage),
-                          ("casualty/contact", self.on_contact)):
+                          ("casualty/contact", self.on_contact), ("responder/pose", self.on_pose)):
             self.bus.subscribe(topic, fn)
         return self
 
@@ -120,7 +124,7 @@ class Handoff:
         if not records:
             return None
         safe, _ = self._safe(records)
-        start = self.start_cell(safe, res)
+        start = self.start_cell(safe, res, records)
         if start is None:
             return None
         reachable = self._reachable(start, safe)
@@ -132,19 +136,28 @@ class Handoff:
                 best = (d, c)
         return best[1] if best else None
 
-    def start_cell(self, safe=None, res=0.05):
+    def start_cell(self, safe=None, res=0.05, records=None):
         """The Responder's cell, or the nearest seen free cell within START_SNAP_M of it (its own body,
-        or rubble beside it, can make its exact cell look occupied on the map); None if none."""
-        if safe is None:
+        or rubble beside it, can make its exact cell look occupied on the map). If no cell at all is
+        mapped within START_SNAP_M (the Responder waits on open ground outside the building, which the
+        Scout's LiDAR never maps), the nearest seen free cell within START_REACH_M. None if none."""
+        if safe is None or records is None:
             res, records = self._map()
             safe, _ = self._safe(records) if records else (set(), set())
         if self.responder_cell in safe:
             return self.responder_cell
         rx, ry, _ = self.responder_cell
-        near = [(math.hypot(c[0] - rx, c[1] - ry) * res, c) for c in safe
-                if abs(c[0] - rx) * res <= START_SNAP_M and abs(c[1] - ry) * res <= START_SNAP_M]
-        near = [(d, c) for d, c in near if d <= START_SNAP_M]
-        return min(near)[1] if near else None
+
+        def nearest(cells, reach):
+            near = [(math.hypot(c[0] - rx, c[1] - ry) * res, c) for c in cells
+                    if abs(c[0] - rx) * res <= reach and abs(c[1] - ry) * res <= reach]
+            near = [(d, c) for d, c in near if d <= reach]
+            return min(near)[1] if near else None
+
+        snap = nearest(safe, START_SNAP_M)
+        if snap is not None or nearest(records, START_SNAP_M) is not None:
+            return snap
+        return nearest(safe, START_REACH_M)
 
     def _queue(self):
         return sorted((c for cid, c in self.casualties.items() if cid not in self.served | self.skipped),
@@ -160,7 +173,11 @@ class Handoff:
         """Start a Responder mission for the best waiting casualty, if the Responder is free."""
         if self.active or self.waiting_scan:
             return None
-        for cas in self._queue():
+        queue = self._queue()
+        if queue and self._map()[1] and self.start_cell() is None:
+            await self.look_at_responder()
+            return None
+        for cas in queue:
             cid = cas["id"]
             goal = self.goal_for(cas)
             if goal is None:
@@ -196,6 +213,18 @@ class Handoff:
                                     item=item, casualty=cid, block=block)
             return cid
         return None
+
+    async def look_at_responder(self):
+        """No seen free cell near the Responder (the Scout's map starts ahead of it): no route can
+        start, so send the Scout to map the Responder's own area, at most every LOOK_EVERY_S."""
+        if self.clock() - self.last_look.get("responder", float("-inf")) < LOOK_EVERY_S:
+            return
+        self.last_look["responder"] = self.clock()
+        x, y = ((self.responder_cell[0] + 0.5) * 0.05, (self.responder_cell[1] + 0.5) * 0.05)
+        await self.bus.publish("scout/goto", {"target": [round(x, 3), round(y, 3), 0.075],
+                                              "reason": f"handoff: map a free cell beside the Responder at [{x:.2f}, {y:.2f}]"})
+        await self.log(f"Responder at {list(self.responder_cell)}", "relook",
+                       f"no seen free cell within {START_SNAP_M} m of the Responder yet; Scout sent to map its area")
 
     def injuries_of(self, cas):
         return (list(cas.get("injuries") or []) + list(self.triage.get(cas["id"], []))
@@ -256,6 +285,13 @@ class Handoff:
         self.hazards = list(data)
 
     # ---- outcomes from the sim Responder and the T13 loop -------------------------------------
+
+    def on_pose(self, data):
+        """responder/pose (every sim tick): track the Responder's cell; no dispatch here, so a pose
+        stream does not re-plan 10 times a second."""
+        pos = data.get("pos")
+        if pos:
+            self.responder_cell = self._cell_of(pos[0], pos[1])
 
     async def on_log(self, data):
         if data.get("model") == MODEL:
