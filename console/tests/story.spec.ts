@@ -87,6 +87,18 @@ test('DEMO-FLOW: in the browser, ?run= replays a recording through the strip and
   await expect(card).toBeHidden();
 });
 
+test('REAL-LOG-DEMO: ?run alone replays the committed real B1 run, not demo data', async ({ page }) => {
+  const fetched: string[] = [];
+  page.on('request', r => { if (r.url().includes('/replays/')) fetched.push(new URL(r.url()).pathname); });
+  await page.goto('/?run&speed=40');
+  await expect(page.locator('#story .story-badge')).toContainText('REPLAY b1-run.jsonl');
+  expect(fetched).toEqual(['/replays/b1-run.jsonl']);
+  // phases lit by the recorded bus messages of the real run (scene, Scout find, Responder delivery)
+  for (const id of ['quake', 'search', 'found', 'deliver']) {
+    await expect(page.locator(`#story .story-phase[data-phase="${id}"]`)).not.toHaveAttribute('data-state', 'pending', { timeout: 20000 });
+  }
+});
+
 test('DEMO-FLOW: live mode shows LIVE and the follow toggle', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#story .story-badge')).toHaveText('LIVE');
