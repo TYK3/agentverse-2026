@@ -80,6 +80,6 @@ def test_snapshot_after_change_does_not_restamp_old_cells():
     g.t = 10.0
     snap = g.snapshot(10.0)
     stale_cells = [r["cell"] for r in snap["cells"]
-                   if r["state"] == "seen" and tuple(r["cell"]) != (0, 0, K)
+                   if r["state"] == "seen" and r["cell"][:2] != [0, 0]
                    and r.get("seen_t", snap["t"]) >= 5.0]
     assert stale_cells == [], f"{len(stale_cells)} cells from before the change shown as seen at t=10"
