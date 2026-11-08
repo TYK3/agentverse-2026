@@ -69,3 +69,34 @@ def test_main_writes_report(tmp_path):
     fail = lambda c, **k: types.SimpleNamespace(returncode=2, stdout="", stderr="boom")
     assert pr.main(["--output", str(out)], runner=fail) == 1
     assert "fail: boom" in out.read_text()
+
+
+class Grid:
+    def add_sensors(self, data):
+        return data
+
+
+def test_timed_detail_per_handler_and_topic():
+    book = defaultdict(lambda: {"calls": 0, "ms": 0.0})
+    detail = defaultdict(lambda: {"calls": 0, "ms": 0.0, "max_ms": 0.0})
+    g = Grid()
+    wrapped = pr.timed(g.add_sensors, book, clock([0.0, 0.002, 1.0, 1.010]), detail, "sensors/scout")
+    wrapped(1)
+    wrapped(2)
+    name = pr.handler_name(g.add_sensors)
+    assert name.endswith("test_profile_run.Grid.add_sensors")
+    d = detail[(name, "sensors/scout")]
+    assert d["calls"] == 2 and round(d["ms"], 6) == 12.0 and round(d["max_ms"], 6) == 10.0
+
+
+def test_per_handler_table_lane_first():
+    row = {"set": "+voice (all)", "lanes": ["sim", "perception"], "wall_s": 20.0, "per_handler": [
+        {"handler": "planner.route.RoutePlanner.update_map", "topic": "map/cells", "calls": 3,
+         "ms": 900.0, "mean_ms": 300.0, "max_ms": 400.0, "share": 0.045},
+        {"handler": "perception.hazards.Hazards.on_sensors", "topic": "sensors/scout", "calls": 10,
+         "ms": 80.0, "mean_ms": 8.0, "max_ms": 40.0, "share": 0.004}]}
+    lines = pr.per_handler_table([{"set": "sim"}, row])
+    body = [ln for ln in lines if ln.startswith("| ") and "Handler" not in ln]
+    assert body[0].startswith("| perception.hazards.Hazards.on_sensors | sensors/scout | 10 | 80.0 |")
+    assert "perception handlers total 80.0 ms" in "\n".join(lines)
+    assert pr.per_handler_table([{"set": "sim"}]) == []
