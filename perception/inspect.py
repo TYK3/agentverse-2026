@@ -2,8 +2,9 @@
 
 Gemini Robotics-ER looks at the Scout's camera frame and points at places a rescuer would want a
 closer look at (a void that could hold a person, an overhang, a gap under a slab). A point on an
-image is only a claim. Each one is turned into a ray through the Scout camera (`scout_cam`: 0.1 m
-ahead of and 0.03 m above the Scout centre, looking along the Scout's heading, fovy 60, 320 x 240)
+image is only a claim. Each one is turned into a ray through the Scout camera (level, looking along
+the Scout's heading, fovy 60, 320 x 240), starting where the depth camera was for that frame
+(`sensors/scout.points_from`; without it, `scout_cam`'s mount 0.1 m ahead and 0.03 m up)
 and kept only if the Scout's own depth points (`sensors/scout.points`, Y9) land along that ray:
 the first surface the depth camera measured there is where the goal is. A point with no depth
 return along its ray is rejected and logged ("rejected_ungrounded"), never driven to.
@@ -111,12 +112,13 @@ class Inspector:
 
     def __init__(self):
         self.last_ask = float("-inf")
-        self.points, self.points_t = [], None
+        self.points, self.points_t, self.points_from = [], None, None
         self.done = []              # scene (x, y) of goals already sent
 
     def keep_points(self, data, now):
         if data.get("points"):
             self.points, self.points_t = data["points"], now
+            self.points_from = data.get("points_from")   # the camera position for these points (Y9)
 
     def due(self, data, now):
         """True when this frame should go to ER: a camera image, fresh depth points, rate limit."""
@@ -127,7 +129,8 @@ class Inspector:
     def goals(self, pose, er_text, receipt=None, model="gemini-robotics-er", now=0.0):
         """-> list of (topic, data): a scout/goto and a log/decision per grounded point, a
         log/decision per rejected one."""
-        out, origin = [], camera_origin(pose)
+        out = []
+        origin = tuple(self.points_from) if self.points_from else camera_origin(pose)
         rid = f" ({receipt})" if receipt else ""
         for u, v, label in parse_points(er_text):
             ray = pixel_ray(pose, u, v)

@@ -207,3 +207,22 @@ def test_hub_wiring_sends_the_grounded_goal(world, monkeypatch):
     bus = asyncio.run(go())
     gotos = [d for t, d in bus.sent if t == "scout/goto"]
     assert len(gotos) == 1 and "gem-" + "d" * 32 in gotos[0]["reason"]
+
+
+def test_ray_starts_where_the_depth_camera_was(world):
+    """The true-scale Scout (building scene) has its depth_cam 0.18 m up: points_from moves the ray."""
+    pose, pts = pose_of(world), depth_points(world)
+    cam = world.m.camera("scout_cam").id
+    ray = I.pixel_ray(pose, 160, 120)
+
+    def depth_from(origin):
+        ins = I.Inspector()
+        ins.keep_points({"points": pts, "points_from": origin}, now=0)
+        log = next(d for t, d in ins.goals(pose, er((160, 120))) if t == "log/decision")
+        return float(log["reason"].split("depth at ")[1].split(" m")[0])
+
+    low = [float(x) for x in world.d.cam_xpos[cam]]
+    high = [low[0], low[1], low[2] + 0.18]
+    for origin in (low, high):
+        assert math.isclose(depth_from(origin), I.ground(origin, ray, pts)[0], abs_tol=0.005)
+    assert abs(depth_from(low) - depth_from(high)) > 0.05, "a higher camera grounds the pixel elsewhere"
