@@ -101,14 +101,25 @@ def thermal(origin, yaw, casualty_pos, visible):
     return grid
 
 
-def acoustic(origin, yaw, casualty_pos, walls, rng, noise=0.05, voice=1.0):
+TAP_RANGE = 10.0       # m: knocking on rubble carries further than a voice (L2)
+TAP_WALL_LOSS = 0.6    # level kept per wall for a tap (a voice keeps 0.5)
+TAP_BEARING_NOISE = 3.0  # deg: sharp taps give a cleaner direction than a voice
+
+
+def acoustic(origin, yaw, casualty_pos, walls, rng, noise=0.05, voice=1.0, tapping=False):
     """{"bearing": deg relative to heading, "level": 0..1}, falling with distance and walls.
 
     `voice` is how loud the casualty is (0 silent .. 1 calling out); a silent one reads noise only.
+    `tapping` (L2): the casualty is knocking in answer to a call, louder and easier to place; a
+    casualty too weak to call out can still knock.
     """
     dist = float(np.linalg.norm(np.asarray(casualty_pos, float)[:2] - np.asarray(origin, float)[:2]))
-    level = max(0.0, 1.0 - dist / 8.0) * (0.5**walls) * voice + rng.normal(0.0, noise)
-    bearing = relative_bearing(origin, yaw, casualty_pos) + rng.normal(0.0, 5.0)
+    level = max(0.0, 1.0 - dist / 8.0) * (0.5**walls) * voice
+    if tapping:
+        level = max(level, max(0.0, 1.0 - dist / TAP_RANGE) * (TAP_WALL_LOSS**walls))
+    level += rng.normal(0.0, noise)
+    spread = TAP_BEARING_NOISE if tapping else 5.0
+    bearing = relative_bearing(origin, yaw, casualty_pos) + rng.normal(0.0, spread)
     bearing = (bearing + 180.0) % 360.0 - 180.0
     return {"bearing": round(float(bearing), 1), "level": round(float(np.clip(level, 0.0, 1.0)), 3)}
 
