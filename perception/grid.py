@@ -8,6 +8,10 @@ Change detection (Z1) is a scan diff, never sim truth: `begin_change()` (called 
 freezes what every seen cell was. After it, a cell that was well-seen free (3+ passes) and now returns
 2+ hits has `appeared` (debris landed there); a cell that was occupied and now has 3+ rays passing
 through it with no hit has `cleared` (what stood there moved), and is set free.
+
+Shadow (STALE-OCCLUDED): a ray that hits an `appeared` cell cannot see past it, so the seen-free cells up to
+SHADOW behind it on that ray, which no ray has passed through since the change, are forgotten (unknown): the
+debris may reach into them. A later ray through them re-earns them as free.
 """
 
 import math
@@ -22,6 +26,7 @@ WALLED = 3            # an unknown cell with this many seen, occupied side neigh
 APPEAR_HITS = 2       # returns after a change in a cell that was free before: something landed there
 CLEAR_PASSES = 3      # rays through a cell that was occupied before, with no return: it moved away
 FREE_PASSES = 3       # a cell counts as "free before" only after this many rays passed through it
+SHADOW = 0.5          # metres behind an appeared cell, along the ray, whose stale free cells are forgotten
 
 
 def cell_of(p, res=RES):
@@ -150,7 +155,19 @@ class Grid:
             c = cell_of((x + r * dx, y + r * dy, z), self.res)
             self.hit(c)
             hits.add(c)
+            if c in self.appeared:
+                self._shadow((x, y, z), (dx, dy), r, c)
         self.infer(hits)
+
+    def _shadow(self, pos, d, r, hit):
+        """Forget the free cells up to SHADOW behind `hit` on this ray that no ray has crossed since the change."""
+        s = r + self.res
+        while s <= r + SHADOW + 1e-9:
+            c = cell_of((pos[0] + s * d[0], pos[1] + s * d[1], pos[2]), self.res)
+            cur = self.cells.get(c)
+            if c != hit and cur is not None and not cur["occupied"] and self.after.get(c, (0, 0))[1] == 0:
+                self.forget([c])
+            s += self.res
 
     def add_sensors(self, data):
         """Update from one sensors/scout payload: {"pose": {"pos": [x, y, z], ...}, "lidar": [ranges]}."""
