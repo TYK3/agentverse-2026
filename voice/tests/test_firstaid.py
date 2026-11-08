@@ -44,6 +44,18 @@ def test_core_actions_present():
     assert expected_actions.issubset(actions), f"Missing required actions: {expected_actions - actions}"
 
 
+def test_casualty_lines_are_short_and_only_on_self_care_steps():
+    """ref FIRSTAID-SOURCES: steps for a bystander (check breathing, recovery position) are never said to the
+    trapped casualty; every casualty_line is short and plain."""
+    lines = {s["action"]: s.get("casualty_line") for s in firstaid.get_steps()}
+    assert lines["check_breathing"] is None and lines["recovery_position"] is None
+    for action in ("control_bleeding", "protect_spine", "keep_limb_still", "protect_airway_from_dust", "keep_warm"):
+        line = firstaid.casualty_line(action)
+        assert 0 < len(line.split()) <= 20, action
+    with pytest.raises(ValueError):
+        firstaid.casualty_line("check_breathing")
+
+
 def test_disclaimer_present():
     data = firstaid.load_firstaid_data()
     assert "disclaimer" in data

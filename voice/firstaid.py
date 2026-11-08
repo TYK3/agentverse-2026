@@ -36,6 +36,15 @@ def get_step(action_or_id: str, path: Path | str | None = None) -> dict[str, Any
     return None
 
 
+def casualty_line(action: str, path: Path | str | None = None) -> str:
+    """What the robot says to a trapped casualty for `action`: the step's `casualty_line`, so the spoken
+    line and its cited source live in one place (ref FIRSTAID-SOURCES). Raises if the step has none."""
+    step = get_step(action, path)
+    if step is None or not step.get("casualty_line"):
+        raise ValueError(f"First aid step {action!r} has no casualty_line")
+    return step["casualty_line"]
+
+
 def format_guidance(step: dict[str, Any]) -> str:
     """Format a step into guidance for a human to follow aloud."""
     title = step.get("title", "First Aid Step")
