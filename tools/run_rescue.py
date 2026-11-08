@@ -16,8 +16,10 @@ a route (whichever it actually drives; the first proposal may be a re-look) and 
 physics check and move permit; then the shift: block landed, permit revoked by what the robots sensed, the
 Responder stopped and stays stopped; then the fresh recheck: a permit granted again (the same route
 re-earned, or a new verified route that avoids the block), the Responder moving again, the supply
-placed by the casualty, the handover report. --b1 adds the L4 descent (sim.demo_descent, #114),
-which is not on the hub: it runs only if that module is installed and is logged as its own stage.
+placed by the casualty, the handover report. --b1 adds the L4 descent to B1, which is not on the hub,
+logged as its own stage: tools/run_b2.py with floor B1 (B1-SLAB-EVENT: a slab lands on the Scout's
+route on B1, then the stop, the fresh re-map and the re-plan are logged as `_b1/*` records and checked
+as one more step), or sim.demo_descent (descent only) where run_b2 is missing.
 
 runs/rescue-<seed>.jsonl gets every bus message as {"t","topic","data"} (a message the hub rejected
 carries "rejected"), plus runner records whose topic starts with "_": _probe/pose (sampled poses),
@@ -292,7 +294,60 @@ def stray_placements(rec):
     return out
 
 
+B1_SHIFT_STEPS = ("slab dropped on the planned route on the target floor", "Scout stopped short of the slab",
+                  "slab mapped from the Scout's own measurements", "re-planned route avoids the slab",
+                  "Scout never entered the slab")
+B1_EVENTS = ("level", "shift", "mapped", "relook", "summary", "verdict")
+
+
+def b1_stage(records):
+    """B1-SLAB-EVENT: turn a tools/run_b2.py floor-B1 run into what this log carries.
+
+    Returns (notes, stage, shift_ok, shift_detail): notes are (topic, data) pairs, one `_b1/<kind>` per
+    shift/level/mapped/relook/summary/verdict record and each plan after the shift, plus `_probe/b1_cell`
+    each time the Scout enters a new cell. stage keeps the `_runner/stage` shape the console reads.
+    The B1 stage is off the hub (LevelWorld, no move permits), so the recheck is the Scout's own
+    fresh map of the slab and a re-plan around it; stage["permit"] says so."""
+    notes, last_cell = [], None
+    shift_t = next((r["t"] for r in records if r["kind"] == "shift"), None)
+    for r in records:
+        kind = r["kind"]
+        if kind == "pose":
+            if r.get("cell") != last_cell:
+                last_cell = r.get("cell")
+                notes.append(("_probe/b1_cell", {"cell": last_cell, "t": r["t"]}))
+        elif kind in B1_EVENTS or (kind == "plan" and shift_t is not None and r["t"] >= shift_t):
+            notes.append((f"_b1/{kind}", r))
+    summary = next((r for r in records if r["kind"] == "summary"), {})
+    verdict = next((r for r in records if r["kind"] == "verdict"), {"steps": {}})
+    stage = {"stage": "b1", "levels": [r["level"] for r in records if r["kind"] == "level"],
+             "reached": summary.get("reached") is True, "final_pos": summary.get("final_pos"),
+             "max_jump": summary.get("max_jump"), "responder_route": summary.get("route"),
+             "route_k": summary.get("route_k"), "shift_t": shift_t,
+             "permit": "none: the B1 stage is off the hub; recheck = fresh LiDAR map + re-plan"}
+    steps = verdict.get("steps", {})
+    bad = [n for n in B1_SHIFT_STEPS if not steps.get(n, {}).get("ok")]
+    detail = "; ".join(f"{n}: {steps.get(n, {}).get('detail', 'missing')}" for n in (bad or B1_SHIFT_STEPS[:4]))
+    return notes, stage, not bad, detail
+
+
 def b1_descent(rec, args):
+    try:
+        b2 = importlib.import_module("tools.run_b2")
+    except ModuleNotFoundError:
+        b2 = None
+    if b2 is not None:
+        _, path = b2.run(seed=args.seed, max_t=args.b1_time, floor="B1")
+        records = [json.loads(line) for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines()]
+        notes, stage, shift_ok, detail = b1_stage(records)
+        for topic, data in notes:
+            rec.note(topic, data)
+        rec.note("_runner/stage", stage)
+        rec.step("B1 descent (L4, not on the hub)", stage["reached"] and stage["levels"][:3] == ["L1", "ground", "B1"],
+                 f"levels {stage['levels']}, max move/tick {stage['max_jump']} m, responder route "
+                 f"{stage['responder_route']} k {stage['route_k']}")
+        rec.step("B1 slab shift: Scout stopped, re-mapped and re-planned around it", shift_ok, detail)
+        return
     try:
         demo = importlib.import_module("sim.demo_descent")
     except ModuleNotFoundError:
