@@ -1,202 +1,329 @@
-# AgentVerse 2026: Team Board
+<h1 align="center">AFTERSHOCK</h1>
 
-Our team's project repo for **AgentVerse 2026** (UCL AI Society hackathon, 7 to 8 November 2026), with a shared message board for our team. Every teammate's coding agent (Claude Code, Codex, Gemini, or any agent that can run a shell command) posts updates to one pinned GitHub issue, tags teammates, and waits for its own ping. Humans can post there too.
+<p align="center"><b>See first. Check the route. Then send help.</b><br>
+A two-robot search-and-rescue agent for collapsed buildings. A light Scout maps the ruin, the system
+predicts what may fall next, and a Responder carries supplies in only along routes that physics and a
+human have cleared.</p>
 
-![How the team board works](docs/how-it-works.svg)
+<p align="center">Built in one weekend for the <b>AgentVerse 2026 Robotics track</b> (UCL AI Society, London, 7 to 8 November 2026).</p>
 
-What we are building and how the five lanes fit together: `coord/CONTEXT.md`. How we work as a team of agents, and the repo settings the owner applies: `PLAYBOOK.md`.
+<p align="center">
+  <img alt="Simulation" src="https://img.shields.io/badge/status-simulation%20prototype-b45309">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.12-3776ab">
+  <img alt="MuJoCo" src="https://img.shields.io/badge/physics-MuJoCo%204.0-444">
+  <img alt="Console" src="https://img.shields.io/badge/console-TypeScript%20%2B%20Three.js-3178c6">
+  <img alt="Offline" src="https://img.shields.io/badge/offline-Gemma%204%20E2B-6d28d9">
+  <img alt="Licence" src="https://img.shields.io/badge/licence-MIT-2f7a4f">
+</p>
 
-## What is this, in plain words
+<p align="center">
+  <img src="docs/images/console.png" alt="The operator console mid-run: route r3 revoked because the LiDAR saw debris inside it, a re-plan banner naming the trigger, an operator approval for clearing light rubble, and the casualty conversation" width="100%">
+</p>
 
-- **A group chat for our AI agents.** It is one pinned GitHub issue. Agents (and people) write short messages on it, like "login page is done, @teammate can your agent add the API route?"
-- **It does not write code and does not touch our files.** It only passes messages. Each person's agent still does its own coding on its own computer.
-- **Tags get flagged.** A small background command (`bash tools/board wait`) notices new posts and marks the ones that tag you. Add `--tagged` and it only wakes you when you are tagged.
-- **GitHub keeps score.** Tasks are GitHub issues. Finished work arrives as pull requests. The board is just where we talk.
-
-## Join in 3 steps
-
-1. **Install** [git](https://git-scm.com/downloads) and the [GitHub CLI](https://cli.github.com). On Windows, use Git Bash.
-2. **Log in to GitHub, once:** `gh auth login`
-3. **Clone the repo and run the setup check:**
-   ```
-   git clone https://github.com/TYK3/agentverse-2026
-   cd agentverse-2026
-   bash tools/setup
-   ```
-
-`tools/setup` checks everything and tells you exactly what to fix. When it says "You're in", you're done. Add `--post` to also post a hello on the board.
-
-Then start your coding agent from the repo folder and paste this:
-
-> Read AGENTS.md. Run `bash tools/board unread`. Keep `bash tools/board wait` running in the background. Post updates with `bash tools/board post "[<my name>'s <agent name>] ..."`.
-
-## Want your agent to set it up for you?
-
-Paste this to your agent (Claude Code, Codex, Gemini, anything that can run commands):
-
-> Set up the team board for me. The repo is https://github.com/TYK3/agentverse-2026. Follow the section "Agent setup manual" in its README exactly. Ask me whenever a step needs me.
-
-### Agent setup manual
-
-*This section is written for AI agents. If you are an agent: follow these steps in order, and stop and ask the human whenever a step says to.*
-
-1. **Check the tools.** Run `git --version`, `gh --version` and `bash --version`. If something is missing, tell the human what to install (git: https://git-scm.com/downloads, GitHub CLI: https://cli.github.com, on Windows use Git Bash) and ask before installing anything.
-2. **Check the GitHub login.** Run `gh auth status`. If not logged in, ask the human to run `gh auth login` in their own terminal (it opens a browser). Never ask for, read or type their password or token.
-3. **Get the repo.** If you are not already inside it: `git clone https://github.com/TYK3/agentverse-2026` then `cd agentverse-2026`.
-4. **Run the check.** `bash tools/setup`. If any line says FIX, do what it says (or ask the human), then run it again until it says "You're in".
-5. **Read `AGENTS.md` in full** and follow it from now on.
-6. **Catch up.** `bash tools/board read -n 10`. Tell the human in one or two lines what is on the board.
-7. **Ask the human two things:** the name to post under, and which folders or task are theirs (the owner table in `AGENTS.md`). Every post must start with `[<Name>'s <your agent name>]`, for example `[Sam's Codex]`.
-8. **Keep listening.** Ask the human to run `bash tools/board wait` in a second terminal, or start it in the background yourself if you can. Start it again each time it returns.
-9. **Say hello (ask first).** `bash tools/setup --post` posts a hello on the board.
-10. **Report back.** Tell the human what passed and what they still have to do.
-
-**Never:** push straight to `main`, change repo settings, post keys, tokens or passwords, take over another person's task without the team lead's say-so, or post anything that is not true about what you actually did.
-
-## Who does what
-
-- **Team lead (`@TYK3`).** Splits the project, creates the task issues, decides who owns which folders, and is the only one who moves work from one person to another.
-- **Everyone else.** Takes their tasks, works only in their own folders, and posts problems on the board.
-- **Anyone can post a problem.** Tag the owner of that area. If the owner does not answer, tag the lead.
-- **Humans outrank agents.** If an agent and a person disagree, the person decides.
-
-## How a task goes, start to finish
-
-1. **Task.** The lead creates a GitHub issue for it, for example issue 12 "login page". The issue list is our task list.
-2. **Take it.** Assign yourself the issue (`gh issue edit 12 --add-assignee @me`) and post on the board that you took it.
-3. **Branch.** Work on your own branch named `<issue number>-<short name>`, for example `12-login-page`. One branch per task, not per person, and nobody works on `main` directly.
-4. **Stay in your lane.** Edit only your own folders (the owner table in `AGENTS.md`). If you need a change in someone else's folder, ask on the board first.
-5. **Pull request.** When it is ready, open a PR that says `Closes #12`. Merging it closes the task by itself, so nobody ticks anything off by hand.
-6. **Post the result.** One or two lines with the PR link, how to run it, what was tested and what was not.
-7. **Review.** A person looks at anything shared (APIs, database schemas, env vars) before it is merged.
-
-Progress notes go as comments on the task issue (`gh issue comment 12 --body "..."`). The board is for handoffs, tags and blockers.
-
-## Checking what an agent did
-
-The board only shows what an agent says it did. To know what really happened, look at the work:
-
-- **Your own agents** work in your own clone, so the changes are already on your computer. Run the dev server (for example `npm run dev`), keep the page open, and use `git status` and `git diff` to see which files changed.
-- **A teammate's agent** works on their computer. You see it once they push a branch and open a PR. To try it, run `gh pr checkout 12` and start the dev server.
-- **Easiest for front-end work:** connect the repo to Vercel, Netlify or Cloudflare Pages. Every PR then gets its own link you can open in a browser without downloading anything.
-- **Screenshots and checks:** ask agents to put a screenshot in the PR, and use GitHub Actions to build and test every PR. A red or green mark is a quick signal.
-
-## If you use your own coding agent
-
-This works the same for Claude Code, Codex, Gemini, Cursor, or any agent that can run shell commands. Use your own account. Nothing is shared.
-
-1. Do the 3 join steps above.
-2. Start your agent from the repo folder, so it can find the rules. Codex, Gemini and most others read `AGENTS.md`. Claude Code reads `CLAUDE.md`, which points to the same file.
-3. Paste the starter message from the join steps, so it knows how to read and post on the board.
-4. **Claude Code only:** it also shows new board posts by itself at the start of a session and before every prompt, through the hooks in `.claude/`. Approve them when it asks, after reading the two short scripts in `.claude/hooks/`. Other agents have no hooks, so tell them to run `bash tools/board unread` at the start of each task.
-5. In a second terminal run `bash tools/board wait`, so you notice a tag while you are idle.
-6. Tell it things like "take issue 12, work on a branch, and post on the board when the PR is up".
-
-If you write code by hand, you can still use the board. The simplest way is to comment on the pinned issue on the GitHub website.
-
-One limit: an agent only reads the board when something prompts it. Nothing starts it by itself. `wait` tells your terminal, and you (or a loop like `while bash tools/board wait; do <your agent command>; done`) start the agent.
-
-## Robotics track: simulator setup (MuJoCo)
-
-MuJoCo is Google DeepMind's simulator. It runs on any laptop, so we build and watch the robot locally and only use a cloud GPU for heavy training.
-
-1. Install: `pip install -r requirements.txt` (use one shared virtual environment so every agent folder can use it).
-2. Check it works: `python tools/mujoco_check.py`, then `python -m mujoco.viewer` for a live window.
-3. Ready-made robots: clone `https://github.com/google-deepmind/mujoco_menagerie` next to this repo (72 robots, about 1.9 GB). Check one loads with `python tools/mujoco_check.py path/to/mujoco_menagerie`.
-4. Learn: the MuJoCo repo (`github.com/google-deepmind/mujoco`) has Colab tutorials and a browser demo, and `playground.mujoco.org` trains policies on a GPU in minutes.
-5. Robot brain: Gemini Robotics-ER is public in AI Studio, with a getting-started notebook in `github.com/google-gemini/robotics-samples`.
-
-**Stretch: Isaac Sim on Modal.** Isaac Sim does not run on a Mac, and a laptop GPU is too small, so it runs on a Modal GPU. `github.com/TheFloatingString/isaac-lab-on-modal` is a working Modal setup (needs a Modal login). Use the L40S GPU, because A100 and H100 lack the ray-tracing cores. The first launch can take over 10 minutes. There is no live window over Modal, so save camera frames and turn them into a video for the submission.
-
-## Watch the B1 scene (`tools/play.py`)
-
-The multi-level building (L1 down to basement B1, casualty c1) can be opened in a MuJoCo viewer without starting the hub or the console:
-
-```
-python tools/play.py                      # viewer on sim/scenes/levels.xml
-python tools/play.py --rescue             # live B1 rescue in that viewer
-python tools/play.py --rescue --no-viewer # same rescue, no window
-```
-
-`--rescue` runs the real Scout loop from `sim.demo_descent` (`LevelWorld`, `perception.levels`, `planner.levels`): the Scout finds c1 in B1 and a Responder route is planned over the map it built. GEMINI_MODE defaults to off. The levels scene has no Responder body or supply kit, so driving the Responder and placing a supply only happen if those bodies exist.
-
-With no `--rescue`, keys in the viewer are **S** (slab shift: the live aftershock), **C** (spawn a spare block if the scene has one) and **R** (reset to the launch pose). `--no-viewer`, `--headless`, or no `DISPLAY` never opens a window, so tests and CI cannot hang on one.
-
-## Several agents under one GitHub login
-
-If you run more than one agent with the same GitHub account, give each its own name with `BOARD_AGENT`, in the terminal where that agent runs:
-
-```
-export BOARD_AGENT="Anthony's Codex-2"
-```
-
-Or save it once in that agent's folder, so it works in any terminal or app that starts the agent there:
-
-```
-bash tools/board agent "Anthony's Codex-2"
-```
-
-What this changes:
-
-- **Each agent has its own read position.** One agent reading the board does not mark things as read for the others.
-- **You still see your other agents' posts.** Without `BOARD_AGENT` the board hides everything posted under your login. With it, only this agent's own posts are hidden.
-- **Posts get the right prefix automatically.** `bash tools/board post "done"` is posted as `[Anthony's Codex-2] done`, and a post that claims to be a different agent is refused.
-- **Aim a post at one agent.** Write `[for: Codex-1]` in it. That agent sees `<<< FOR YOU`. Your other agents see `<<< TAGS @tyk3, BUT FOR Codex-1` and can ignore it.
-
-Each agent should still work in its own clone of the repo (or its own `git worktree`), so two agents never edit the same files.
-
-## If two agents change the same file
-
-Nothing is overwritten. Each agent works on its own branch, so the clash shows up when the second pull request is merged, and GitHub says "This branch has conflicts". The agent then pulls `main` into its branch (`git pull --rebase origin main`), fixes the conflicting lines, pushes again, and asks on the board if it is unsure which version is right. To make it rare: keep to your own folders, ask on the board before touching a shared file (`package.json`, routes, database schema), keep branches short, and pull `main` before you start and before you open the pull request.
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `bash tools/setup` | Check your setup and get the message to give your agent |
-| `bash tools/board post "[Name's Agent] ..."` | Post to the board (must start with whose agent it is) |
-| `bash tools/board unread` | Show new posts since your last check; marks the ones that tag you |
-| `bash tools/board wait` | Block until someone else posts, then print it (`--interval S`, `--timeout S`, `--tagged` to wake only when you are tagged) |
-| `bash tools/board read -n 20` | Show the last 20 posts |
-| `bash tools/board whoami` | Print your GitHub login |
-| `bash tools/board agent "Sam's Claude"` | Save who this folder's agent is (run with no name to show it) |
-
-`wait` checks GitHub every 30 seconds, using one request when nothing is new. If it cannot reach GitHub (offline, or rate limited) it says so once and backs off, up to 10 minutes between tries. If many agents share one account, slow it down with `--interval 60`.
-
-**Settings** (environment variables, all optional)
-
-| Variable | What it does |
-|---|---|
-| `BOARD_ISSUE` | Issue number of the board (default 1) |
-| `BOARD_REPO` | `owner/name`, if you run outside the cloned repo |
-| `BOARD_AGENT` | Who this agent is, like `Anthony's Codex-2`. Or save it once per folder with `bash tools/board agent`. See the next section |
-| `BOARD_INTERVAL` | Seconds between checks in `wait` (default 30) |
-| `BOARD_LOGIN` | Use this login instead of asking `gh` (for tests) |
-
-The script checks these values before using them, so a typo gives a clear error instead of a strange one.
-
-## Team lead, once at kickoff
-
-1. Add your teammates as collaborators on the repo.
-2. Open an issue from the **Message board** template and pin it. It should be issue 1; if not, everyone runs `export BOARD_ISSUE=<number>`.
-3. In `AGENTS.md`, put in your teammates' GitHub logins and fill the owner table (area, owner, folders).
-4. Create the first task issues.
-5. Optional but recommended: in the repo settings, add a branch rule that requires a pull request before merging into `main`. Without it the "no pushing to `main`" rule is only a request, not a lock.
-
-## Troubleshooting
-
-- **`bash tools/setup` says FIX:** do what that line says, then run it again.
-- **"cannot work out the repository":** run from inside the cloned repo, or `export BOARD_REPO=owner/name`.
-- **"start the post with [<person>'s <agent>]":** add a prefix like `[Anthony's Claude]`.
-- **Nothing shows up:** check everyone is on the same issue number (`BOARD_ISSUE`).
-- **`gh` errors:** run `gh auth status`, then `gh auth login` again.
-- **I can read the board but not push code:** the lead has not added you as a collaborator yet.
-
-## Rules for everyone
-
-- If this repo is public, **never post keys, tokens or private data** in the board or in commits.
-- Humans outrank agents. Only the team lead reassigns work between teammates.
-- Keep posts short. Long chatter costs everyone's agents tokens.
+<p align="center"><a href="docs/technical-summary.pdf"><b>One-page technical summary (PDF)</b></a> ·
+<a href="docs/aftershock.md">Full spec</a> · <a href="coord/CONTRACT.md">Interfaces</a> · <a href="#quick-start">Quick start</a></p>
 
 ---
-MIT licensed. Copyright (c) 2026 Anthony Tan Yen Kun.
+
+## Contents
+
+- [Why](#why)
+- [What it does](#what-it-does)
+- [How it works](#how-it-works)
+- [Models and where they run](#models-and-where-they-run)
+- [Measured results](#measured-results)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Tests](#tests)
+- [Repository layout](#repository-layout)
+- [Safety and limits](#safety-and-limits)
+- [Roadmap](#roadmap)
+- [Team](#team)
+- [Licence and acknowledgements](#licence-and-acknowledgements)
+
+## Why
+
+After an earthquake, rescuers can't see inside a collapsed building, and an aftershock can bring more of
+it down on whoever goes in. Time matters: "the vast majority of survivors are brought out within 24 hours
+by local teams", and more than 90% within three days (Ilan Kelman, UCL, to AFP, 9 February 2023;
+[source](https://www.dailysabah.com/turkey/chances-of-survival-may-be-up-to-a-week-after-earthquakes-experts/news),
+an expert comment, not a study). Sending a person or a heavy machine in blind wastes those hours and adds
+risk.
+
+AFTERSHOCK splits the job in two. A small Scout, cheap to lose, goes in first and maps. The heavier
+Responder moves only when the route it would take has been seen, survives a simulated aftershock, and, if
+it is risky, has an operator's yes.
+
+**Who it's for**
+
+- **The USAR team lead or operator.** They decide where it's safe to send people or machines and approve
+  risky moves. Their hands are often busy, so every command works by voice or typed.
+- **The trapped casualty.** No screen and no login. They hear the Scout call out, answer by tapping or
+  speaking, and get supplies and spoken guidance in their own language.
+- **The next team in.** They read the handover report: what is safe, who is where, what was approved.
+
+## What it does
+
+**Maps what it has actually seen.** The Scout's LiDAR, depth camera, thermal channel and microphone build
+a map whose cells are *seen*, *inferred* or *unknown*. Only seen, free cells can carry a route. A re-look
+(sending the Scout back) is a decision the planner makes, not a fallback.
+
+**Finds people without faces.** Casualty position and confidence come from body pose, a warm patch in the
+thermal image and the bearing of tapping or speech. Simulated vitals are labelled as simulated.
+
+**Predicts what will fall.** Before any shake, depth points flag blocks that look poorly supported. After
+one, a LiDAR scan diff shows what moved. Cells are *stable*, *at risk* or *collapsed*.
+
+**Checks every route with physics.** Local A* proposes a Responder route; MuJoCo shakes the scene against
+it. A block that would land on the route rejects it. Passing earns a **move permit**.
+
+**Adapts when the building moves.** Any sensed change (an aftershock, debris that shifts, a block dropped
+live from the console) revokes the permit. The Responder stops on the spot, the Scout re-scans, and the
+new route is drawn with a one-line reason.
+
+**Delivers and talks.** The Responder carries water, a first aid kit, a radio, a bandage, a splint and a
+thermal blanket, and can clear light rubble with its arm. The casualty hears the Scout in their own
+language and gets short, cited first aid steps for a human to follow.
+
+**Keeps working offline.** Routing, the confidence gate and the handoff run on the device. A local Gemma 4
+model reads goals when the network drops, inside a budget shown live on the console.
+
+**Writes the handover.** At the end of a run it drafts a report from the reasoning log: map, casualties and
+confidence, hazards, routes and re-plans, supplies delivered and every approval.
+
+<p align="center">
+  <img src="docs/images/building.png" alt="The building scene after the aftershock: a two-storey frame with a slab and a wall section fallen outwards and rubble across the ground" width="80%">
+</p>
+<p align="center"><sub>The building scene in MuJoCo after an aftershock: the slab and a wall section have come down.</sub></p>
+
+## How it works
+
+Five lanes run as asynchronous Python tasks on one validated topic bus. The browser console connects over a
+WebSocket. Each lane talks only through typed topics, so any lane can be replaced by a fake and tested on
+its own ([`coord/CONTRACT.md`](coord/CONTRACT.md)).
+
+```mermaid
+flowchart LR
+  subgraph Sim["sim/ (MuJoCo)"]
+    world["World, Scout, Responder<br/>sensors at 10 Hz"]
+    check["Physics route check"]
+    shock["Aftershock / inject"]
+  end
+  subgraph Perception["perception/"]
+    grid["Seen / inferred / unknown map"]
+    cas["Casualty fusion<br/>pose + thermal + sound"]
+    haz["Hazards<br/>stability + scan diff"]
+  end
+  subgraph Planner["planner/"]
+    astar["Local A* route"]
+    gate["Confidence gate<br/>act / re-look / refer"]
+    permit["Move permit"]
+    report["Handover report"]
+  end
+  subgraph Voice["voice/"]
+    talk["Casualty talk<br/>translation, first aid"]
+  end
+  console["console/<br/>3D map, reasoning, approvals"]
+
+  world -- "sensors/scout" --> grid & cas & haz
+  grid -- "map/cells" --> astar
+  haz -- "map/hazards" --> astar
+  astar -- "route/proposed" --> check
+  check -- "route/verified" --> permit
+  haz -- "sensed change" --> permit
+  permit -- "permit/route" --> gate
+  gate -- "gate/request" --> console
+  console -- "gate/answer" --> gate
+  gate -- "responder/action" --> world
+  shock -- "world/change" --> haz
+  cas -- "map/casualties" --> talk
+  world -- "responder/pose, log/decision" --> console
+  report --> console
+```
+
+**What happens when the building moves**
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant S as Sim (MuJoCo)
+  participant P as Perception
+  participant Pl as Planner
+  participant R as Responder
+  participant O as Operator
+
+  Pl->>S: route/proposed r2
+  S-->>Pl: route/verified (physics ok)
+  Pl->>R: move r2 (permit granted)
+  S->>P: block lands on r2
+  P->>Pl: LiDAR hit inside the route
+  Pl->>R: permit revoked, stop
+  P->>P: Scout re-scans the route cells
+  Pl->>S: route/proposed r3 (avoids the block)
+  S-->>Pl: route/verified
+  Pl->>O: risky? ask first
+  O-->>Pl: approve
+  Pl->>R: move r3, place supply
+```
+
+We kept movement out of the language models on purpose. Timers, thresholds, routing and the gate are
+ordinary code, so the same seed gives the same decisions. A model answer is logged with a receipt but never
+grants movement: only physics and the permit do.
+
+## Models and where they run
+
+| Function | Model or method | Runs on | Measured latency or budget |
+|---|---|---|---|
+| Routing, confidence gate, handoff | Local A*, rule-based gate | Device | under 50 ms per step |
+| Offline goal reading | Gemma 4 E2B (`gemma4:e2b`, Q4_K_M) via Ollama 0.40.15 | Device | 1.8 to 2.8 s warm, 19 s cold (pre-warmed); 4.1 GB resident. Budget 5,000 MB and 4,000 ms per step, metered live |
+| World, sensors, route check | MuJoCo 4.0.0 | Device | 0.6 to 0.9 ms per 2 ms physics step |
+| Mapping, casualty fusion, hazards | Python | Device | 15.7 ms per sensor frame (970-frame replay) |
+| Camera check, casualty talk, translation, report | `gemini-3.8-flash` | Cloud, optional | Advisory only. Every call logs a receipt with its wall time; capped at 300 calls an hour |
+| Spatial look points, approval routing | `gemini-robotics-er-2-preview`, `gemini-3.5-flash-lite` | Cloud, optional | as above |
+| Operator voice, photo to scene | `gemini-3.8-live` with `gemini-3.8-flash-tts`, `gemini-4-argon` | Cloud, optional | as above |
+
+"Device" is the demo laptop: CPU only, 8 GB RAM, no GPU (WSL2, 12 threads). With `GEMINI_MODE=off` every
+cloud feature falls back to a local stand-in and the whole run still completes. On real robots the planner
+would run on a Jetson Orin NX 16 GB ([`docs/hardware.md`](docs/hardware.md)).
+
+## Measured results
+
+From runs on 8 November 2026, `GEMINI_MODE=off`, auto-approve.
+
+| Run | Result |
+|---|---|
+| Backup scene, 150 s, aftershock at 75 s | Supplies placed beside the casualty; re-plan 4 s after the aftershock; no hub errors |
+| Tower scene, same | Water 0.09 m from the casualty; re-plan 0.2 s after the aftershock; no hub errors |
+| Building scene, same | Water 0.19 m from the casualty; re-plan 0.2 s after the aftershock; no hub errors |
+| Aftershock on a live route (B1 run) | Block lands 50.1 s, permit revoked 50.1 s, re-granted after a fresh check 52.3 s, moving again 53.1 s (sim time) |
+| B1 end-to-end checks | Seeds 3, 4, 5, 18 and 19 pass 17/17 (seed 3 has also scored 15/17 on a rerun) |
+| Multi-level descent to B2 | Seeds 0 to 4 pass 9/9: the Scout descends, maps a dropped slab, re-routes and reaches the casualty |
+
+The test suites hold about 900 Python tests and 36 browser tests. A baseline comparison harness and its raw
+results are in [`eval/`](eval/).
+
+## Quick start
+
+**Requirements:** Python 3.12, Node.js 20.19 or later (for Vite 7), and a CPU that can run MuJoCo (no GPU needed). Linux,
+macOS or WSL2. Optional: [Ollama](https://ollama.com) with `gemma4:e2b` for the offline planner, and a
+`GEMINI_API_KEY` for the cloud features.
+
+```bash
+git clone https://github.com/TYK3/agentverse-2026
+cd agentverse-2026
+
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r coord/requirements.txt
+pip install -r voice/requirements.txt        # optional: live voice
+(cd console && npm install)
+```
+
+**Run the whole rescue** (hub, every lane and the console, then a replay of the run):
+
+```bash
+python tools/demo.py --scene backup --auto-approve --duration 150 --shift-at 75
+```
+
+The console opens at `http://127.0.0.1:5173`; the hub serves `ws://127.0.0.1:8000/ws`. Leave out
+`--auto-approve` to answer the approval cards yourself. `--shift-at` drops the aftershock in mid-run; the
+**Simulate Re-Plan** button in the console does the same whenever you like. Scenes: `backup`, `tower`, `building`.
+
+**Replay a recorded run** in story mode:
+
+```bash
+python tools/demo.py --replay console/public/runs/<file>.jsonl
+```
+
+**Run the hub on its own** (for example to connect your own client):
+
+```bash
+SIM_SCENE=backup uvicorn coord.hub:app --port 8000
+```
+
+## Configuration
+
+| Variable | Default | What it does |
+|---|---|---|
+| `GEMINI_MODE` | `off` | `off` uses local stand-ins, `replay` uses cached answers, `live` calls the API |
+| `GEMINI_API_KEY` | none | Read from the environment or `.env`, never from code |
+| `GEMINI_CAP_PER_HOUR` | `300` | Hard cap on live Gemini calls |
+| `SIM_SCENE` | `backup` | `backup`, `tower`, `building`, or a path to an MJCF file (`tools/demo.py` defaults to `building`) |
+| `SIM_CLOCK` | `wall` | `step` advances a fixed time per tick for repeatable runs |
+| `HUB_PROCESSES` | off | `1` runs the sim lane in its own process, so a slow planner step can't stall physics |
+| `PLANNER_LOCAL_MODEL` | `gemma4:e2b` | The Ollama model for offline goal reading |
+| `OLLAMA_HOST` | Ollama's default | Where the local model is served |
+
+## Tests
+
+Each lane has its own check (lint plus tests), and CI runs the same scripts:
+
+```bash
+bash sim/check.sh
+bash perception/check.sh
+bash planner/check.sh
+bash voice/check.sh
+bash coord/check.sh
+bash console/check.sh        # TypeScript build, smoke test, Playwright
+```
+
+For a quick pass on one lane: `GEMINI_MODE=off python -m pytest -q sim/tests`.
+
+## Repository layout
+
+| Path | What's there |
+|---|---|
+| [`sim/`](sim/) | MuJoCo scenes (backup, tower, building, multi-level), Scout and Responder models, sensors, the aftershock, the physics route check |
+| [`perception/`](perception/) | The seen/inferred/unknown grid, exploration, casualty fusion, hazard prediction, triage |
+| [`planner/`](planner/) | A* routing, the confidence gate, move permits, the Responder handoff, the offline Gemma planner, the edge budget, the handover report |
+| [`voice/`](voice/) | Operator voice, casualty contact and translation, cited first aid, emergency call preparation |
+| [`console/`](console/) | The operator console: 3D map, routes, reasoning log, budget meter, approvals, typed commands, story replay |
+| [`coord/`](coord/) | The topic bus and hub, message schemas, the Gemini wrapper with receipts, the interface contract |
+| [`hw/`](hw/) | Bridges toward real hardware (not used in the demo) |
+| [`tools/`](tools/) | The demo launcher, run and evaluation scripts, the team board |
+| [`eval/`](eval/) | Baseline evaluation harness and results |
+| [`docs/`](docs/) | Spec, technical summary, hardware and electronics concepts, the [team board manual](docs/team-board.md) |
+
+## Safety and limits
+
+- **A model never authorises movement.** Physics, a fresh scan and, for risky moves, the operator do.
+- **Risky moves and any emergency call need an explicit operator yes.** Every decision is logged with its
+  perception, model, physics result and outcome.
+- **No faces, no diagnosis.** Casualty vitals are simulated and labelled; first aid is cited guidance for a
+  human, not treatment.
+- **Simulation only.** Hazard and casualty outputs are estimates, not engineering or medical advice. The sim
+  robots are smaller than the real hardware they stand for (a real Jackal needs doorways of about 0.8 m).
+  Real deployment would need independent validation.
+
+## Roadmap
+
+| Area | This weekend | Next |
+|---|---|---|
+| Environment | Three MuJoCo scenes plus a multi-level descent | Scenes built from photos of real sites; fire and flood |
+| Scout | Simulated LiDAR, depth, thermal, sound | AgileX LIMO Pro with a LoRa relay for deep coverage |
+| Responder | One arm, light rubble only | Clearpath Jackal with a Kinova Gen3 lite; heavier clearing |
+| Hazards | Physics-based estimate | Structural models validated with engineers |
+| Autonomy | Local planner within a stated budget | Full on-robot autonomy on Jetson Orin |
+
+The hardware concept, with sources for every part, is in [`docs/hardware.md`](docs/hardware.md) and
+[`docs/electronics.md`](docs/electronics.md).
+
+## Team
+
+Built at AgentVerse 2026 by Anthony ([@TYK3](https://github.com/TYK3), team lead), Philbert
+([@PhillysTheBest](https://github.com/PhillysTheBest)), Alif ([@AlifKhan03](https://github.com/AlifKhan03)),
+Charlotte ([@Camellia526](https://github.com/Camellia526)) and Abia ([@13abiazt-a11y](https://github.com/13abiazt-a11y)).
+
+Each of us worked with our own coding agents. They coordinated on a shared message board, one pinned
+GitHub issue, so one person's agent could ask another's about an interface without anyone relaying it by
+hand. How it works: [`docs/team-board.md`](docs/team-board.md) and [`AGENTS.md`](AGENTS.md).
+
+## Licence and acknowledgements
+
+MIT, see [`LICENSE`](LICENSE).
+
+Physics by [MuJoCo](https://mujoco.org); 3D console by [Three.js](https://threejs.org); local model by
+[Gemma](https://ai.google.dev/gemma) on [Ollama](https://ollama.com); cloud models from the Gemini API.
+Third-party 3D asset credits are listed in the console (**3D asset credits**).
+
+AFTERSHOCK is a hackathon prototype in simulation. It is not a certified rescue system and must not be used
+to make real rescue decisions.
