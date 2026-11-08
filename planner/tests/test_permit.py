@@ -46,6 +46,26 @@ def test_verified_route_is_granted_with_evidence():
     assert out[1][1]["outcome"] == "permit granted"
 
 
+def test_a_relook_says_what_it_is_checking():
+    """ref RELOOK-HAS-ORIGIN (#371): the re-look's reason carries its cause, so a log or console line showing the
+    Scout's goto can say why, without finding the earlier permit/route."""
+    ps, _ = verified_permits()
+    out = ps.on_sensors(sweep(hit_at=1.0), 2.0)
+    cause = out[0][1]["evidence"][-1]["detail"]
+    reason = gotos(out)[0]["reason"]
+    assert reason.startswith("re-look to re-earn move permission on route r1") and cause in reason, reason
+    later = [g for k in range(30) for g in gotos(ps.on_sensors(elsewhere(), 2.5 + k * 0.5))]
+    assert later and all(cause in g["reason"] for g in later)      # the repeats say it too
+
+
+def test_a_hazard_relook_names_the_hazard():
+    ps, _ = verified_permits()
+    out = ps.on_hazards([{"cell": [12, 10, 0], "status": "at_risk", "why": "slab leaning 30 deg", "estimate": True}],
+                        2.0)
+    reason = gotos(out)[0]["reason"]
+    assert "slab leaning 30 deg" in reason, reason
+
+
 def test_failed_physics_is_never_granted():
     ps, out = verified_permits(ok=False)
     assert out[0][1]["granted"] is False

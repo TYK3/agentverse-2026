@@ -211,8 +211,12 @@ class Permits:
             sx, sy = scout_xy if scout_xy else ((unseen[0][0] + 0.5) * self.res, (unseen[0][1] + 0.5) * self.res)
             i, j = min(unseen, key=lambda c: math.hypot((c[0] + 0.5) * self.res - sx, (c[1] + 0.5) * self.res - sy))
         p.relook_at = t
+        # The cause rides along, so a log or console line showing this goto says what is being checked
+        # without finding the earlier permit/route (RELOOK-HAS-ORIGIN, #371).
+        cause = next((e["detail"] for e in reversed(p.evidence) if e["kind"] in ("shift", "hazard")), None)
+        reason = f"re-look to re-earn move permission on route {p.route}" + (f": {cause}" if cause else "")
         return [("scout/goto", {"target": [round((i + 0.5) * self.res, 3), round((j + 0.5) * self.res, 3), 0.075],
-                                "reason": f"re-look to re-earn move permission on route {p.route}"})]
+                                "reason": reason})]
 
     def _hazards_on(self, p: Permit) -> dict:
         return {c: self.hazards[c].get("why", "hazard") for c in p.colset if c in self.hazards}
