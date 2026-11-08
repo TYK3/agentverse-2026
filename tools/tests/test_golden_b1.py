@@ -19,7 +19,7 @@ ORDER = ["L1", "ground", "B1"]
 
 
 def load():
-    return [json.loads(line) for line in make_b1.GOLDEN.read_text().splitlines()]
+    return [json.loads(line)["data"] for line in make_b1.GOLDEN.read_text().splitlines()]
 
 
 def levels_in_order(events):
@@ -62,7 +62,7 @@ def test_live_descent_matches_golden():
     pytest.importorskip("mujoco")
     from sim.demo_descent import run
 
-    live = json.loads("[" + ",".join(make_b1.record(run(floor="B1")).splitlines()) + "]")
+    live = [json.loads(line)["data"] for line in make_b1.record(run(floor="B1")).splitlines()]
     gold = load()
     hint = "B1 descent changed; if deliberate, regenerate: python -m tools.tests.golden.make_b1"
     ev_live, ev_gold = live[1:-1], gold[1:-1]

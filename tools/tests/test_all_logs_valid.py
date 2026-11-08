@@ -17,7 +17,6 @@ KNOWN_NONCONFORMING = {
     'perception/fixtures/scout_backup_standin.jsonl': 'bus envelopes without top-level t',
     'sim/recordings/scout_backup.jsonl': 'bus envelopes without top-level t',
     'sim/recordings/scout_tower.jsonl': 'bus envelopes without top-level t',
-    'tools/tests/golden/b1_descent.jsonl': 'demo_descent meta/event rows, not a schema kind',
 }
 
 
