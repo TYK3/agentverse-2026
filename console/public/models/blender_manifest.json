@@ -1,17 +1,17 @@
 {
  "scene_version": 1,
- "source_commit": "7da9ec7",
+ "source_commit": "c70cbee",
  "builder": "tools/blender/build_scene.py",
  "blender": "4.2.3 LTS",
  "seed": 8112026,
- "units": "metres, Z up in Blender; glTF +Y up (console rotates +90 deg about X once)",
+ "units": "metres, Z up at scale 1 (export_yup off, MuJoCo/console frame, as aftershock.glb)",
  "sources": {
   "tower": "sim/scenes/tower.xml (boxes, ids, poses)",
   "basements": "AFTERLIGHT scene spec section 2 (illustrative, not in the sim yet)"
  },
  "files": {
   "blender_tower.glb": {
-   "bytes": 964108,
+   "bytes": 964116,
    "triangles": 9868,
    "bbox_min": [
     -2.05,

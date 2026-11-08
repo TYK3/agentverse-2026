@@ -10,8 +10,8 @@ Writes:
   console/public/models/blender_responder.glb   Responder (Jackal-class), 0.52 x 0.44 x 0.75 m incl. mast
   console/public/models/blender_manifest.json   dimensions, node names, triangle counts, file sizes
 
-Units: metres, Z up, +X east / robot forward, ground finished floor z = 0. The glTF exporter converts to
-+Y up (Blender's default), so the console rotates the loaded scene once by +90 degrees about X.
+Units: metres, Z up, +X east / robot forward, ground finished floor z = 0. Exported Z up at scale 1 (the
+console's MuJoCo frame, same convention as console/public/models/aftershock.glb): no rotation on import.
 
 The above-ground tower is read from the MJCF, never re-typed: every b<N> body with a box geom becomes a mesh
 of the same size, pose and id. Welded ("braced") blocks are merged per level and material so the GLB stays at
@@ -483,7 +483,7 @@ def select_tree(root):
 
 def export(root, path):
     select_tree(root)
-    bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB", use_selection=True, export_yup=True,
+    bpy.ops.export_scene.gltf(filepath=str(path), export_format="GLB", use_selection=True, export_yup=False,
                               export_apply=True, export_extras=True, export_cameras=False, export_lights=False,
                               export_image_format="AUTO", export_draco_mesh_compression_enable=False)
 
@@ -525,7 +525,7 @@ def main():
         "builder": "tools/blender/build_scene.py",
         "blender": bpy.app.version_string,
         "seed": SEED,
-        "units": "metres, Z up in Blender; glTF +Y up (console rotates +90 deg about X once)",
+        "units": "metres, Z up at scale 1 (export_yup off, MuJoCo/console frame, as aftershock.glb)",
         "sources": {"tower": "sim/scenes/tower.xml (boxes, ids, poses)",
                     "basements": "AFTERLIGHT scene spec section 2 (illustrative, not in the sim yet)"},
         "files": {},

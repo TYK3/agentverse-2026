@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 
 // BLENDER-LOOK: Blender robot and tower models, lighting, dust, robots following live poses.
 
-type Look = { robotsLoaded: boolean; towerLoaded: boolean; towerVisible: boolean; error?: string; dust: number; responderPoses: number; enabled: boolean };
+type Look = { lite: boolean; robotsLoaded: boolean; towerLoaded: boolean; towerVisible: boolean; error?: string; dust: number; responderPoses: number; enabled: boolean };
 type Bus = { dispatchBusMessage(topic: string, data: unknown): void };
 
 /** Robots loaded and the fixture replay done (it sends its own sensors/scout and responder/pose). */
@@ -15,6 +15,9 @@ async function ready(page: Page): Promise<void> {
     return w.aftershockLook.responderPoses >= 1 && Math.abs(w.aftershockMap.scoutGroup.position.z - 0.1) < 1e-6;
   }), { timeout: 15000 }).toBe(true);
 }
+
+// Small canvas: in software GL (CI) every pixel is CPU work shared with the other spec files' workers.
+test.use({ viewport: { width: 800, height: 500 } });
 
 const look = (page: Page) => page.evaluate(() => (window as unknown as { aftershockLook: Look }).aftershockLook);
 
@@ -39,7 +42,7 @@ test('robot models load at their true envelopes, Z up, standing on the floor', a
   await ready(page);
   const s = await look(page);
   expect(s.error).toBeUndefined();
-  expect(s.dust).toBeGreaterThan(0);
+  expect(s.dust).toBe(s.lite ? 0 : 700);                      // software GL (CI) gets the lite look
   // let the Scout settle on the fixture pose, then measure it unrotated
   await page.evaluate(() => (window as unknown as Bus).dispatchBusMessage('sensors/scout', { t: 1, pose: { pos: [0.5, 0.5, 0.0], yaw: 0 } }));
   await expect.poll(async () => (await probe(page, 'look-scout'))?.pos[0] ?? 0, { timeout: 15000 }).toBeCloseTo(0.5, 2);
@@ -115,6 +118,7 @@ test('the tower loads with ?look=tower: sim boxes, B1..B3 basements, cut-away so
   expect(b1.min[2]).toBeCloseTo(-1.1, 2);                    // B1 slab top -1.00, 0.10 m thick
   const ground = (await probe(page, 'level_g_static'))!;
   expect(ground.min[0]).toBeCloseTo(-2.05, 2);               // 4 m core + the sim's 0.05 m wall half thickness
+  await page.goto('about:blank');                             // stop drawing the tower: it starves other workers
 });
 
 test('a model that fails to load leaves the console primitives in place', async ({ page }) => {
@@ -135,4 +139,20 @@ test('?look=0 turns the look off', async ({ page }) => {
   const s = await look(page);
   expect(s.enabled).toBe(false);
   expect(s.robotsLoaded).toBe(false);
+});
+
+test('?robots=a1 keeps the A1 robots; ?look=full forces lights and dust even in software GL', async ({ page }) => {
+  await page.goto('/?fake=1&robots=a1&look=full');
+  await page.waitForTimeout(2500);
+  const s = await look(page);
+  expect(s.enabled).toBe(true);
+  expect(s.lite).toBe(false);
+  expect(s.robotsLoaded).toBe(false);
+  expect(s.dust).toBe(700);
+  const lights = await page.evaluate(() => {
+    const m = (window as unknown as { aftershockMap: { scene: { getObjectByName(n: string): unknown } } }).aftershockMap;
+    return [!!m.scene.getObjectByName('blender-look'), !!m.scene.getObjectByName('dust')];
+  });
+  expect(lights).toEqual([true, true]);
+  await page.goto('about:blank');
 });

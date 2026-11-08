@@ -11,9 +11,14 @@
 //   away. It is the scene the simulator runs (and, below ground, a proposal), not what perception mapped.
 // - PBR lighting (hemisphere + warm key + two amber emergency lamps; headlight beams are additive cones), exponential fog and a
 //   slow drift of dust (static under prefers-reduced-motion).
+// - The Blender robots replace whatever the map groups draw for the robots (primitives, or the A1 robots.glb
+//   from assets.ts); ?robots=a1 keeps the A1 robots and still applies the rest of the look.
+// - In software WebGL (no GPU, e.g. CI) the look is "lite": the robots and fog only, no extra lights and no
+//   drifting dust, so the console's own frame rate (and the fixture replay) is not starved. ?look=full forces
+//   the full look anyway (screenshots on a CPU box).
 // - ?look=0 turns all of it off. A model that fails to load leaves the console's own primitives in place.
 //
-// glTF is +Y up; the console is the MuJoCo frame (Z up), so each loaded scene is rotated once, +90 deg about X.
+// The GLBs are exported in the console's MuJoCo frame (metres, Z up, scale 1), like aftershock.glb: no rotation.
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -22,6 +27,7 @@ import type { MapViewer } from './map';
 
 export interface LookState {
   enabled: boolean;
+  lite: boolean;                 // software GL: robots and fog only
   robotsLoaded: boolean;
   towerLoaded: boolean;
   towerVisible: boolean;
@@ -37,6 +43,7 @@ const RESPONDER_ORIGIN_Z = 0.05;  // sim: the Responder's body origin is its cha
 const SNAP_M = 0.75;              // a pose jump longer than this is shown as a jump
 const EASE_S = 0.12;              // time constant for easing between pose samples
 const DUST_COUNT = 700;
+const LITE_DELAY_MS = 4000;      // software GL: start loading the robots this long after setup
 
 interface Follower {
   model: THREE.Object3D;
@@ -56,7 +63,6 @@ function floorZ(z: number, origin: number): number {
 
 function upright(root: THREE.Object3D): THREE.Group {
   const g = new THREE.Group();
-  root.rotation.x = Math.PI / 2;      // glTF +Y up -> console +Z up, once
   g.add(root);
   return g;
 }
@@ -76,6 +82,29 @@ function dustSprite(): THREE.Texture {
   return t;
 }
 
+function softwareGl(renderer: THREE.WebGLRenderer): boolean {
+  const gl = renderer.getContext();
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
+  const name = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
+  return /swiftshader|llvmpipe|softpipe|software/i.test(name);
+}
+
+/** Lite look: the same colour, texture, emission and opacity with Lambert shading (cheap in software GL). */
+function lambert(root: THREE.Object3D): void {
+  const done = new Map<THREE.Material, THREE.Material>();
+  root.traverse(o => {
+    const mesh = o as THREE.Mesh;
+    const std = mesh.material as THREE.MeshStandardMaterial;
+    if (!mesh.isMesh || !std?.isMeshStandardMaterial) return;
+    if (!done.has(std)) {
+      done.set(std, new THREE.MeshLambertMaterial({ color: std.color, map: std.map, emissive: std.emissive,
+        emissiveIntensity: std.emissiveIntensity, transparent: std.transparent, opacity: std.opacity,
+        depthWrite: std.depthWrite }));
+    }
+    mesh.material = done.get(std)!;
+  });
+}
+
 function kelvin(k: number): THREE.Color {
   // Tanner Helland's blackbody fit, good enough for lamp tints.
   const t = k / 100;
@@ -90,6 +119,7 @@ export function setupLook(viewer: MapViewer): LookState {
   const param = lookParam();
   const state: LookState = {
     enabled: param !== '0',
+    lite: false,
     robotsLoaded: false,
     towerLoaded: false,
     towerVisible: false,
@@ -103,13 +133,14 @@ export function setupLook(viewer: MapViewer): LookState {
   const scene = viewer.scene;
   const internals = viewer as unknown as { scoutGroup: THREE.Group; responderGroup: THREE.Group };
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  state.lite = param !== 'full' && softwareGl(viewer.renderer);
 
   // ---- light and air ---------------------------------------------------------------------------------
-  scene.traverse(o => {
-    if ((o as THREE.AmbientLight).isAmbientLight) (o as THREE.AmbientLight).intensity = 0.6;
-  });
   scene.background = new THREE.Color(0x0b1119);
   scene.fog = new THREE.FogExp2(0x0b1119, 0.04);
+  if (!state.lite) scene.traverse(o => {
+    if ((o as THREE.AmbientLight).isAmbientLight) (o as THREE.AmbientLight).intensity = 0.6;
+  });
   const hemi = new THREE.HemisphereLight(0xdbe8ff, 0x4a3c2c, 1.1);
   hemi.position.set(0, 0, 1);
   const key = new THREE.DirectionalLight(kelvin(5200), 1.6);
@@ -127,7 +158,7 @@ export function setupLook(viewer: MapViewer): LookState {
     lamp.position.set(x, y, z);
     lamps.add(lamp);
   }
-  scene.add(look);
+  if (!state.lite) scene.add(look);
 
   // Dust: sparse motes in and around the tower, drifting slowly and settling.
   const dustPos = new Float32Array(DUST_COUNT * 3);
@@ -151,8 +182,10 @@ export function setupLook(viewer: MapViewer): LookState {
   }));
   dust.name = 'dust';
   dust.frustumCulled = false;
-  scene.add(dust);
-  state.dust = DUST_COUNT;
+  if (!state.lite) {
+    scene.add(dust);
+    state.dust = DUST_COUNT;
+  }
 
   // ---- robots ----------------------------------------------------------------------------------------
   const followers: { scout?: Follower; responder?: Follower } = {};
@@ -192,8 +225,14 @@ export function setupLook(viewer: MapViewer): LookState {
 
   const idle = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void })
     .requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 300));
-  idle(() => {
+  const keepA1Robots = new URLSearchParams(window.location.search).get('robots') === 'a1';
+  // In software GL, parsing the models and compiling their shaders takes seconds of CPU: wait until the page has
+  // settled (the first bus messages and fixture replay are in) before starting.
+  const later = (cb: () => void) => (state.lite ? window.setTimeout(() => idle(cb, { timeout: 1500 }), LITE_DELAY_MS)
+    : idle(cb, { timeout: 1500 }));
+  if (!keepA1Robots) later(() => {
     Promise.all([loadModel('blender_scout.glb'), loadModel('blender_responder.glb')]).then(([s, r]) => {
+      if (state.lite) { lambert(s); lambert(r); }
       const scout = upright(s);
       scout.name = 'look-scout';
       headlight(scout, 0.17, 0.085, 0.7);
@@ -205,7 +244,7 @@ export function setupLook(viewer: MapViewer): LookState {
       followers.responder = { model: responder, target: new THREE.Vector3(), yaw: 0, has: false };
       state.robotsLoaded = true;
     }).catch(fail('robot models'));
-  }, { timeout: 1500 });
+  });
 
   // ---- tower -----------------------------------------------------------------------------------------
   let tower: THREE.Group | undefined;
@@ -232,6 +271,7 @@ export function setupLook(viewer: MapViewer): LookState {
           mesh.material = m;
         }
       });
+      if (state.lite) lambert(root);
       tower = upright(root);
       tower.name = 'look-tower';
       for (const [label, z] of [['B1 · illustrative', -0.35], ['B2 · illustrative', -1.35], ['B3 · illustrative', -2.35]] as const) {
@@ -241,7 +281,7 @@ export function setupLook(viewer: MapViewer): LookState {
         tower.add(tag);
       }
       scene.add(tower);
-      scene.add(lamps);
+      if (!state.lite) scene.add(lamps);
       state.towerLoaded = true;
       applyTower();
     }).catch(fail('tower model'));
@@ -293,7 +333,7 @@ export function setupLook(viewer: MapViewer): LookState {
     } else {
       step(followers.responder, rg, rg.position, rg.rotation.z, dt);
     }
-    if (!reducedMotion) {
+    if (!reducedMotion && !state.lite) {
       for (let i = 0; i < DUST_COUNT; i++) {
         dustPos[i * 3] += dustVel[i * 3] * dt;
         dustPos[i * 3 + 1] += dustVel[i * 3 + 1] * dt;
