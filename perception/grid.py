@@ -37,6 +37,7 @@ class Grid:
         self.layers = set()    # every k a cell was ever set in (the LiDAR layer, k = 1, in practice)
         self.before = None     # {cell: occupied} frozen by begin_change(), None before the first change
         self.before_passes = {}  # cell -> rays that had passed through it by begin_change()
+        self.before_hits = {}    # cell -> returns it had given by begin_change()
         self.after = {}        # cell -> [hits, passes] since begin_change()
         self.appeared = {}     # cell -> t: free before the change, returns hits now
         self.cleared = {}      # cell -> t: occupied before the change, rays pass through now
@@ -73,18 +74,35 @@ class Grid:
 
         A return beats a pass: a wall's face cell is partly free space, so a ray grazing the wall
         can pass through it. After a change, a cell that was occupied is cleared only by CLEAR_PASSES
-        rays with no return since.
+        rays with no return since, more passes than the returns it gave before the change, and no side
+        neighbour still standing (WALL-FLICKER: grazing rays along a wall that did not move cleared
+        its face cells, and the next return set them back, 258 cells flipping in a real run).
         """
         cur = self.cells.get(c)
         if self.before is not None:
             after = self.after.setdefault(c, [0, 0])
             after[1] += 1
-            if self.before.get(c) and after[0] == 0 and after[1] >= CLEAR_PASSES and c not in self.cleared:
+            if (self.before.get(c) and after[0] == 0 and after[1] >= CLEAR_PASSES
+                    and after[1] > self.before_hits.get(c, 0) and c not in self.cleared
+                    and not self._held(c)):
                 self.cleared[c] = self.t
                 if cur is not None:
                     cur["hits"] = 0
         if cur is None or cur["hits"] == 0:
             self._set(c, "seen", False)["passes"] += 1
+
+    def _held(self, c):
+        """A side neighbour is still standing: occupied before the change (as in _free_before) and
+        still returning hits since it.
+
+        A wall that did not move keeps returning, so its face cells stay put. A block that moved
+        away returns nothing anywhere, so its cells still clear together; a stray new return beside
+        it (free before) does not hold it."""
+        for f in SIDES:
+            n = (c[0] + f[0], c[1] + f[1], c[2])
+            if self.before.get(n) and self.after.get(n, (0, 0))[0] > 0:
+                return True
+        return False
 
     def _free_before(self, c):
         """Seen free before the change, by FREE_PASSES rays, and not touching anything occupied then.
@@ -99,6 +117,7 @@ class Grid:
         """A shake was felt: freeze what every seen cell was, and diff the scans that follow against it."""
         self.before = {c: cur["occupied"] for c, cur in self.cells.items() if cur["state"] == "seen"}
         self.before_passes = {c: cur.get("passes", 0) for c, cur in self.cells.items()}
+        self.before_hits = {c: cur.get("hits", 0) for c, cur in self.cells.items()}
         self.after = {}
         self.appeared, self.cleared = {}, {}
         if t is not None:
