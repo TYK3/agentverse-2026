@@ -55,7 +55,7 @@ def main():
                 "pose": {"pos": [round(v, 3) for v in pos], "yaw": round(yaw, 3)},
                 "lidar": [round(float(r), 3) for r in lidar(m, d, np.array(pos))],
             }
-            f.write(json.dumps({"topic": "sensors/scout", "data": data}, separators=(",", ":")) + "\n")
+            f.write(json.dumps({"t": data["t"], "topic": "sensors/scout", "data": data}, separators=(",", ":")) + "\n")
     print(f"wrote {n + 1} frames to {OUT}")
 
 

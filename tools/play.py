@@ -30,6 +30,38 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 DT = 0.1
+RES = 0.05            # perception / planner grid cell (m)
+SCOUT_HALF_DIAG = 0.128   # scout_chassis box 0.1 x 0.08 half extents: farthest face point from its centre
+
+
+def scout_clearance():
+    """Centre-to-centre distance at which a parked Scout no longer trips Responder.free_ahead.
+
+    free_ahead blocks when a ray from the Responder's centre hits anything within HALF_LEN + GAP + step,
+    and the Scout's chassis reaches SCOUT_HALF_DIAG from its own centre. One cell of margin on top.
+    """
+    from sim import responder as R
+
+    return R.HALF_LEN + R.GAP + R.SPEED * DT + SCOUT_HALF_DIAG + RES
+
+
+def clear_of_scout(cells, scout_xy, clear, res=RES):
+    """`cells` cut before the first cell on the goal floor whose centre is within `clear` of the Scout.
+
+    The Responder route is planned to where the Scout stopped, so its last cells sit under the parked
+    Scout. Only cells on the route's final layer count: a floor above or below can share x, y.
+    """
+    if not cells:
+        return []
+    import math
+
+    k_goal = cells[-1][2]
+    for n, c in enumerate(cells):
+        if c[2] != k_goal:
+            continue
+        if math.hypot((c[0] + 0.5) * res - scout_xy[0], (c[1] + 0.5) * res - scout_xy[1]) < clear:
+            return [list(x) for x in cells[:n]]
+    return [list(x) for x in cells]
 
 
 def parse(argv=None):
@@ -213,14 +245,17 @@ def descend(world, on_step=None, realtime=False, max_t=600.0, floor="B1", verbos
     start = world.trace[0]
     responder = find_route(final, [], cell(start[1], start[2], start[3] - 0.075),
                            cell(here[0], here[1], world.floor_z))
-    ks = [c[2] for c in responder.get("cells", [])]
+    planned = responder.get("cells") or []
+    route = clear_of_scout(planned, (float(here[0]), float(here[1])), scout_clearance())
+    ks = [c[2] for c in route]
     return {
         "reached": reached, "t": round(world.t, 1), "levels": visited, "plans": plans,
         "max_jump": round(max_jump(world.trace), 4),
         "final_pos": [round(float(v), 3) for v in here],
         "responder_route": responder["status"],
         "route_k": (max(ks), min(ks)) if ks else None,
-        "route_cells": responder.get("cells") or [],
+        "route_cells": route,
+        "route_trimmed": len(planned) - len(route),
         "map": final, "log": log,
         "start_cell": cell(start[1], start[2], start[3] - 0.075),
         "goal_cell": goal_cell,

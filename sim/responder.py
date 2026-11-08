@@ -18,7 +18,11 @@ Messages (coord/CONTRACT.md):
 - in  `world/change`     freeze in place, drop the current move and the queue (wait for a new responder/action)
 - in  `permit/route`     L1: granted false stops a move on that route at once and refuses new moves on it
                          until a granted true arrives (routes with no permit message behave as before)
-- out `log/decision`     every action's outcome; refusals say outcome "refused" and why
+- out `log/decision`     every action's outcome; refusals say outcome "refused" and why. When the collision
+                         ray stops a move, a `ray_hit` record comes first (just before "blocked"): perception
+                         "responder ray hit at [x, y], cell [i, j, k]", reason "robot responder route <id> hit
+                         <geom> at [x, y] cell [i, j, k]" (the nearest ray hit, scene frame; cell = floor(pos / RES),
+                         k from the route), so the planner can mark the blocked cell
 
 Clearing debris is `grip_block(block_id)` / `release_block(block_id)`, reached from responder/action's
 optional `block` (Y2). Two mass limits: a block slid aside to clear a route may be up to LIGHT_KG; a block
@@ -56,6 +60,11 @@ SLOTS = {"water": (-0.1, 0.0, 0.11), "first_aid_kit": (0.0, 0.0, 0.08), "radio":
          "thermal_blanket": (0.0, 0.0, 0.122), "splint": (0.0, 0.0, 0.137), "bandage": (0.1, 0.0, 0.156)}
 BLOCK_SLOT_Z = 0.18         # above the tallest supply (water top is 0.17 over the Responder centre); add the block's half height
 PLACE_AHEAD = 0.08          # place_supply sets the item down this far in front of the chassis
+# KIT-SPOTS (#262): later items go beside earlier ones, not on them. Spots ahead of the gripper, nearest
+# first: centre, then PLACE_SIDE and twice that to each side, then a second row PLACE_ROW further out.
+PLACE_SIDE = 0.10           # metres between spots across the Responder's heading
+PLACE_ROW = 0.12            # metres between the two rows of spots
+PLACE_GAP = 0.02            # metres kept clear between a set-down item and any supply already on the floor
 
 
 def cell_centre(cell, res=RES):
@@ -98,6 +107,7 @@ class Responder:
         self.queue = []            # responder/action messages waiting for the current move to finish
         self.failed_routes = set()  # routes whose move was refused: their other actions are refused too
         self.log = []              # every log/decision this Responder published
+        self.last_hit = None       # nearest blocking ray hit of the last free_ahead: (x, y), geom name
         self.floor_z = float(self.pos[2]) - RIDE_Z   # floor under the chassis; follows ramps (levels.xml)
         self.pitch = 0.0           # nose-down tilt in radians, from the floor under the front and back
 
@@ -220,6 +230,17 @@ class Responder:
     def on_action(self, msg):
         """Run a responder/action now, or queue it behind the current move (the planner sends a whole
         move -> grip -> place_supply -> release sequence at once and there is no completion message)."""
+        # A re-plan supersedes the old mission, rather than waiting behind its move.
+        # Validate it first: a refused replacement must leave the current move intact.
+        if (msg.get("action") == "move" and msg.get("route") != self.route
+                and (self.state == "moving" or self.queue)):
+            old_route, dropped = self.route, len(self.queue)
+            result = self._run(msg)
+            if result["outcome"] != "refused":
+                self.queue = []
+                self._decide("replaced", f"route {old_route} replaced by {self.route}; "
+                                         f"dropped {dropped} obsolete queued action(s)")
+            return result
         if self.state == "moving" or self.queue:
             self.queue.append(dict(msg))
             return self._decide("queued", f"{msg.get('action')} {msg.get('item')} waits for the current move "
@@ -241,6 +262,8 @@ class Responder:
             out = self.move(route)
             if out["outcome"] == "refused":
                 self.failed_routes.add(route)
+            else:
+                self.failed_routes.discard(route)
             return out
         if route in self.failed_routes:
             # Never place or drop a supply where the Responder did not drive (its move was refused).
@@ -307,10 +330,41 @@ class Responder:
         self.d.eq_active[self._eq("carry_" + item)] = 0
         if tag.startswith("place_supply"):
             # Set it down on the floor just in front of the gripper (toward the casualty), upright and still.
-            fwd = np.array([math.cos(self.yaw), math.sin(self.yaw)])
-            x, y = self._put_down(item, self.pos[:2] + fwd * (HALF_LEN + PLACE_AHEAD))
+            x, y = self._put_down(item, self._free_spot(item))
             return self._decide("done", f"placed {item} at [{x:.2f}, {y:.2f}]", tag)
         return self._decide("done", f"released {item}", tag)
+
+    def _footprint(self, name):
+        """Radius (m) of body `name`'s footprint on the floor: a cylinder's radius, a box's half diagonal."""
+        geom = self.m.body_geomadr[self.m.body(name).id]
+        size = self.m.geom_size[geom]
+        if self.m.geom_type[geom] == mujoco.mjtGeom.mjGEOM_CYLINDER:
+            return float(size[0])
+        return float(math.hypot(size[0], size[1]))
+
+    def _free_spot(self, item):
+        """Where to set `item` down: the nearest spot ahead of the gripper clear of every supply already on the
+        floor (not held), so a later item never lands on an earlier one (KIT-SPOTS, #262). The first item goes
+        straight ahead, as before. If every spot is taken, straight ahead."""
+        fwd = np.array([math.cos(self.yaw), math.sin(self.yaw)])
+        side = np.array([-fwd[1], fwd[0]])
+        ahead = self.pos[:2] + fwd * (HALF_LEN + PLACE_AHEAD)
+        down = [(self.d.xpos[self.m.body(n).id][:2].copy(), self._footprint(n))
+                for n in SUPPLIES if n != item and not self.holding(n) and self._has_body(n)]
+        r = self._footprint(item)
+        for row in (0.0, PLACE_ROW):
+            for k in (0, 1, -1, 2, -2):
+                xy = ahead + fwd * row + side * (k * PLACE_SIDE)
+                if all(np.linalg.norm(xy - p) >= r + q + PLACE_GAP for p, q in down):
+                    return xy
+        return ahead
+
+    def _has_body(self, name):
+        try:
+            self.m.body(name)
+        except KeyError:
+            return False
+        return True
 
     def _put_down(self, name, xy):
         """Lower free body `name` onto the floor at xy (upright, at rest); the gripper's last move."""
@@ -386,13 +440,48 @@ class Responder:
         up = np.cross(fwd, side)
         need = HALF_LEN + GAP + step
         geomid = np.zeros(1, dtype=np.int32)
+        nearest = None
         for z in RAY_HEIGHTS:
             for offset in (0.0, HALF_WIDTH, -HALF_WIDTH):
                 origin = np.array([*self.pos[:2], self.floor_z + RIDE_Z]) + up * (z - RIDE_Z) + side * offset
                 dist = mujoco.mj_ray(self.m, self.d, origin, fwd, None, 1, self.body, geomid)
                 if 0 <= dist < need and not self._carried_geom(int(geomid[0])):
-                    return False
-        return True
+                    if nearest is None or dist < nearest[0]:
+                        nearest = (dist, origin + fwd * dist, int(geomid[0]))
+        if nearest is None:
+            self.last_hit = None
+            return True
+        _, point, geom = nearest
+        self.last_hit = ((float(point[0]), float(point[1])),
+                         mujoco.mj_id2name(self.m, mujoco.mjtObj.mjOBJ_GEOM, geom) or f"geom{geom}")
+        return False
+
+    def _hit_cell(self, xy):
+        """Grid cell of a scene-frame (x, y), as perception's map: floor(pos / RES); k from the current route."""
+        cells = self.routes.get(self.route) or []
+        k = 0
+        if cells:
+            near = min(cells, key=lambda c: float(np.linalg.norm(cell_centre(c) - np.asarray(xy))))
+            k = int(near[2]) if len(near) > 2 else 0
+        return [math.floor(xy[0] / RES), math.floor(xy[1] / RES), k]
+
+    def _report_hit(self):
+        """Publish where the collision ray hit (log/decision outcome "ray_hit"), before the "blocked" record."""
+        if self.last_hit is None:
+            return None
+        (hx, hy), geom = self.last_hit
+        i, j, k = self._hit_cell((hx, hy))
+        data = {
+            "t": round(max(0.0, float(self.clock())), 2),
+            "perception": f"responder ray hit at [{hx:.3f}, {hy:.3f}], cell [{i}, {j}, {k}]",
+            "model": "sim",
+            "physics": "mujoco",
+            "outcome": "ray_hit",
+            "reason": f"robot responder route {self.route} hit {geom} at [{hx:.3f}, {hy:.3f}] cell [{i}, {j}, {k}]",
+        }
+        self.log.append(data)
+        self.publish("log/decision", data)
+        return data
 
     def _carried_geom(self, geom):
         """Geoms the Responder itself carries never block it."""
@@ -421,6 +510,7 @@ class Responder:
             heading = math.atan2(delta[1], delta[0])
             step = min(budget, dist)
             if not self.free_ahead(heading, step):
+                self._report_hit()
                 self._set_pose(self.pos[:2], heading)
                 dropped = len(self.queue)
                 self.path, self.queue, self.state = [], [], "blocked"
