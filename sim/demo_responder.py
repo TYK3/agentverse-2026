@@ -17,7 +17,7 @@ DT = 0.1
 # (x, y) corners in the scene frame; cells_along() turns them into 5 cm route cells at layer k=0.
 ROUTES = {
     # through the breach beside the rubble pile, across room 1, through the doorway, up to block b11
-    "r1": [(-0.48, -2.1), (-0.48, 0.25), (0.97, 0.25), (0.97, 0.47)],
+    "r1": [(-0.48, -1.77), (-0.48, 0.25), (0.97, 0.25), (0.97, 0.47)],
     # through the room 2/3 gap that b11 was blocking, then up to casualty c1
     "r2": [(0.97, 0.47), (1.77, 0.47), (1.77, 0.62)],
 }
