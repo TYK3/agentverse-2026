@@ -1,6 +1,7 @@
 """perception lane: the live map, casualties, hazard estimates and Scout exploration. The hub (coord/hub.py) calls `start(bus)` on startup."""
 
 import asyncio
+import math
 
 from perception.casualties import PROMPT, Casualties
 from perception.cloud import Cloud
@@ -15,7 +16,50 @@ PERIOD = 0.5          # map/cells and map/casualties (when changed) at 2 Hz
 SNAPSHOT_EVERY = 10   # ticks, so a full snapshot every 5 s
 EXPLORE_EVERY = 2     # ticks, so a frontier decision every 1 s
 
+KEY_MOVE_M = 0.05     # PERCEPTION-KEYFRAME: the grid scan and the depth cloud run on a frame only if the
+KEY_TURN_RAD = math.radians(5)   # Scout moved this far or turned this much since the last keyframe,
+STILL_EVERY = 5       # ... and at least every 5th frame (2 Hz) when still: cells in view keep earning the
+                      # FREE_PASSES / CLEAR_PASSES the scan diff needs to call a change
+FORCE_AFTER_CHANGE_S = 10.0   # every frame for this long after world/change (the scan diff counts passes)
+FORCE_AFTER_GOTO_S = 5.0      # ... and after a scout/goto (a re-look wants every frame of what it sees)
+
 _tasks = set()        # keeps the publish loop from being garbage collected
+
+
+class Keyframe:
+    """Decides, once per sensors/scout frame, whether the geometry work (grid scan, depth cloud) runs.
+
+    Only geometry is keyframed. Casualties (sound is averaged over consecutive frames, and the Listener
+    stops the Scout to hear taps) and hazard motion (debris moving in front of a still Scout) need
+    every frame, and so does perception's clock (grid.t)."""
+
+    def __init__(self, move=KEY_MOVE_M, turn=KEY_TURN_RAD, still_every=STILL_EVERY):
+        self.move, self.turn, self.still_every = move, turn, still_every
+        self.last = None              # (x, y, yaw) of the last keyframe
+        self.skipped = 0              # frames skipped since it
+        self.force_until = float("-inf")
+        self.current = True           # the decision for the frame being handled now
+
+    def force(self, t, hold):
+        self.force_until = max(self.force_until, t + hold)
+
+    def due(self, data):
+        pose = data.get("pose") or {}
+        pos, yaw, t = pose.get("pos"), pose.get("yaw", 0.0), data.get("t", 0.0)
+        if pos is None:
+            self.current = True
+            return True
+        due = self.last is None or t <= self.force_until or self.skipped + 1 >= self.still_every
+        if not due:
+            lx, ly, lyaw = self.last
+            turned = abs((yaw - lyaw + math.pi) % (2 * math.pi) - math.pi)
+            due = math.hypot(pos[0] - lx, pos[1] - ly) >= self.move or turned >= self.turn
+        if due:
+            self.last, self.skipped = (pos[0], pos[1], yaw), 0
+        else:
+            self.skipped += 1
+        self.current = due
+        return due
 
 
 async def start(bus):
@@ -33,7 +77,17 @@ async def start(bus):
         # land on a different world each run, and the same seed would not repeat (demo60, #31).
         return grid.t
 
-    bus.subscribe("sensors/scout", grid.add_sensors)
+    key = Keyframe()
+
+    def scan(data):
+        # First sensors/scout subscriber: decides the keyframe for this frame. grid.t is perception's
+        # clock, so it advances on every frame, scanned or not.
+        if key.due(data):
+            grid.add_sensors(data)
+        else:
+            grid.t = data.get("t", grid.t)
+
+    bus.subscribe("sensors/scout", scan)
     bus.subscribe("sensors/scout", explorer.on_sensors)
     casualties = Casualties()
 
@@ -57,16 +111,24 @@ async def start(bus):
     bus.subscribe("sensors/scout", listen)
     bus.subscribe("scout/goto", lambda d: listener.on_goto(d, now()))   # yield to permit re-looks
     hazards = Hazards(grid, Cloud(grid.res))
-    bus.subscribe("sensors/scout", hazards.on_sensors)
+
+    def hazard_frame(data):
+        if key.current:
+            hazards.cloud.add_sensors(data)       # depth points: geometry, keyframed
+        hazards.motion.add_sensors(data)          # debris moving in view: every frame
+
+    bus.subscribe("sensors/scout", hazard_frame)
     _inspect(bus, now)          # G2: ER points, kept only where the depth points ground them
 
     def change(data):
+        key.force(now(), FORCE_AFTER_CHANGE_S)
         hazards.on_change(data)     # timed on the sensors clock, like the scan diff
         explorer.on_change(data)    # after hazards: it re-visits what was predicted at_risk
 
     bus.subscribe("world/change", change)
     bus.subscribe("map/hazards", explorer.on_hazards)
     bus.subscribe("scout/goto", lambda d: explorer.on_goto(d, now()))
+    bus.subscribe("scout/goto", lambda d: key.force(now(), FORCE_AFTER_GOTO_S))
     bus.subscribe("gate/decision", lambda d: explorer.on_decision(d, now()))
     TRIAGE.attach(bus)
     _spawn(_publish(bus, grid, explorer, casualties, hazards, now))
@@ -134,6 +196,7 @@ async def _publish(bus, grid, explorer, casualties, hazards, now):
 
 __all__ = [
     "TRIAGE",
+    "Keyframe",
     "Triager",
     "start",
     "triage_summary",
