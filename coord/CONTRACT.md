@@ -9,7 +9,11 @@ WebSocket gateway at `ws://localhost:8000/ws`. The wire envelope is
 Lanes expose `async def start(bus)` and use `bus.subscribe(topic, callback)` (sync or async callback)
 and `await bus.publish(topic, data)`. Every publish is validated against `coord.messages.TOPICS`.
 Browser clients may publish only `operator/command`, `gate/answer` and `status/link`; invalid messages close the
-connection with code 1008 before dispatch. The gateway forwards all topics except `sensors/scout`
+connection with code 1008 before dispatch. Over HTTP the console dev origin (`http://localhost:5173`,
+`http://127.0.0.1:5173`, plus `HUB_CORS_ORIGINS`) may call only `GET` and `POST`; its one write
+is the sim's `POST /inject {"kind":"aftershock"}` or `{"kind":"block_added","pos":[x,y,z]}`
+(T05). Without a live sim the hub answers 503 and publishes nothing; `world/change` still comes
+only from the sim once the change has happened (LIVE-UI). The gateway forwards all topics except `sensors/scout`
 and replays its latest 200 forwarded envelopes to each new connection. This is bounded event
 history, not a complete map snapshot: perception also publishes full map snapshots every 5 s (T08).
 `map/points` is a separate latest-only frame: only one bounded cloud is retained and
@@ -22,7 +26,7 @@ run started. These are first drafts: the owning lane refines them by PR.
 ## Messages
 | Name | Producer | Consumer | Shape |
 |---|---|---|---|
-| `scene/loaded` | sim | all | `{"scene":"backup"|"photo"|"tower"|"building",|"photo"|"tower",\|"photo","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
+| `scene/loaded` | sim | all | `{"scene":"backup"\|"photo"\|"tower"\|"building","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
 | `sensors/scout` | sim | perception, planner (L1 permits trace the LiDAR) | LiDAR ranges, camera frame, thermal grid, acoustic `{"bearing":deg,"level":0..1}`, pose |
 | `map/cells` | perception | planner, console | `{"t":0,"res":0.05,"cells":[{"cell":[i,j,k],"state":"seen"\|"inferred"\|"unknown","occupied":true}]}` |
 | `map/points` | hub from measured Scout depth | console (Y4) | `{"t":0.5,"res":0.05,"points":[[x,y,z],...],"points_from":[x,y,z]}`; max 2048 points/frame, at most 2 Hz, latest-only (D1) |
