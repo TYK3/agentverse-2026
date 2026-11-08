@@ -310,6 +310,14 @@
               "type": "null"
             }
           ]
+        },
+        "floor": {
+          "type": "string",
+          "enum": [
+            "B1",
+            "B2",
+            "B3"
+          ]
         }
       },
       "required": [
