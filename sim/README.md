@@ -88,4 +88,4 @@ Owner: see the owner table in `AGENTS.md`. Only this lane's agent edits files he
 - The true-scale Scout (`scout/scout`): `World` uses its LiDAR site as the sensor origin (`pose.pos`
   is that point, 0.26 m up), its `depth_cam` for frames, and its footprint for the drive check.
 - The Responder model is the true-scale one, but `sim/responder.py` still uses the small robot's
-  dimensions for its collision rays (owner: Abia's Claude).
+  dimensions for its collision rays (a follow-up in responder.py).
