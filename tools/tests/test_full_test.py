@@ -66,3 +66,17 @@ def test_summary_parses_pytest_line():
     assert full_test.summary("x\n==== 3 passed, 1 skipped in 0.12s ====\n") == "3 passed, 1 skipped"
     assert full_test.summary("no pytest here") == ""
     assert sys.executable
+
+
+def test_demo_rows_run_headless_or_skip(tmp_path):
+    root = make_repo(tmp_path)
+    (root / "sim").mkdir()
+    (root / "sim" / "__init__.py").write_text("")
+    (root / "sim" / "demo_aftershock.py").write_text(
+        "import sys\nprint('flags', sys.argv[1:])\n")
+    code, md = go(root, "--suite", "good")
+    assert code == 0
+    assert "| sim.demo_aftershock --no-viewer | PASS |" in md and "flags ['--no-viewer']" in md
+    assert "| sim.demo_descent | SKIPPED | module not on this checkout |" in md
+    code, md = go(root, "--suite", "good", "--no-demos")
+    assert "demo_aftershock" not in md

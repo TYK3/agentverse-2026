@@ -4,7 +4,8 @@ Each suite runs in its own subprocess with GEMINI_MODE=off and a timeout, so one
 hanging lane cannot stall the rest. The result goes to runs/full_test.md: a
 pass/fail table per suite and the last lines of each suite's output.
 
-The e2e rescue (tools/run_rescue.py) runs only if that file exists on this
+The sim demos (descent, responder, aftershock) run headless as rows too; each
+must exit 0. The e2e rescue (tools/run_rescue.py) runs only if that file exists on this
 checkout; otherwise it is reported as "skipped", never as passed.
 Exit code is 0 only when nothing failed or timed out.
 """
@@ -19,6 +20,8 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SUITES = ["coord/tests", "tools/tests", "sim/tests", "perception/tests", "planner", "voice/tests"]
+DEMOS = [("sim.demo_descent", []), ("sim.demo_responder", ["--headless"]),
+         ("sim.demo_aftershock", ["--no-viewer"])]
 RESCUE = "tools/run_rescue.py"
 TAIL_LINES = 25
 _SUMMARY = re.compile(r"^=*\s*(\d+ (?:passed|failed|errors?|skipped|deselected)\b.*?) in [\d.]+s",
@@ -59,7 +62,7 @@ def skipped(name, why):
             "summary": why, "tail": ""}
 
 
-def plan(root, suites, seed, rescue_timeout):
+def plan(root, suites, seed, rescue_timeout, demos=True):
     """List of (name, cmd, timeout|None) jobs; None cmd means skipped with a reason."""
     jobs = []
     for suite in suites:
@@ -68,6 +71,12 @@ def plan(root, suites, seed, rescue_timeout):
                                  "-p", "no:cacheprovider"], None))
         else:
             jobs.append((suite, None, "folder not on this checkout"))
+    for module, flags in DEMOS if demos else []:
+        name = " ".join([module, *flags])
+        if (root / (module.replace(".", "/") + ".py")).exists():
+            jobs.append((name, [sys.executable, "-m", module, *flags], rescue_timeout))
+        else:
+            jobs.append((name, None, "module not on this checkout"))
     if (root / RESCUE).exists():
         jobs.append((f"e2e rescue (seed {seed})",
                      [sys.executable, RESCUE, "--auto-approve", "--seed", str(seed)],
@@ -99,10 +108,11 @@ def report(results, started):
 def parse(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--timeout", type=float, default=600, help="seconds per pytest suite")
-    ap.add_argument("--rescue-timeout", type=float, default=300, help="seconds for the e2e run")
+    ap.add_argument("--rescue-timeout", type=float, default=300, help="seconds for each demo and the e2e run")
     ap.add_argument("--seed", type=int, default=1, help="seed for the e2e rescue")
     ap.add_argument("--suite", action="append", help="only these suites (repeatable)")
     ap.add_argument("--no-rescue", action="store_true", help="skip the e2e rescue")
+    ap.add_argument("--no-demos", action="store_true", help="skip the sim demo rows")
     ap.add_argument("--output", default="runs/full_test.md")
     return ap.parse_args(argv)
 
@@ -111,7 +121,8 @@ def main(argv=None, root=ROOT):
     args = parse(argv)
     started = time.strftime("%Y-%m-%d %H:%M:%S %Z")
     results = []
-    for name, cmd, extra in plan(root, args.suite or SUITES, args.seed, args.rescue_timeout):
+    for name, cmd, extra in plan(root, args.suite or SUITES, args.seed, args.rescue_timeout,
+                                  not args.no_demos):
         if name.startswith("e2e") and args.no_rescue:
             results.append(skipped(name, "--no-rescue"))
         elif cmd is None:
