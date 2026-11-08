@@ -117,6 +117,7 @@ class Responder:
         # those: x1_rubble and the Scout are non-colliding too, and must still stop it.
         self.passable = {geom for _, geom, _ in casualties(m)}
         self.wait_since = None     # sim time the Scout first stood in the way of this move (cause 3)
+        self.routeless_logged = False   # one "ignored" record per run of route-less supply commands
         self.floor_z = float(self.pos[2]) - RIDE_Z   # floor under the chassis; follows ramps (levels.xml)
         self.pitch = 0.0           # nose-down tilt in radians, from the floor under the front and back
 
@@ -239,6 +240,18 @@ class Responder:
     def on_action(self, msg):
         """Run a responder/action now, or queue it behind the current move (the planner sends a whole
         move -> grip -> place_supply -> release sequence at once and there is no completion message)."""
+        if (msg.get("action") in ("place_supply", "release") and msg.get("item") in SUPPLIES
+                and not msg.get("block") and msg.get("route") in (None, "none")):
+            # A supply is set down only at the end of a route the Responder drove. A route-less one
+            # (perception/triage.py, SUPPLY-ROUTELESS) put the water down at the start, where it then
+            # blocked every route. Ignored, not refused: a refusal would clear the queued delivery.
+            if not self.routeless_logged:
+                self.routeless_logged = True
+                return self._decide("ignored", f"{msg.get('action')} {msg.get('item')} has no route: supplies "
+                                               "are set down only at the end of a driven route")
+            return {"outcome": "ignored"}
+        if msg.get("action") == "move":
+            self.routeless_logged = False
         # A re-plan supersedes the old mission, rather than waiting behind its move.
         # Validate it first: a refused replacement must leave the current move intact.
         if (msg.get("action") == "move" and msg.get("route") != self.route
