@@ -398,6 +398,13 @@ class Responder:
         return {"state": self.state, "pos": [x, y], "yaw": round(self.yaw, 3), "route": self.route,
                 "carrying": [n for n in SUPPLIES if self.holding(n)]}
 
+    def pose_message(self, t):
+        """E2: the responder/pose payload, the Responder's actual pose this tick (sim.run publishes it at
+        10 Hz, so viewers draw its real, continuous motion instead of jumping to the route's end)."""
+        return {"t": round(max(0.0, float(t)), 2), "pos": [round(float(v), 3) for v in self.pos],
+                "yaw": round(self.yaw, 3), "state": self.state, "route": self.route,
+                "carrying": [n for n in SUPPLIES if self.holding(n)]}
+
 
 def attach(world, bus):
     """Wire a Responder into a sim World and the hub Bus and return it.
