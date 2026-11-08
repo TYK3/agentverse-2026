@@ -2,13 +2,14 @@ import { test, expect } from '@playwright/test';
 
 type Assets = {
   loaded: boolean; error?: string; buildingVisible: boolean; blocks: string[];
-  credits: { licence: string }[]; movedBlocks: string[];
+  credits: { licence: string }[]; movedBlocks: string[]; worldChanges: number;
   showBuilding(show: boolean): void; markMoved(ids: string[]): void;
 };
 const assets = (page: import('@playwright/test').Page) =>
   page.evaluate(() => {
     const a = (window as unknown as { aftershockAssets: Assets }).aftershockAssets;
-    return { loaded: a.loaded, error: a.error, visible: a.buildingVisible, blocks: a.blocks, credits: a.credits, moved: a.movedBlocks };
+    return { loaded: a.loaded, error: a.error, visible: a.buildingVisible, blocks: a.blocks, credits: a.credits,
+             moved: a.movedBlocks, changes: a.worldChanges };
   });
 
 test('A1: the demo model loads with every tower block named by its scene id, plus credits', async ({ page }) => {
@@ -28,6 +29,7 @@ test('A1: the demo model loads with every tower block named by its scene id, plu
 test('A1: the tower model shows only for the tower scene, and moved blocks turn to ghosts', async ({ page }) => {
   await page.goto('/?fake=1');                                  // fixtures replay the backup scene
   await expect.poll(async () => (await assets(page)).loaded, { timeout: 20000 }).toBe(true);
+  await expect.poll(async () => (await assets(page)).changes, { timeout: 20000 }).toBeGreaterThan(0);  // replay done
   expect((await assets(page)).visible).toBe(false);
   expect((await assets(page)).moved).toEqual([]);              // backup-scene world/change never marks tower blocks
   await page.evaluate(() => (window as unknown as { aftershockAssets: Assets }).aftershockAssets.showBuilding(true));

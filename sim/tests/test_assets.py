@@ -73,7 +73,7 @@ def test_console_model_has_every_block_and_part_and_fits_the_budget():
     blocks = {mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, i) for i in scene.block_ids(m)}
     assert blocks <= names, sorted(blocks - names)
     assert {"building", "annex", "scout", "responder", "first_aid_kit"} <= names
-    assert {name for name, *_ in annex.boxes()} <= names
+    assert {"annex_body", "ground", "rebar"} <= names                 # static extras, merged
     assert not any(n and n.startswith(("casualty", "c1", "c2", "c3", "c4")) for n in names)   # perception's job
 
 

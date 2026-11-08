@@ -9,9 +9,11 @@ the HDRI next to it and CREDITS.json. Headless Blender (the bpy wheel) does the 
 
 Nodes, so the console can find them by name:
   building/      b1..b27, one mesh per tower block, named by its block id (scene/loaded "id") and posed
-                 as in tower.xml; rebar_* rods and the ground (with the excavation pit) are visual extras
-  annex/         the basements and stair/lift core from sim/assets/annex.py (same boxes as the MuJoCo
-                 collision scene sim/scenes/tower_annex.xml), plus visual debris on B1 and in the pit
+                 as in tower.xml; "rebar" (rods out of the broken slab edges) and "ground" (with the
+                 excavation pit) are visual extras, each merged into one mesh
+  annex/         "annex_body": the basements and stair/lift core from sim/assets/annex.py (same boxes as
+                 the MuJoCo collision scene sim/scenes/tower_annex.xml) plus visual debris on B1 and in
+                 the pit, merged into one mesh (one draw call per material, not ~150)
   scout          menagerie Unitree Go1 in its home pose, fitted to the tower scene's Scout footprint
   responder      Quaternius Rover, fitted to the tower scene's Responder footprint (0.32 x 0.14 m)
   first_aid_kit  Quaternius First Aid Kit, fitted to the scene's kit box
@@ -49,6 +51,8 @@ GLB = OUT_DIR / "aftershock.glb"
 UV_TILE_M = 0.75         # one texture repeat per 0.75 m: brick courses in proportion to 0.3 m robots
 SATURATION = 0.25        # the Poly Haven texture is red-painted; keep a trace of the paint, mostly grey
 MAX_MB = 20.0
+GO1_FACES = 1500         # per Go1 part before merging
+ROBOT_FACES = 4000       # per merged robot: ~0.2 m on screen, so ~30k triangles halved the frame rate
 
 
 def _module(name):
@@ -311,7 +315,7 @@ def build_annex(mats, root):
     for lo, hi, n in piles:
         for _ in range(n):
             half = [rng.uniform(0.04, 0.16), rng.uniform(0.04, 0.12), rng.uniform(0.03, 0.08)]
-            bm = box_mesh("d", half, cuts=3)
+            bm = box_mesh("d", half, cuts=2)
             roughen(bm, half, 0.5, k + 100)
             c = (rng.uniform(lo[0], hi[0]), rng.uniform(lo[1], hi[1]), lo[2] + half[2] * 0.8)
             mw = Matrix.Translation(c) @ Matrix.Rotation(rng.uniform(0, math.pi), 4, "Z") \
@@ -328,9 +332,44 @@ def footprint(name):
     return [float(v) for v in m.geom_size[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, name)]]
 
 
+def merged(objs, name):
+    """Apply modifiers and join `objs` into one mesh: one draw call per material instead of one per part
+    (13 Go1 parts cost the console more frame time than the whole tower in software WebGL)."""
+    bpy.context.view_layer.update()
+    for o in objs:
+        mw = o.matrix_world.copy()
+        o.parent = None
+        o.matrix_world = mw
+        for mod in list(o.modifiers):
+            with bpy.context.temp_override(object=o, active_object=o):
+                bpy.ops.object.modifier_apply(modifier=mod.name)
+    if len(objs) > 1:
+        with bpy.context.temp_override(active_object=objs[0], selected_editable_objects=objs, selected_objects=objs):
+            bpy.ops.object.join()
+    objs[0].name = name
+    return objs[0]
+
+
+def merge_children(root, prefix, name):
+    kids = [o for o in root.children if o.type == "MESH" and o.name.startswith(prefix)]
+    if kids:
+        obj = merged(kids, name)
+        mw = obj.matrix_world.copy()
+        obj.parent = root
+        obj.matrix_parent_inverse = Matrix.Identity(4)
+        obj.matrix_world = mw
+
+
 def fit(root, objs, half, *, keep_height=False):
     """Uniformly scale and move `objs` (already posed in world space) so their xy bounds fit inside the
-    box `half`, centred, standing on z 0; then parent them to `root` at the origin."""
+    box `half`, centred, standing on z 0; then join them into one mesh parented to `root` at the origin."""
+    objs = [merged(objs, f"{root.name}_body")]
+    faces = len(objs[0].data.polygons)
+    if faces > ROBOT_FACES:                 # small on screen: keep the console fast in software WebGL
+        dec = objs[0].modifiers.new("decimate", "DECIMATE")
+        dec.ratio = ROBOT_FACES / faces
+        with bpy.context.temp_override(object=objs[0], active_object=objs[0]):
+            bpy.ops.object.modifier_apply(modifier=dec.name)
     bpy.context.view_layer.update()
     pts = [o.matrix_world @ Vector(c) for o in objs for c in o.bound_box]
     lo = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
@@ -371,12 +410,13 @@ def scout(root):
         me = bpy.data.meshes.new(f"go1_{g}")
         me.from_pydata(verts, [], faces)
         me.materials.append(mats[key])
+        me.shade_smooth()                       # shared vertices: a third of the flat-shaded size
         obj = bpy.data.objects.new(f"scout_part_{g}", me)
         bpy.context.collection.objects.link(obj)
         obj.matrix_world = pose_matrix(d.geom_xpos[g], d.geom_xmat[g])
-        if len(faces) > 6000:
+        if len(faces) > GO1_FACES:
             dec = obj.modifiers.new("decimate", "DECIMATE")
-            dec.ratio = 6000 / len(faces)
+            dec.ratio = GO1_FACES / len(faces)
         objs.append(obj)
     half = footprint("scout_chassis")
     return fit(root, objs, half, keep_height=True)
@@ -420,7 +460,12 @@ def build(preview=None, rover_yaw=0.0, kit_yaw=0.0):
     blocks = tower(mats, building)
     rebar(blocks, mats["rebar"], building)
     ground(mats["ground"], building)
-    build_annex(mats, empty("annex"))
+    annex_root = empty("annex")
+    build_annex(mats, annex_root)
+    # Static extras become one mesh each (one draw call per material); the blocks stay one mesh per id.
+    merge_children(building, "rebar_", "rebar")
+    merge_children(building, "ground_", "ground")
+    merge_children(annex_root, "", "annex_body")
     report = {"blocks": sorted(blocks, key=lambda b: int(b[1:]))}
     s, size = scout(empty("scout"))
     report["scout"] = {"scale": round(s, 4), "size_m": [round(v, 3) for v in size]}

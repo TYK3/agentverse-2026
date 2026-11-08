@@ -1,6 +1,6 @@
 // A1: free 3D assets for the demo (built by sim/assets/build_glb.py, credits in public/models/CREDITS.json).
 //
-// - parking_garage HDRI lights the scene (environment only; the background stays the console's).
+// - parking_garage HDRI lights the model's materials (reflections only; the background stays the console's).
 // - The Scout and Responder primitives are swapped for the Go1 and Rover models, scaled to the
 //   footprint the console already draws, so poses, labels and tests are unchanged.
 // - The tower model (blocks b1..b27 by scene/loaded id, basements, stair/lift core) is shown only when
@@ -25,6 +25,7 @@ export interface DemoAssets {
   blocks: string[];
   credits: Credit[];
   movedBlocks: string[];
+  worldChanges: number;          // world/change messages seen (any scene)
   showBuilding(show: boolean): void;
   markMoved(ids: string[]): void;
 }
@@ -104,6 +105,7 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     blocks: [],
     credits: [],
     movedBlocks: [],
+    worldChanges: 0,
     showBuilding: () => {},
     markMoved: () => {},
   };
@@ -148,16 +150,36 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
   // and a world/change only marks tower blocks while the tower is the scene shown.
   on('scene/loaded', data => { clearMoved(); state.showBuilding((data as { scene?: string })?.scene === 'tower'); });
   on('world/change', data => {
+    state.worldChanges += 1;
     if (forced ?? towerScene) state.markMoved((data as { moved_blocks?: string[] })?.moved_blocks ?? []);
   });
 
   const internals = viewer as unknown as { scoutGroup?: THREE.Group; responderGroup?: THREE.Group };
 
+  // The HDRI lights only the model's own materials, not scene.environment: that would put image-based
+  // lighting on every console material (thousands of map cells) and halve the frame rate in software GL.
+  let envTex: THREE.Texture | undefined;
+  const lit: THREE.Object3D[] = [];
+  const light = () => {
+    if (!envTex) return;
+    for (const part of lit.splice(0)) {
+      part.traverse(o => {
+        const mats = ([] as THREE.Material[]).concat((o as THREE.Mesh).material ?? []);
+        for (const m of mats) {
+          const std = m as THREE.MeshStandardMaterial;
+          if (!std.isMeshStandardMaterial) continue;
+          std.envMap = envTex!;
+          std.envMapIntensity = 0.6;
+          std.envMapRotation.set(Math.PI / 2, 0, 0);   // the HDRI is y-up; the console is z-up
+          std.needsUpdate = true;
+        }
+      });
+    }
+  };
   new HDRLoader().load(`${BASE}parking_garage_1k.hdr`, tex => {
     tex.mapping = THREE.EquirectangularReflectionMapping;
-    viewer.scene.environment = tex;
-    viewer.scene.environmentIntensity = 0.6;
-    viewer.scene.environmentRotation.set(Math.PI / 2, 0, 0);   // the HDRI is y-up; the console is z-up
+    envTex = tex;
+    light();
   }, undefined, () => { /* lighting falls back to the console's own lights */ });
 
   fetch(`${BASE}CREDITS.json`)
@@ -168,7 +190,10 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     })
     .catch(() => {});
 
-  new GLTFLoader().load(`${BASE}aftershock.glb`, gltf => {
+  // Load after the page has painted and the first messages are in: the model is only decoration.
+  const idle = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void })
+    .requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 500));
+  idle(() => new GLTFLoader().load(`${BASE}aftershock.glb`, gltf => {
     const root = gltf.scene;                 // exported in the scene frame (z up): no rotation needed
     building = root.getObjectByName('building');
     annex = root.getObjectByName('annex');
@@ -181,12 +206,15 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     state.blocks = building ? building.children.map(c => c.name).filter(n => /^b\d+$/.test(n)) : [];
     swapInto(internals.scoutGroup, root.getObjectByName('scout'));
     swapInto(internals.responderGroup, root.getObjectByName('responder'));
+    lit.push(...[building, annex, root.getObjectByName('scout'), root.getObjectByName('responder')]
+      .filter((o): o is THREE.Object3D => !!o));
+    light();
     state.loaded = true;
     apply();
     state.markMoved([]);
   }, undefined, err => {
     state.error = String(err);
     console.error('[assets] demo model failed to load; the console keeps its own primitives', err);
-  });
+  }), { timeout: 2000 });
   return state;
 }
