@@ -1,15 +1,21 @@
 """Speech output (TTS) module for AFTERSHOCK.
 
 Subscribes to 'say' messages. Synthesises speech with gemini-3.8-flash-tts
-and plays through sounddevice. If GEMINI_MODE=off or if TTS fails,
-falls back safely to text-only display.
+and plays through sounddevice. If GEMINI_MODE=off, TTS fails or there is no
+sound device, it falls back to printed text and marks the 'tts' stand-in.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import io
+import json
 import logging
 import os
 import sys
+import threading
+import wave
 from typing import Any
 
 from voice import translate
@@ -31,69 +37,108 @@ def _mark_stand_in() -> None:
         pass
 
 
-def _count_call() -> None:
-    try:
-        from coord import gem
-        gem.count_call("tts")
-    except (ImportError, AttributeError, RuntimeError):
-        pass
+SAMPLE_RATE = 24000  # Gemini TTS returns 16-bit mono PCM at 24 kHz
+VOICE = os.environ.get("VOICE_TTS_VOICE", "Kore")  # prebuilt voice; calm and clear
+_play_lock = threading.Lock()  # one utterance at a time, so lines never overlap
+
+
+def _audio_cache_file(gem: Any, text: str) -> Any:
+    raw = json.dumps(["tts_studio", VOICE, text])
+    return gem.CACHE / f"tts-{hashlib.sha256(raw.encode()).hexdigest()}.pcm"
+
+
+def synthesise(text: str) -> bytes:
+    """Return 16-bit PCM for text from gemini-3.8-flash-tts, through coord.gem's client and cap.
+
+    Raises gem.GeminiOff in off mode, or any SDK error; speak_text turns those into text-only.
+    In replay mode a cached .pcm in .gem_cache is reused; live calls are cached too.
+    """
+    from coord import gem
+
+    if gem.MODE == "off":
+        raise gem.GeminiOff("tts")
+    f = _audio_cache_file(gem, text)
+    if gem.MODE == "replay" and f.exists():
+        return f.read_bytes()
+    gem.count_call("tts")
+    from google.genai import types
+
+    config = types.GenerateContentConfig(
+        http_options=types.HttpOptions(api_version="v1alpha"),  # speech_config is v1alpha only (#76 live test)
+        response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=VOICE)
+            )
+        ),
+    )
+    response = gem._c().models.generate_content(
+        model=gem.MODEL_IDS["tts_studio"], contents=text, config=config
+    )
+    data = response.candidates[0].content.parts[0].inline_data.data
+    if isinstance(data, str):  # some SDK versions hand back base64 text
+        data = base64.b64decode(data)
+    if not data:
+        raise ValueError("tts returned no audio")
+    gem.CACHE.mkdir(exist_ok=True)
+    f.write_bytes(data)
+    return data
+
+
+def decode(audio: bytes) -> tuple[bytes, int, int]:
+    """(16-bit PCM frames, sample rate, channels). The TTS answers with a WAV file (RIFF header);
+    raw headerless PCM at SAMPLE_RATE mono is accepted too."""
+    if audio[:4] == b"RIFF" and audio[8:12] == b"WAVE":
+        with wave.open(io.BytesIO(audio), "rb") as wf:
+            if wf.getsampwidth() != 2:
+                raise ValueError(f"expected 16-bit audio, got {8 * wf.getsampwidth()}-bit")
+            return wf.readframes(wf.getnframes()), wf.getframerate(), wf.getnchannels()
+    return audio[: len(audio) - len(audio) % 2], SAMPLE_RATE, 1
+
+
+def play(audio: bytes) -> None:
+    """Play TTS audio (WAV or raw 16-bit PCM) on the default output device and wait until it ends."""
+    import numpy as np
+    import sounddevice as sd
+
+    pcm, rate, channels = decode(audio)
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    if channels > 1:
+        samples = samples.reshape(-1, channels)
+    with _play_lock:
+        sd.play(samples, rate)
+        sd.wait()
+
+
+def _text_only(text: str, to: str, tag: str, reason: str, **extra: Any) -> dict[str, Any]:
+    _mark_stand_in()
+    sys.stdout.write(f"[voice/tts: {tag}] ({to}) {text}\n")
+    sys.stdout.flush()
+    return {"spoken": False, "mode": "text-only", "reason": reason, "text": text, **extra}
 
 
 def speak_text(text: str, to: str = "operator", allow_device: bool = True) -> dict[str, Any]:
-    """Speak text using TTS or fall back to text-only output."""
-    mode = get_mode()
-    if mode == "off":
-        _mark_stand_in()
-        sys.stdout.write(f"[voice/tts: off] ({to}) {text}\n")
-        sys.stdout.flush()
-        return {"spoken": False, "mode": "text-only", "reason": "gemini_off", "text": text}
+    """Speak text with Gemini TTS through the sound device; fall back to printed text.
 
-    # Live or replay TTS attempt
+    Never raises: a missing key, the call cap, a network error or no sound device all end
+    in text-only output and mark the 'tts' stand-in for the console badge.
+    """
+    if get_mode() == "off":
+        return _text_only(text, to, "off", "gemini_off")
     try:
-        _count_call()
-        from coord import gem
-
-        audio_bytes = None
-        try:
-            client = gem._c()
-            response = client.models.generate_content(
-                model=gem.MODEL_IDS.get("tts_studio", "gemini-3.8-flash-tts"),
-                contents=text,
-            )
-            if hasattr(response, "candidates") and response.candidates:
-                for part in response.candidates[0].content.parts:
-                    if hasattr(part, "inline_data") and part.inline_data:
-                        audio_bytes = part.inline_data.data
-                        break
-        except (AttributeError, RuntimeError, KeyError, TypeError, ValueError, OSError) as e:
-            logger.debug("Direct TTS synthesis call note: %s", e)
-
-        if audio_bytes and allow_device:
-            try:
-                import sounddevice as sd
-
-                sd.default.samplerate = 24000
-                logger.info("Playing TTS audio for %s: %d bytes", to, len(audio_bytes))
-                return {"spoken": True, "mode": "audio", "bytes": len(audio_bytes), "text": text}
-            except (ImportError, OSError, RuntimeError) as sde:
-                logger.warning("Sounddevice playback unavailable: %s", sde)
-                _mark_stand_in()
-
-        # If audio bytes generated but device wasn't allowed or failed
-        if audio_bytes:
-            return {"spoken": True, "mode": "audio_synthesised", "bytes": len(audio_bytes), "text": text}
-
-        # Otherwise fallback to text only
-        _mark_stand_in()
-        sys.stdout.write(f"[voice/tts: fallback] ({to}) {text}\n")
-        sys.stdout.flush()
-        return {"spoken": False, "mode": "text-only", "reason": "tts_fallback", "text": text}
-
-    except (ImportError, AttributeError, RuntimeError, KeyError, TypeError, ValueError, OSError) as exc:
-        _mark_stand_in()
-        sys.stdout.write(f"[voice/tts: error fallback] ({to}) {text} ({exc})\n")
-        sys.stdout.flush()
-        return {"spoken": False, "mode": "text-only", "reason": "tts_exception", "error": str(exc), "text": text}
+        pcm = synthesise(text)
+    except Exception as exc:  # noqa: BLE001 - GeminiOff, cap RuntimeError, SDK/network errors
+        logger.warning("TTS unavailable, text only: %s", exc)
+        return _text_only(text, to, "fallback", "tts_fallback", error=str(exc))
+    if not allow_device:
+        return {"spoken": False, "mode": "audio_synthesised", "bytes": len(pcm), "text": text}
+    try:
+        play(pcm)
+    except Exception as exc:  # noqa: BLE001 - no numpy/sounddevice/PortAudio/output device
+        logger.warning("Sound device unavailable, text only: %s", exc)
+        return _text_only(text, to, "no device", "no_device", bytes=len(pcm), error=str(exc))
+    logger.info("Spoke %d bytes to %s", len(pcm), to)
+    return {"spoken": True, "mode": "audio", "bytes": len(pcm), "text": text}
 
 
 def handle_say(data: dict[str, Any]) -> dict[str, Any]:

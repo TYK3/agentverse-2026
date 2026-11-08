@@ -81,3 +81,13 @@ def test_live_translation_calls_gemini(monkeypatch):
         op_text = translate.translate_casualty_reply("Yardım yolda.", source_lang="tr", target_lang="en", allow_fixture=False)
         assert op_text == "Help is coming."
         assert len(fake_gem.calls) == 2
+
+
+def test_gemini_off_from_real_gem_returns_stand_in(monkeypatch):
+    """GEMINI_MODE=live in the env while coord.gem is off: GeminiOff must become the stand-in."""
+    from coord import gem
+
+    monkeypatch.setenv("GEMINI_MODE", "live")
+    monkeypatch.setattr(gem, "MODE", "off")
+    assert translate.translate_to_casualty("Help is coming.") == translate.OFF_STAND_IN_TEXT
+    assert translate.translate_casualty_reply("Yardım edin") == translate.OFF_STAND_IN_TEXT

@@ -2,3 +2,4 @@
 google-genai>=3.0
 sounddevice
 pynput
+numpy
