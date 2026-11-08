@@ -8,10 +8,11 @@
   --story-wait: #fbbf24;
   --story-held: #f97316;
   --story-done: #34d399;
+  /* Top of the map, under its title and buttons: the map panel can be taller than the window. */
   position: absolute;
   left: 0.75rem;
   right: 0.75rem;
-  bottom: 0.75rem;
+  top: 8.6rem;
   z-index: 40;
   color: var(--story-text);
   font-size: 0.85rem;
@@ -109,7 +110,7 @@
 .story-card {
   position: absolute;
   left: 50%;
-  bottom: calc(100% + 1rem);
+  top: calc(100% + 0.75rem);
   transform: translateX(-50%);
   width: min(30rem, 100%);
   max-height: 60vh;

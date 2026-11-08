@@ -19,7 +19,8 @@ export const PHASES: { id: PhaseId; label: string }[] = [
   { id: 'report', label: 'Report' },
 ];
 
-export const BELOW_GROUND_Z = -0.5;     // a robot below this is in the basement (B1 and down)
+export const BELOW_GROUND_Z = -0.5;
+const SIM_TIMED = new Set(['sensors/scout', 'responder/pose', 'world/change']);     // a robot below this is in the basement (B1 and down)
 
 export type Phase = { state: PhaseState; t: number | null; note: string };
 export type StoryFacts = {
@@ -79,8 +80,12 @@ export class StoryModel {
   }
 
   /** Feed one bus message. Returns the phase it moved, or null. */
+  /** Sim time, from a replay's recorded t (setTime) or, live, from the topics stamped in sim seconds. */
+  setTime(t: number): void { if (Number.isFinite(t)) this.t = Math.max(this.t, t); }
+
   apply(topic: string, data: unknown): PhaseId | null {
-    if (isRec(data) && num(data.t) !== null) this.t = Math.max(this.t, num(data.t)!);
+    // Some lanes stamp payloads with their own clocks; only these carry sim time.
+    if (SIM_TIMED.has(topic) && isRec(data) && num(data.t) !== null) this.setTime(num(data.t)!);
     switch (topic) {
       case 'scene/loaded': {
         if (!isRec(data)) return null;

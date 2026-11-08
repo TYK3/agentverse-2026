@@ -169,7 +169,10 @@ export function setupStory(viewer: Viewer | null): { model: StoryModel; view: St
   const view = new StoryView(model, viewer, run ? 'replay' : 'live');
   on('*', msg => {
     const { topic, data } = msg as { topic: string; data: unknown };
-    if (topic === STATUS_TOPIC) return view.replayStatus(data as ReplayStatus);
+    if (topic === STATUS_TOPIC) {
+      model.setTime((data as ReplayStatus).t);           // the recording's own sim time
+      return view.replayStatus(data as ReplayStatus);
+    }
     if (model.apply(topic, data)) view.render();
   });
   if (run) {

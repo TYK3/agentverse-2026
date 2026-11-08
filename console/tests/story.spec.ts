@@ -38,7 +38,7 @@ test('DEMO-FLOW: a whole rescue lights every phase in order, with the facts for 
     approvals: { asked: 1, approved: 1, held: 0 }, deepestZ: -3,
   });
   expect(Object.keys(m.facts.casualties)).toEqual(['c2']);
-  expect(m.t).toBe(52);
+  expect(m.t).toBe(44);                                             // last sim-timed event: the aftershock
 });
 
 test('DEMO-FLOW: camera focus follows the phase (scout target, casualty, responder)', () => {
@@ -80,6 +80,7 @@ test('DEMO-FLOW: in the browser, ?run= replays a recording through the strip and
   await expect(card).toContainText('Supplies delivered');
   await expect(card).toContainText('water');
   await expect(card).toContainText('10 of 10');
+  await expect(card).not.toContainText('887');
   await page.waitForTimeout(500);                                   // let the chip colours settle
   await page.screenshot({ path: 'test-results/story-replay.png' });
   await card.getByRole('button', { name: 'Close' }).click();
@@ -93,4 +94,14 @@ test('DEMO-FLOW: live mode shows LIVE and the follow toggle', async ({ page }) =
   await expect(follow).toHaveAttribute('aria-pressed', 'true');
   await follow.click();
   await expect(follow).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('DEMO-FLOW: time comes from sim clocks only, not from lanes that stamp their own', () => {
+  const m = new StoryModel();
+  m.apply('log/decision', { t: 887460.8, perception: 'x', model: 'local-contact', physics: '', outcome: 'say', reason: 'r' });
+  m.apply('casualty/reply', { id: 'c1', t: 887461.0, text: 'yes', source: 'sim' });
+  expect(m.t).toBe(0);
+  m.apply('responder/pose', { t: 12.5, pos: [0, 0, 0], yaw: 0, state: 'idle', carrying: [] });
+  m.setTime(14.9);
+  expect(m.t).toBe(14.9);
 });
