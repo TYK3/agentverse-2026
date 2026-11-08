@@ -99,6 +99,38 @@ GEMINI_MODE=off python -m planner.report_run
 `bash planner/check.sh` includes this demo and the report tests. The check uses
 pytest and Pydantic to validate the published report against the shared schema.
 
+### Remote paramedic reports (ref Y6)
+
+`paramedic report` and `remote paramedic report` also generate a handover. Its
+existing `report/handover` envelope includes `json.paramedic_reports[]` and a
+Markdown section for each casualty: scene coordinates in metres with observation
+time, detection confidence and sensor clues; simulated breathing rate; the six
+Y5 response categories; self-reported pain locations; requested actions,
+observed sim action outcomes and confirmed simulated deliveries, human gate
+decisions and unknown information.
+Reports retain the last observation of casualties absent from a later list and
+label it as such. Detection confidence never becomes medical certainty. A
+missing reply is unknown, and `none_reported` pain is not a diagnosis.
+
+The optional dialogue reader calls the public `voice.GUIDE.summary(cid)` from Y5
+only if the voice lane is already loaded. It does not start voice or make a model
+call. Until Y5 is available, symptoms and answers remain explicitly unknown.
+Tests and other local integrations can inject `dialogue_summary(cid)` into
+`ReportCollector`. Only known response categories and body parts are retained;
+no face data, audio or raw transcripts are copied. Y3 has no published triage
+interface yet, so the report does not invent a triage assessment.
+
+Actions are associated only with routes whose goal ends exactly in ` to <id>`.
+Unassociated actions remain in the global handover. For repeated supply items,
+placement logs use the sim's active route; when no route can be established
+unambiguously the delivery remains unassigned. Commands never prove treatment
+or delivery, and this collector never authorizes robot motion or medical steps.
+
+`GEMINI_MODE=off python -m planner.paramedic_run` replays a labelled synthetic
+two-casualty fixture (one simulated delivery, one denied human gate). The same
+fixture is included in `bash planner/check.sh`; real audio and patient input are
+not part of this demo.
+
 ## Human approval and tasks (T14)
 
 `router = await planner.start(bus)` attaches the verification loop as

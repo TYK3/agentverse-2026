@@ -12,6 +12,12 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from planner.paramedic import (
+    ParamedicReports,
+    is_report_command,
+    render_paramedic_markdown,
+)
+
 REPORTS = Path(__file__).resolve().parents[1] / "reports"
 
 
@@ -28,7 +34,7 @@ def _text(value):
 def render_markdown(report):
     """The same factual renderer is used for templates and optional model drafts."""
     stats = report["map"]
-    lines = ["# AFTERSHOCK handover", "", _text(report["summary"]), "",
+    lines = ["# AFTERLIGHT handover", "", _text(report["summary"]), "",
              f"Source: {_text(report['source'])}. Vitals are simulated; hazards are estimates.", "",
              (f"Map: {stats['seen']} seen, {stats['inferred']} inferred, {stats['unknown']} explicit unknown; "
               f"{stats['occupied']} occupied. Unlisted cells remain unknown."), "", "## Casualties"]
@@ -74,6 +80,7 @@ def render_markdown(report):
                      f"{_text(request['status'])}.")
     if not report["approvals"]:
         lines.append("- No approval requests recorded.")
+    lines.extend(render_paramedic_markdown(report.get("paramedic_reports", []), _text))
     lines.extend(["", "## Open risks"])
     lines.extend(f"- {_text(risk)}" for risk in report["open_risks"])
     return "\n".join(lines) + "\n"
@@ -82,9 +89,12 @@ def render_markdown(report):
 class ReportCollector:
     """One collector per run. Only allowlisted, non-image event fields are retained."""
 
-    def __init__(self, bus, *, output_dir=REPORTS, clock=time.monotonic, gem=None, model_timeout=8):
+    def __init__(self, bus, *, output_dir=REPORTS, clock=time.monotonic, gem=None, model_timeout=8,
+                 dialogue_summary=None):
         self.bus, self.output_dir, self.clock = bus, Path(output_dir), clock
         self.t0 = clock()
+        self.paramedics = ParamedicReports(self._t, dialogue_summary)
+        self._sim_route = None
         self.cells = {}
         self.res = None
         self.casualties = []
@@ -93,6 +103,7 @@ class ReportCollector:
         self.routes = {}
         self.replans = []
         self.actions = []
+        self.sim_action_results = []
         self.deliveries = []
         self.approvals = {}
         self.unmatched_answers = []
@@ -131,6 +142,7 @@ class ReportCollector:
             vitals = record.get("vitals", {})
             casualty["vitals"] = {**_pick(vitals, ("breathing_rate",)), "simulated": True}
             self.casualties.append(casualty)
+        self.paramedics.observe(self.casualties)
 
     def on_hazards(self, data):
         hazards = [{**_pick(h, ("cell", "status", "why")), "estimate": True} for h in data]
@@ -150,15 +162,30 @@ class ReportCollector:
                              "reason": f"moved blocks: {', '.join(data['moved_blocks'])}"})
 
     def on_log(self, data):
+        if data["model"] == "sim" and data["physics"] == "mujoco":
+            move = re.search(r", move (\S+)$", data.get("perception", ""))
+            result_route = (move[1] if move[1] in self.routes else None) if move else self._sim_route
+            if move and data["outcome"] in ("act", "done"):
+                self._sim_route = move[1] if move[1] in self.routes else None
+            elif move and data["outcome"] == "refused":
+                self._sim_route = None  # subsequent item logs have no dependable active-route attribution
+            if result_route and data.get("perception", "").startswith("responder at ["):
+                self.sim_action_results.append({**_pick(data, ("t", "perception", "outcome", "reason")),
+                                                "route": result_route, "simulated": True})
         if data["model"] == "sim" and data["physics"] == "mujoco" and data["outcome"] == "done":
-            placed = re.fullmatch(r"placed (water|first_aid_kit|radio) at \[(-?\d+(?:\.\d+)?), (-?\d+(?:\.\d+)?)\]",
+            placed = re.fullmatch(r"placed (water|first_aid_kit|radio|bandage|splint|thermal_blanket) "
+                                  r"at \[(-?\d+(?:\.\d+)?), (-?\d+(?:\.\d+)?)\]",
                                   data["reason"])
             if placed and data["perception"].endswith(f", place_supply {placed[1]}"):
                 item, x, y = placed.groups()
-                command = next((a for a in reversed(self.actions) if a["action"] == "place_supply"
-                                and a["item"] == item and a["status"].startswith("commanded")), None)
+                pending = [a for a in self.actions if a["action"] == "place_supply"
+                           and a["item"] == item and a["status"].startswith("commanded")]
+                if self._sim_route is not None:
+                    pending = [a for a in pending if a["route"] == self._sim_route]
+                # Repeated supplies for different casualties cannot be attributed by item alone.
+                command = pending[0] if len({a["route"] for a in pending}) == 1 else None
                 delivery = {"item": item, "pos": [float(x), float(y)], "t": data["t"], "simulated": True,
-                            "route": command["route"] if command else None}
+                            "route": command["route"] if command else self._sim_route}
                 if not any(d["item"] == item and d["t"] == data["t"] and d["pos"] == delivery["pos"]
                            for d in self.deliveries):
                     self.deliveries.append(delivery)
@@ -172,7 +199,7 @@ class ReportCollector:
                 self.approvals[match[1]]["status"] = data["reason"]
 
     def on_action(self, data):
-        self.actions.append({**_pick(data, ("action", "route", "item")), "t": self._t(),
+        self.actions.append({**_pick(data, ("action", "route", "item", "block")), "t": self._t(),
                              "status": "commanded; completion unconfirmed"})
 
     def on_request(self, data):
@@ -198,7 +225,7 @@ class ReportCollector:
             request["status"] = "operator approved" if data["approved"] is True else "operator denied"
 
     async def on_command(self, data):
-        if data["text"].strip().lower() in ("report", "handover report", "generate report"):
+        if is_report_command(data["text"]):
             await self.generate()
 
     def snapshot(self):
@@ -213,16 +240,19 @@ class ReportCollector:
             risks.append("Human approval requests are still pending.")
         if self.unmatched_answers:
             risks.append("Unmatched approval answers were received; they grant no permission.")
-        return copy.deepcopy({
+        report = copy.deepcopy({
             "summary": f"{len(self.casualties)} casualty observations; {len(self.routes)} routes; "
                        f"{len(self.replans)} world-change/re-plan records; {len(self.approvals)} approval requests.",
             "map": stats, "casualties": self.casualties,
             "hazards": {"before": self.hazards_before or [], "after": self.hazards_after},
             "routes": list(self.routes.values()), "replans": self.replans, "actions": self.actions,
+            "sim_action_results": self.sim_action_results,
             "supplies_delivered": self.deliveries, "approvals": list(self.approvals.values()),
             "unmatched_answers": self.unmatched_answers, "open_risks": risks,
             "source": "plain template; model stand-in",
         })
+        report["paramedic_reports"] = self.paramedics.build(report)
+        return report
 
     @staticmethod
     def _key(report):

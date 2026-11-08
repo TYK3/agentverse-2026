@@ -7,3 +7,4 @@ uv run --no-project --with pytest --with pydantic --with fastapi --with psutil p
 uv run --no-project python -m planner.fake_run
 uv run --no-project --with pydantic python -m planner.loop_run > /dev/null
 uv run --no-project python -m planner.report_run > /dev/null
+uv run --no-project python -m planner.paramedic_run > /dev/null

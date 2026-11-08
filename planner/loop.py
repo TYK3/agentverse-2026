@@ -13,6 +13,7 @@ import json
 import re
 import time
 
+from planner.paramedic import is_report_command
 from planner.route import RoutePlanner
 
 IDLE, PROPOSED, VERIFIED, GATED, EXECUTING = "IDLE", "PROPOSED", "VERIFIED", "GATED", "EXECUTING"
@@ -432,7 +433,7 @@ class Loop:
         """operator/command -> a mission. The local model (or keywords) only reads the goal."""
         text = data["text"]
         low = text.lower().strip()
-        if low in ("report", "handover report", "generate report"):
+        if is_report_command(text):
             return  # ReportCollector handles this command; it must not become a navigation goal.
         if low in ("stop", "hold"):
             await self.cancel_request("operator stopped the mission")
