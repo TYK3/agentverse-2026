@@ -110,6 +110,15 @@ export class StoryModel {
         const b = this.pose(isRec(data.responder) ? vec3(data.responder.pos) : null, 'responder');
         return a ?? b;
       }
+      case '_runner/stage': {
+        // The B1 descent runs in a separate world, not on the hub's pose stream.
+        // Only the runner's explicit successful descent result proves this phase.
+        if (!isRec(data) || data.stage !== 'b1' || data.reached !== true ||
+            !Array.isArray(data.levels) || data.levels.join(',') !== 'L1,ground,B1') return null;
+        const pos = vec3(data.final_pos);
+        if (pos) this.facts.deepestZ = Math.min(this.facts.deepestZ, pos[2]);
+        return this.set('descend', 'done', 'Separate B1 descent stage reached L1 → ground → B1');
+      }
       case 'responder/pose':
         return this.pose(isRec(data) ? vec3(data.pos) : null, 'responder');
       case 'map/casualties': {
