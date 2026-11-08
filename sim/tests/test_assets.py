@@ -72,8 +72,8 @@ def test_console_model_has_every_block_and_part_and_fits_the_budget():
     m, _ = scene.load(scene.TOWER)
     blocks = {mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, i) for i in scene.block_ids(m)}
     assert blocks <= names, sorted(blocks - names)
-    assert {"building", "annex"} <= names
-    assert {"annex_body", "ground", "rebar"} <= names                 # static extras, merged
+    assert {"building", "annex", "B1", "B2", "B3", "core"} <= names
+    assert {"B1_body", "B2_body", "B3_body", "core_body", "ground", "rebar"} <= names   # merged meshes
     robot_names = {n.get("name") for n in _glb_json(robots)["nodes"]}
     assert {"scout", "responder", "first_aid_kit"} <= robot_names
     assert not robot_names & blocks and not names & {"scout", "responder", "first_aid_kit"}   # split, not copied
@@ -104,6 +104,28 @@ def test_robot_models_are_the_agreed_true_scale_robots(name):
     m, d = robots.load(name)                                            # same geoms, Responder arm stowed
     mlo, mhi = robots.extent(m, d, f"{name}/{name}")
     assert np.allclose(lo, mlo, atol=0.01) and np.allclose(hi, mhi, atol=0.01)
+
+
+@pytest.mark.parametrize("level,floor_z", [("B1", -1.0), ("B2", -2.0), ("B3", -3.0)])
+def test_basement_levels_are_separate_nodes_in_a_fixed_frame(level, floor_z):
+    """Each basement level is its own node at (0, 0, floor z), z up, scale 1, holding exactly the annex
+    boxes (cut at the level boundaries) from its floor slab up to the underside of the slab above."""
+    gltf = _glb_json(MODELS / "aftershock.glb")
+    nodes = gltf["nodes"]
+    annex_node = next(n for n in nodes if n.get("name") == "annex")
+    node = next(n for n in nodes if n.get("name") == level)
+    assert nodes.index(node) in annex_node["children"]
+    assert node["translation"] == [0, 0, floor_z]
+    assert "rotation" not in node and "scale" not in node and "matrix" not in node
+    assert node["extras"]["level"] == level and node["extras"]["floor_z"] == floor_z
+    assert [nodes[c]["name"] for c in node["children"]] == [f"{level}_body"]
+    lo, hi = _mesh_bounds(MODELS / "aftershock.glb", f"{level}_body")
+    zlo, zhi = floor_z - 2 * annex.T, floor_z + 1 - 2 * annex.T
+    inside = [(b_lo, b_hi) for _, _, b_lo, b_hi in annex.boxes() if b_hi[2] > zlo and b_lo[2] < zhi]
+    want_lo = np.min([b[0] for b in inside], axis=0)
+    want_hi = np.max([b[1] for b in inside], axis=0)
+    assert np.allclose(lo[:2], want_lo[:2], atol=1e-3) and np.allclose(hi[:2], want_hi[:2], atol=1e-3)
+    assert lo[2] == pytest.approx(zlo - floor_z, abs=1e-3) and hi[2] == pytest.approx(zhi - floor_z, abs=1e-3)
 
 
 def test_credits_ship_with_the_model_and_need_no_attribution_gaps():

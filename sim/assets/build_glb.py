@@ -12,9 +12,12 @@ Nodes, so the console can find them by name (aftershock.glb: building, annex; ro
   building/      b1..b27, one mesh per tower block, named by its block id (scene/loaded "id") and posed
                  as in tower.xml; "rebar" (rods out of the broken slab edges) and "ground" (with the
                  excavation pit) are visual extras, each merged into one mesh
-  annex/         "annex_body": the basements and stair/lift core from sim/assets/annex.py (same boxes as
-                 the MuJoCo collision scene sim/scenes/tower_annex.xml) plus visual debris on B1 and in
-                 the pit, merged into one mesh (one draw call per material, not ~150)
+  annex/B1, B2, B3  the basement levels from sim/assets/annex.py (same boxes as the MuJoCo collision
+                 scene sim/scenes/tower_annex.xml, cut at the level boundaries) plus visual debris on B1
+                 and in the pit. Each is its own node: z up, metres, scale 1, no rotation, origin
+                 (0, 0, floor z) with floor z -1, -2, -3 (extras: level, floor_z), holding one mesh
+                 "<level>_body" in that frame (one draw call per material, not ~150)
+  annex/core     the stair/lift core above the ground floor, one mesh "core_body"
   scout          the AgileX LIMO Pro, built from sim/robots/scout.xml's geoms: true scale, the agreed
                  322 x 220 mm envelope (docs/hardware.md), wheels, LiDAR, cameras and mic array where the
                  spec puts them
@@ -311,17 +314,56 @@ def ground(mat, root):
         to_object(f"ground_{i}", box_mesh("g", half), mat, Matrix.Translation(c), root)
 
 
+# Basement levels: each owns its floor slab and everything up to the underside of the slab above, so the
+# three nodes stack without overlap. Origin of each node: its floor top under the tower centre.
+LEVELS = {"B1": -1.0, "B2": -2.0, "B3": -3.0}
+SLAB_T = 2 * annex.T
+
+
+def level_range(floor_z):
+    return floor_z - SLAB_T, floor_z + 1.0 - SLAB_T
+
+
+def clip_z(lo, hi, zlo, zhi):
+    """The part of box (lo, hi) between zlo and zhi, or None."""
+    a, b = max(lo[2], zlo), min(hi[2], zhi)
+    return ((lo[0], lo[1], a), (hi[0], hi[1], b)) if b - a > 1e-6 else None
+
+
 def build_annex(mats, root):
+    """annex/{B1,B2,B3,core}: the annex boxes cut at the level boundaries, so each basement level is one
+    addressable node (z up, metres, scale 1, origin (0, 0, floor z)); "core" is the stair/lift core above
+    the ground floor. Visual only: sim/assets/annex.py's MuJoCo boxes are not cut."""
+    parts = {}
+    for lvl, z in LEVELS.items():
+        e = empty(lvl, root)
+        e.location = (0.0, 0.0, z)
+        e["level"], e["floor_z"], e["frame"] = lvl, z, "scene frame: metres, z up"
+        parts[lvl] = (e, *level_range(z))
+    core = empty("core", root)
+    parts["core"] = (core, level_range(LEVELS["B1"])[1], math.inf)
+    bpy.context.view_layer.update()
+
+    def place(name, bm, mat, world, lvl):
+        obj = to_object(name, bm, mat, world, None)       # world-space UVs first, then into the level
+        e = parts[lvl][0]
+        obj.parent = e
+        obj.matrix_parent_inverse = e.matrix_world.inverted()
+
     for name, label, lo, hi in annex.boxes():
-        half = [(b - a) / 2 for a, b in zip(lo, hi, strict=True)]
-        c = [(a + b) / 2 for a, b in zip(lo, hi, strict=True)]
         mat = mats["lift"] if label == "lift" else mats["slab"] if label in ("slab", "stair") else mats["wall"]
-        to_object(name, box_mesh(name, half), mat, Matrix.Translation(c), root)
+        for lvl, (_, zlo, zhi) in parts.items():
+            cut = clip_z(lo, hi, zlo, zhi)
+            if cut is None:
+                continue
+            half = [(b - a) / 2 for a, b in zip(*cut, strict=True)]
+            c = [(a + b) / 2 for a, b in zip(*cut, strict=True)]
+            place(f"{name}@{lvl}", box_mesh(name, half), mat, Matrix.Translation(c), lvl)
     rng = random.Random(11)
-    piles = [((0.5, -1.3, -1.0), (1.9, 1.3, -1.0), 28),     # B1 under the collapsed east room
-             ((2.2, -1.4, -3.0), (3.1, 1.4, -3.0), 14)]     # spoil in the pit
+    piles = [("B1", (0.5, -1.3, -1.0), (1.9, 1.3, -1.0), 28),     # B1 under the collapsed east room
+             ("B3", (2.2, -1.4, -3.0), (3.1, 1.4, -3.0), 14)]     # spoil in the pit
     k = 0
-    for lo, hi, n in piles:
+    for lvl, lo, hi, n in piles:
         for _ in range(n):
             half = [rng.uniform(0.04, 0.16), rng.uniform(0.04, 0.12), rng.uniform(0.03, 0.08)]
             bm = box_mesh("d", half, cuts=2)
@@ -329,8 +371,13 @@ def build_annex(mats, root):
             c = (rng.uniform(lo[0], hi[0]), rng.uniform(lo[1], hi[1]), lo[2] + half[2] * 0.8)
             mw = Matrix.Translation(c) @ Matrix.Rotation(rng.uniform(0, math.pi), 4, "Z") \
                 @ Matrix.Rotation(rng.uniform(-0.4, 0.4), 4, "X")
-            to_object(f"debris_{k}", bm, mats["rubble"], mw, root)
+            place(f"debris_{k}", bm, mats["rubble"], mw, lvl)
             k += 1
+    for lvl, (e, _, _) in parts.items():
+        merge_children(e, "", f"{lvl}_body")
+        body = e.children[0]
+        body.data.transform(body.matrix_basis)            # vertices in the level frame, body node unposed
+        body.matrix_basis = Matrix.Identity(4)
 
 
 # ---------------------------------------------------------------- robots and kit
@@ -494,7 +541,6 @@ def build(preview=None, kit_yaw=0.0):
     # Static extras become one mesh each (one draw call per material); the blocks stay one mesh per id.
     merge_children(building, "rebar_", "rebar")
     merge_children(building, "ground_", "ground")
-    merge_children(annex_root, "", "annex_body")
     report = {"blocks": sorted(blocks, key=lambda b: int(b[1:]))}
     report["scout"] = {"size_m": mjcf_robot(empty("scout"), "scout")}
     report["responder"] = {"size_m": mjcf_robot(empty("responder"), "responder")}
