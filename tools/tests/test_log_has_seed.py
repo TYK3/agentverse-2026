@@ -82,16 +82,6 @@ def test_file_name_carries_its_own_seed(seed_logs):
     assert names[0] != names[1]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "tools/run_b2.py run() writes level, pose, plan, mapped and shift "
-        "records, then a summary record, then a verdict line, into "
-        "<floor>-<seed>.jsonl. The summary and the verdict have no seed "
-        "field and there is no header record, so the seed is missing from "
-        "the log content."
-    ),
-)
 def test_log_content_carries_its_own_seed(seed_logs):
     texts = []
     for item in seed_logs:
