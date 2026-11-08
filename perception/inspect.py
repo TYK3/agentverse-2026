@@ -172,8 +172,8 @@ def _log(t, perception, model, outcome, reason):
 def ask_er(gem, b64):
     """(text, receipt id, model) from one ER call through coord/gem.py; (None, None, None) when off,
     capped or failing (the stand-in is marked: no goals come from ER then)."""
-    contents = [{"role": "user", "parts": [{"inline_data": {"mime_type": "image/jpeg", "data": b64}},
-                                           {"text": PROMPT}]}]
+    contents = [{"type": "image", "mime_type": "image/jpeg", "data": b64},
+                {"type": "text", "text": PROMPT}]
     try:
         res = gem.ask_with_receipt(MODEL_KEY, contents, thinking="low", feature=FEATURE)
     except Exception as exc:  # noqa: BLE001 - off, cap, network, SDK: ER is optional, exploring goes on
