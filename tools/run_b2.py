@@ -1,6 +1,7 @@
 """e2e-b2: a real B2 rescue with a slab shift, the stop and a fresh recheck, logged as jsonl (ref b2).
 
     python tools/run_b2.py                 # prints each step, writes runs/b2-<seed>.jsonl
+    python tools/run_b2.py --floor B3      # e2e-b3: down to c3 in B3, runs/b3-<seed>.jsonl
 
 The Scout starts on L1 and finds its own way down to casualty c2 in basement B2 (L1 -> ground -> B1 -> B2
 on ramps R2, R1, R3) with the same closed loop as sim.demo_descent: LevelWorld physics (height only from
@@ -37,7 +38,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 RES = 0.05
-FLOOR = "B2"
+FLOOR = "B2"                       # default target floor (--floor B3 for e2e-b3)
+PATHS = {"B1": ["L1", "ground", "B1"], "B2": ["L1", "ground", "B1", "B2"],
+         "B3": ["L1", "ground", "B1", "B2", "B3"]}
+FLOOR_K = {"B1": -12, "B2": -24, "B3": -36}  # floor height / 0.05
+CASUALTY = {"B1": "c1", "B2": "c2", "B3": "c3"}
 SLAB_HALF = (0.12, 0.12, 0.05)     # metres: a 0.24 m x 0.24 m x 0.1 m slab
 SHIFT_AHEAD = 0.3                  # metres along the route to c2 ahead of the Scout
 MIN_LEFT = 0.6                     # only shift if this much of that route is left (room to go round)
@@ -45,15 +50,15 @@ MAX_JUMP = 0.035                   # metres per 0.1 s tick: 0.3 m/s plus a ramp'
 STOP_WINDOW = 3.0                  # sim seconds after the shift for the Scout to stop or turn away
 
 STEPS = (
-    "descended L1 -> ground -> B1 -> B2",
-    "slab dropped on the planned route in B2",
+    "descended level by level to the target floor",
+    "slab dropped on the planned route on the target floor",
     "Scout stopped short of the slab",
     "slab mapped from the Scout's own measurements",
     "re-planned route avoids the slab",
-    "Scout reached c2 on B2",
+    "Scout reached the casualty on the target floor",
     "Scout never entered the slab",
     "no teleport",
-    "route over the scouted map from L1 to B2",
+    "route over the scouted map from L1 to the target floor",
 )
 
 
@@ -125,11 +130,14 @@ def evaluate(records):
     def put(name, ok, t, detail):
         out[name] = {"ok": bool(ok), "t": t, "detail": detail}
 
+    summary = next((r for r in records if r["kind"] == "summary"), {})
+    floor = summary.get("floor", "B2")
     levels = [r["level"] for r in records if r["kind"] == "level"]
-    put(STEPS[0], levels[:4] == ["L1", "ground", "B1", "B2"], None, " -> ".join(levels) or "no level")
+    want = PATHS[floor]
+    put(STEPS[0], levels[:len(want)] == want, None, " -> ".join(levels) or "no level")
     shift = next((r for r in records if r["kind"] == "shift"), None)
     put(STEPS[1], shift is not None, shift and shift["t"],
-        f"slab at {shift['xy']} on {shift['level']}" if shift else "no shift (route in B2 too short or never driven)")
+        f"slab at {shift['xy']} on {shift['level']}" if shift else f"no shift (route on {floor} too short or never driven)")
     if shift:
         after = [r for r in records if r["t"] >= shift["t"]]
         stop = next((r for r in after if r["kind"] == "pose" and r["state"] in ("blocked", "arrived", "idle")
@@ -155,12 +163,11 @@ def evaluate(records):
     else:
         for n in (2, 3, 4, 6):
             put(STEPS[n], False, None, "no shift")
-    summary = next((r for r in records if r["kind"] == "summary"), {})
     put(STEPS[5], summary.get("reached") is True, summary.get("t"),
         f"at {summary.get('final_pos')} on {summary.get('final_level')}")
     jump = summary.get("max_jump")
     put(STEPS[7], jump is not None and jump <= MAX_JUMP, None, f"max move {jump} m per tick")
-    put(STEPS[8], summary.get("route") == "ok" and summary.get("route_k") and summary["route_k"][1] <= -24,
+    put(STEPS[8], summary.get("route") == "ok" and summary.get("route_k") and summary["route_k"][1] <= FLOOR_K[floor],
         None, f"{summary.get('route')} k {summary.get('route_k')}")
     steps = {n: out[n] for n in STEPS}
     return {"steps": steps, "passed": [n for n in STEPS if steps[n]["ok"]],
@@ -168,7 +175,7 @@ def evaluate(records):
 
 
 # ---- one run -------------------------------------------------------------------------------------
-def run(seed=0, max_t=500.0, out_dir=None, verbose=False):
+def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
     from perception.levels import GridLevels
     from planner.levels import Levels, find_route, waypoints
     from sim.demo_descent import DT, GOALS, SCAN_EVERY, _near, cell, probe_target
@@ -178,7 +185,7 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False):
     out_dir.mkdir(parents=True, exist_ok=True)
     w = LevelWorld(path=scene_with_slab(out_dir), seed=seed, render=False)
     gl = GridLevels(RES)
-    goal = GOALS[FLOOR]
+    goal = GOALS[floor]
     goal_cell = cell(*goal)
     records = []
 
@@ -209,7 +216,7 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False):
             next_pose += 1.0
         if stopped:
             here = w.pos
-            if math.hypot(here[0] - goal[0], here[1] - goal[1]) < 0.15 and w.level() == FLOOR:
+            if math.hypot(here[0] - goal[0], here[1] - goal[1]) < 0.15 and w.level() == floor:
                 break
             if probing is not None and w.state == "blocked" and cell(*here[:2], w.floor_z)[:2] != list(probing[:2]):
                 gl.refuse(probing)
@@ -236,8 +243,8 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False):
             rec("plan", status=plan["status"], why=why, target=[round(float(v), 2) for v in target],
                 cells=plan["cells"])
             w.goto({"target": target, "reason": f"b2 {why}"})
-        # The unscripted change: once, in B2, on the route the Scout is driving.
-        if (shift is None and w.level() == FLOOR and w.state == "moving" and plan
+        # The unscripted change: once, on the target floor, on the route the Scout is driving.
+        if (shift is None and w.level() == floor and w.state == "moving" and plan
                 and plan["status"] == "ok" and len(plan["cells"]) > 2):
             xy = point_ahead(plan["cells"], w.pos[:2])
             if xy is not None:
@@ -252,14 +259,14 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False):
             rec("level", level=last_level)
 
     here = w.pos
-    reached = math.hypot(here[0] - goal[0], here[1] - goal[1]) < 0.15 and w.level() == FLOOR
+    reached = math.hypot(here[0] - goal[0], here[1] - goal[1]) < 0.15 and w.level() == floor
     final = gl.message(w.t, everything=True)
     start = w.trace[0]
     route = find_route(final, [], cell(start[1], start[2], start[3] - 0.075), cell(here[0], here[1], w.floor_z))
     ks = [c[2] for c in route.get("cells", [])]
-    rec("summary", reached=reached, final_pos=[round(float(v), 3) for v in here], final_level=w.level(),
+    rec("summary", floor=floor, reached=reached, final_pos=[round(float(v), 3) for v in here], final_level=w.level(),
         max_jump=round(max_jump(w.trace), 4), route=route["status"], route_k=[max(ks), min(ks)] if ks else None)
-    path = out_dir / f"b2-{seed}.jsonl"
+    path = out_dir / f"{floor.lower()}-{seed}.jsonl"
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(json.dumps(r) + "\n" for r in records)
     verdict = evaluate(records)
@@ -272,10 +279,11 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--max-t", type=float, default=500.0, help="sim seconds allowed")
+    p.add_argument("--floor", choices=sorted(PATHS), default=FLOOR, help="target basement (default B2)")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
-    verdict, path = run(args.seed, args.max_t, verbose=args.verbose)
-    print(f"e2e-b2 seed {args.seed}: {len(verdict['passed'])}/{len(STEPS)} steps passed")
+    verdict, path = run(args.seed, args.max_t, verbose=args.verbose, floor=args.floor)
+    print(f"e2e-{args.floor.lower()} seed {args.seed} (casualty {CASUALTY[args.floor]}): {len(verdict['passed'])}/{len(STEPS)} steps passed")
     for name in STEPS:
         s = verdict["steps"][name]
         t = f"{s['t']:6.1f}s" if isinstance(s["t"], (int, float)) else "       "
