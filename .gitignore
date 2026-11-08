@@ -17,3 +17,9 @@ __pycache__/
 # T24 raw trajectories; the compressed measured dataset is committed separately.
 eval/traces/
 eval/stand-in/traces/
+
+# local Python environment, tool caches and run outputs (tools/*.py write to runs/)
+.venv/
+.ruff_cache/
+.pytest_cache/
+runs/
