@@ -39,11 +39,12 @@ def _mark_stand_in() -> None:
 
 SAMPLE_RATE = 24000  # Gemini TTS returns 16-bit mono PCM at 24 kHz
 VOICE = os.environ.get("VOICE_TTS_VOICE", "Kore")  # prebuilt voice; calm and clear
+CALM_STYLE = "Say this slowly, softly and calmly, like a kind rescuer talking to someone who is scared"
 _play_lock = threading.Lock()  # one utterance at a time, so lines never overlap
 
 
 def _audio_cache_file(gem: Any, text: str) -> Any:
-    raw = json.dumps(["tts_studio", VOICE, text])
+    raw = json.dumps(["tts_studio", VOICE, text])  # text already carries any style prefix
     return gem.CACHE / f"tts-{hashlib.sha256(raw.encode()).hexdigest()}.pcm"
 
 
@@ -117,16 +118,19 @@ def _text_only(text: str, to: str, tag: str, reason: str, **extra: Any) -> dict[
     return {"spoken": False, "mode": "text-only", "reason": reason, "text": text, **extra}
 
 
-def speak_text(text: str, to: str = "operator", allow_device: bool = True) -> dict[str, Any]:
+def speak_text(
+    text: str, to: str = "operator", allow_device: bool = True, style: str | None = None
+) -> dict[str, Any]:
     """Speak text with Gemini TTS through the sound device; fall back to printed text.
 
+    `style` is a spoken-delivery hint for TTS only (for example CALM_STYLE); it is never printed.
     Never raises: a missing key, the call cap, a network error or no sound device all end
     in text-only output and mark the 'tts' stand-in for the console badge.
     """
     if get_mode() == "off":
         return _text_only(text, to, "off", "gemini_off")
     try:
-        pcm = synthesise(text)
+        pcm = synthesise(f"{style}: {text}" if style else text)
     except Exception as exc:  # noqa: BLE001 - GeminiOff, cap RuntimeError, SDK/network errors
         logger.warning("TTS unavailable, text only: %s", exc)
         return _text_only(text, to, "fallback", "tts_fallback", error=str(exc))
@@ -163,7 +167,7 @@ def handle_say(data: dict[str, Any]) -> dict[str, Any]:
         else:
             text_to_speak = translated_text
 
-    result = speak_text(text_to_speak, to=to)
+    result = speak_text(text_to_speak, to=to, style=CALM_STYLE if to == "casualty" else None)
     result.update({
         "to": to,
         "intent": intent,
