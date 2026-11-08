@@ -13,6 +13,7 @@ import {
 } from './map';
 import { setupPanels } from './panels';
 import { setupHardwarePanel } from './hardware';
+import { setupStory } from './story';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);
@@ -112,6 +113,9 @@ setupPanels();
 // Setup robot hardware specification panel (Y7c)
 setupHardwarePanel();
 
+// Story mode (DEMO-FLOW): phase strip, camera follow, report card; ?run=<url> replays a recording
+const story = setupStory(mapViewer);
+
 // Initial boot
 if (isFakeMode) {
   // Populate the backup building demo scene immediately so the coloured map, casualty, hazards and route are visible
@@ -122,4 +126,4 @@ if (isBenchmarkMode) {
   mapViewer.generate100kBenchmark();
 }
 
-connect();
+if (!story.replaying) connect();
