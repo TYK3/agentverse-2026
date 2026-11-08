@@ -18,9 +18,11 @@ async def run(world, bus, rate_hz=RATE_HZ):
     dt = 1.0 / rate_hz
     while True:
         started = time.monotonic()
-        world.responder.step(dt)      # the Responder (T06) moves on the same tick as the physics
+        if world.responder is not None:
+            world.responder.step(dt)  # the Responder (T06) moves on the same tick as the physics
         events = world.tick(dt)
-        events.append(("responder/pose", world.responder.pose_message(world.t)))   # E2: its real pose, 10 Hz
+        if world.responder is not None:
+            events.append(("responder/pose", world.responder.pose_message(world.t)))  # E2: real pose, 10 Hz
         if getattr(world, "relay", None) is not None:  # L3: move the radio, drop crumbs, re-route
             events += world.relay.step(world.t, world.pos)
             world.hw.source.transport.flush()
@@ -60,8 +62,13 @@ async def start(bus, loop=True):
     sim/responder.py, `world.responder`) follows route/proposed, gate/* and responder/action, freezes
     on world/change and reports every outcome as log/decision.
     """
-    name, path = scene.resolve()          # SIM_SCENE=backup (default) | tower | path to an MJCF file
-    world = World(path=path)
+    name, path = scene.resolve()          # SIM_SCENE=backup (default) | tower | building | levels | MJCF path
+    if name == "levels":
+        from sim.levels import LevelWorld
+
+        world = LevelWorld(path=path)
+    else:
+        world = World(path=path)
     world.scene = name
     from sim import recorder  # here, so `python -m sim.recorder` imports it only once
 
@@ -72,7 +79,8 @@ async def start(bus, loop=True):
     # The Responder subscribes to route/proposed first: the hub runs callbacks in order and the
     # physics check below publishes route/verified, which can trigger the planner's whole
     # move/place/release dispatch before later callbacks run (seen in a real-lane run).
-    world.responder = responder.attach(world, bus)
+    # The levels scene contains only a Scout; never invent a Responder or approve its motion.
+    world.responder = None if name == "levels" else responder.attach(world, bus)
     try:
         # Y9: the Scout's depth camera; a true-scale robot scene names its own (world.camera_name, #122)
         world.rgbd = rgbd.RGBD(world.m, camera=getattr(world, "camera_name", rgbd.CAMERA))
@@ -80,7 +88,11 @@ async def start(bus, loop=True):
         world.rgbd = None
 
     async def on_route(route):
-        await bus.publish("route/verified", world.verify(route))
+        verification = world.verify(route) if world.responder is not None else {
+            "id": route["id"], "ok": False, "unstable_cells": [],
+            "detail": "levels scene has no Responder; movement verification unavailable",
+        }
+        await bus.publish("route/verified", verification)
 
     bus.subscribe("route/proposed", on_route)
     inject.install(world, bus)

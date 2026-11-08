@@ -10,11 +10,11 @@ SCENES = pathlib.Path(__file__).parent / "scenes"
 BACKUP = SCENES / "backup.xml"
 TOWER = SCENES / "tower.xml"
 BUILDING = SCENES / "building.xml"
-NAMED = {"backup": BACKUP, "tower": TOWER, "building": BUILDING}
+NAMED = {"backup": BACKUP, "tower": TOWER, "building": BUILDING, "levels": SCENES / "levels.xml"}
 
 
 def resolve(name=None):
-    """(scene name, path) for a scene name: `backup` (default), `tower`, or an MJCF path (name: its stem).
+    """(scene name, path) for a NAMED scene (default backup), or an MJCF path (name: its stem).
 
     With no name, the SIM_SCENE environment variable picks it.
     """
