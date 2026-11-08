@@ -1,0 +1,27 @@
+{
+  "topic": "casualty/contact",
+  "data": {
+    "id": "c1",
+    "t": 40.1,
+    "status": "done",
+    "turns": 4,
+    "max_turns": 8,
+    "facts": {
+      "responsive": true,
+      "hurt": [
+        "leg"
+      ],
+      "bleeding": false,
+      "breathing_hard": null,
+      "can_walk": false,
+      "cold": true
+    },
+    "injuries": [
+      "left leg hurts, may be broken",
+      "feels cold"
+    ],
+    "receipts": [
+      "gem-0123456789abcdef0123456789abcdef"
+    ]
+  }
+}

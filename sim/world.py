@@ -7,6 +7,7 @@ Other sim tasks (Responder T06) work on the same `World`: `world.m`, `world.d`, 
 """
 
 import math
+import re
 
 import mujoco
 import numpy as np
@@ -18,6 +19,23 @@ CLEARANCE = 0.15       # metres of free space the Scout needs ahead before it mo
 HALF_WIDTH = 0.08      # Scout chassis half width; side rays check the corners
 ARRIVE = 0.02          # metres
 LAND = 1.0             # seconds an injected block gets to fall and settle before world/change
+HEAR_CALL_M = 6.0      # the casualty hears the Scout calling within this range (L2)
+TAP_DELAY_S = 1.0      # reaction time before they start knocking
+TAP_S = 6.0            # how long they knock after each call
+
+
+def casualties(m):
+    """[(name, geom id, voice)] for every casualty geom c<n>_g, in number order. `voice` (0 silent ..
+    1 calling out) comes from the scene's <numeric name="voice_c<n>"> and defaults to 1."""
+    out = []
+    for g in range(m.ngeom):
+        match = re.fullmatch(r"(c\d+)_g", mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, g) or "")
+        if match:
+            name = match.group(1)
+            k = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_NUMERIC, "voice_" + name)
+            voice = float(m.numeric_data[m.numeric_adr[k]]) if k >= 0 else 1.0
+            out.append((name, g, voice))
+    return sorted(out, key=lambda c: int(c[0][1:]))
 
 
 class World:
@@ -27,7 +45,8 @@ class World:
         self.rng = np.random.default_rng(seed)
         self.scout = self.m.body("scout").id
         self.scout_mocap = int(self.m.body_mocapid[self.scout])
-        self.casualty_geom = self.m.geom("c1_g").id
+        self.casualties = casualties(self.m)   # [(name, geom id, voice)], c1 first
+        self.casualty_geom = self.casualties[0][1]
         self.target = None          # [x, y] the Scout is driving to
         self.reason = ""
         self.state = "idle"         # idle | moving | arrived | blocked
@@ -38,6 +57,7 @@ class World:
         self.shake_start = None     # block positions when it began
         self.events = []            # (topic, data) produced since the last tick
         self.landing = None         # (world time, name) when an injected block will have landed
+        self.tapping = {}           # casualty name -> (from, until) world times they knock back (L2)
         self.refresh_unstable()
 
     # ---- physics route check ----------------------------------------------------
@@ -85,8 +105,8 @@ class World:
         b = spare[0]
         g = self.m.body_geomadr[b]
         self.m.body_gravcomp[b] = 0
-        self.m.geom_contype[g] = self.m.geom_conaffinity[g] = 1
-        self.m.body_contype[b] = self.m.body_conaffinity[b] = 1      # the broad phase filters on these too
+        self.m.geom_contype[g], self.m.geom_conaffinity[g] = 1, 3       # 3: also hits braced pieces (tower)
+        self.m.body_contype[b], self.m.body_conaffinity[b] = 1, 3      # the broad phase filters on these too
         adr = self.m.jnt_qposadr[self.m.body_jntadr[b]]
         vadr = self.m.jnt_dofadr[self.m.body_jntadr[b]]
         z = max(float(pos[2]), float(self.m.geom_size[g][2]) + 0.005)
@@ -165,21 +185,52 @@ class World:
         events, self.events = self.events, []
         return events
 
+    # ---- casualties answer a call (L2) --------------------------------------------
+    def on_say(self, msg):
+        """A `say` to the casualty, spoken by the Scout: every casualty who can hear it taps back.
+
+        Heard when the Scout is within HEAR_CALL_M and at most two walls away; they start after a
+        short reaction time and knock for TAP_S seconds.
+        """
+        if msg.get("to") != "casualty":
+            return
+        origin = self.pos
+        for name, geom, _voice in self.casualties:
+            casualty = self.d.geom_xpos[geom].copy()
+            if float(np.linalg.norm((casualty - origin)[:2])) > HEAR_CALL_M:
+                continue
+            hit, _ = sensors.first_hit(self.m, self.d, origin, casualty, self.scout)
+            walls = 0 if hit == geom else sensors.walls_between(self.m, self.d, origin, casualty, self.scout, geom)
+            if walls <= 2:
+                self.tapping[name] = (self.t + TAP_DELAY_S, self.t + TAP_DELAY_S + TAP_S)
+
+    def is_tapping(self, name=None):
+        """Whether casualty `name` (any casualty when None) is knocking right now."""
+        spans = self.tapping.values() if name is None else [self.tapping[name]] if name in self.tapping else []
+        return any(a <= self.t < b for a, b in spans)
+
     # ---- sensors -----------------------------------------------------------------
     def sensors_message(self, camera=True):
         """Payload for sensors/scout. `camera` adds a base64 JPEG frame when a renderer exists."""
         origin, yaw = self.pos, self.yaw
-        casualty = self.d.geom_xpos[self.casualty_geom].copy()
-        hit, _ = sensors.first_hit(self.m, self.d, origin, casualty, self.scout)
-        in_sight = hit == self.casualty_geom
-        walls = 0 if in_sight else sensors.walls_between(self.m, self.d, origin, casualty, self.scout, self.casualty_geom)
-        visible = in_sight and float(np.linalg.norm((casualty - origin)[:2])) <= sensors.THERMAL_RANGE
+        heard, thermal = [], None
+        for name, geom, voice in self.casualties:
+            casualty = self.d.geom_xpos[geom].copy()
+            hit, _ = sensors.first_hit(self.m, self.d, origin, casualty, self.scout)
+            in_sight = hit == geom
+            walls = 0 if in_sight else sensors.walls_between(self.m, self.d, origin, casualty, self.scout, geom)
+            visible = in_sight and float(np.linalg.norm((casualty - origin)[:2])) <= sensors.THERMAL_RANGE
+            grid = sensors.thermal(origin, yaw, casualty, visible)
+            thermal = grid if thermal is None else thermal + (grid - 0.1)
+            heard.append(sensors.acoustic(origin, yaw, casualty, walls, self.rng, voice=voice,
+                                          tapping=self.is_tapping(name)))
+        loudest = max(heard, key=lambda a: a["level"])     # the contract carries one bearing: the loudest
         data = {
             "t": round(self.t, 2),
             "pose": {"pos": [round(float(v), 3) for v in origin], "yaw": round(yaw, 3)},
             "lidar": [round(float(r), 3) for r in sensors.lidar(self.m, self.d, origin, self.scout)],
-            "thermal": np.round(sensors.thermal(origin, yaw, casualty, visible), 2).tolist(),
-            "acoustic": sensors.acoustic(origin, yaw, casualty, walls, self.rng),
+            "thermal": np.round(np.clip(thermal, 0.0, 1.0), 2).tolist(),
+            "acoustic": loudest,
             "motion": {"state": self.state, "target": None if self.target is None else [round(float(v), 3) for v in self.target]},
         }
         if camera:

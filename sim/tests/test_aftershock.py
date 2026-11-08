@@ -96,7 +96,7 @@ def test_inject_drops_a_block_and_reports_it():
 
 def test_spare_block_is_not_in_scene_loaded():
     m, d = scene.load()
-    assert [b["id"] for b in scene.blocks(m, d)] == [f"b{i}" for i in range(1, 16)]
+    assert [b["id"] for b in scene.blocks(m, d)] == [f"b{i}" for i in range(1, 17)]
     assert m.geom_contype[m.geom("x1_rubble").id] == 0
 
 
@@ -130,10 +130,23 @@ def test_start_answers_route_proposed_within_1s():
 
 
 def test_inject_install_is_a_no_op_outside_the_hub(world):
-    import sys
+    """Only the hub's own bus gets /inject, even when coord.hub was imported earlier in the session."""
 
-    assert "coord.hub" not in sys.modules
-    assert inject.install(world) is False
+    class FakeBus:
+        pass
+
+    assert inject.install(world, FakeBus()) is False
+
+
+def test_inject_install_adds_the_route_on_the_hub_bus(world):
+    hub = pytest.importorskip("coord.hub")
+    routes = [r for r in hub.app.router.routes if getattr(r, "path", None) == "/inject"]
+    try:
+        assert inject.install(world, object()) is False
+        assert inject.install(world, hub.bus) is True
+        assert [getattr(r, "path", None) for r in hub.app.router.routes].count("/inject") == 1
+    finally:
+        hub.app.router.routes[:] = [r for r in hub.app.router.routes if getattr(r, "path", None) != "/inject"] + routes
 
 
 def test_shake_offset():

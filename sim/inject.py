@@ -6,7 +6,7 @@
 
 block_added drops the spare rubble block at pos; aftershock starts the live shake. Either way the
 sim loop publishes world/change once the world has the change. The route is added to the hub's
-FastAPI app only when coord.hub is already loaded, so tests and scripts never import FastAPI.
+FastAPI app only when sim.start was given the hub's own bus, so tests and scripts never import FastAPI.
 """
 
 import sys
@@ -30,11 +30,15 @@ def handle(world, body):
     return 400, {"error": "kind must be block_added or aftershock"}
 
 
-def install(world):
-    """Add POST /inject to the hub app when running inside the hub. Returns True if added."""
+def install(world, bus):
+    """Add POST /inject to the hub app when `bus` is the hub's own bus. Returns True if added.
+
+    Checking the bus, not just whether coord.hub is imported, keeps a test that calls sim.start with a
+    fake bus (in a session that also imported the hub) from wiring /inject to that test's world.
+    """
     hub = sys.modules.get("coord.hub")
     app = getattr(hub, "app", None)
-    if app is None:
+    if app is None or getattr(hub, "bus", None) is not bus:
         return False
     from fastapi import Request
     from fastapi.responses import JSONResponse

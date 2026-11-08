@@ -13,12 +13,15 @@ import json
 import re
 import time
 
+from planner.paramedic import is_report_command
 from planner.route import RoutePlanner
+from planner.supply import KIT
 
 IDLE, PROPOSED, VERIFIED, GATED, EXECUTING = "IDLE", "PROPOSED", "VERIFIED", "GATED", "EXECUTING"
 ACT, RELOOK = 0.8, 0.5  # confidence >= ACT acts, >= RELOOK re-looks, below refers to a human
 MAX_REPLANS = 3  # physics rejections in a row before the gate refers to a human
 REVIEW_TIMEOUT_S = 5.0
+GATE_TIMEOUT_S = 60.0
 REPLAN_EVERY_S = 1.0  # while waiting for a re-scan, try a new route at most once a second
 MODEL = "local-astar"
 
@@ -41,7 +44,10 @@ class Loop:
     """One Responder mission at a time. Start it with `await loop.mission(start, goal, ...)`."""
 
     def __init__(self, bus, router: RoutePlanner, *, gem=None, clock=time.monotonic,
-                 review_timeout=REVIEW_TIMEOUT_S, budget=None, places=None, start_cell=None, interpret=None):
+                 review_timeout=REVIEW_TIMEOUT_S, budget=None, places=None, start_cell=None, interpret=None,
+                 gate_timeout=GATE_TIMEOUT_S):
+        if not 0 < gate_timeout <= GATE_TIMEOUT_S:
+            raise ValueError("gate timeout must be positive and at most 60 seconds")
         self.bus, self.router = bus, router
         self.budget = budget  # planner.budget.Budget: times each local step for status/budget
         self.places = places or {}  # operator place name -> goal cell, for operator/command
@@ -58,12 +64,18 @@ class Loop:
         self.hazards: list[dict] = []  # from perception
         self.unstable: dict[tuple, str] = {}  # cell -> why, from physics rejections
         self.casualties: dict[str, dict] = {}
+        self.relooked: dict[tuple, float] = {}  # re-looked cell -> confidence before that re-look
         self.replans = 0
         self.waiting_scan: str | None = None  # why we are waiting for the map to change
         self.map_version = 0
         self.scan_from_version = 0
         self.last_try = float("-inf")
         self.request: dict | None = None  # open gate/request
+        self.gate_timeout = gate_timeout
+        self._gate_timer = None
+        self._gate_deadline = None
+        self._gate_tasks = set()
+        self.verified_route: str | None = None
         self.review = "not run"
         self._n = {"d": 0, "g": 0}
 
@@ -97,22 +109,33 @@ class Loop:
 
     # ---- mission and proposals ----------------------------------------------------------------
 
-    async def mission(self, start, goal, *, goal_text="deliver water to c1", item="water", casualty="c1"):
+    async def mission(self, start, goal, *, goal_text="deliver water to c1", item="water", casualty="c1",
+                      action="deliver", block=None):
+        """`block` (Y2): found material standing in for `item`. action "fetch" drives to it and grips it
+        (no place); a later "deliver" with the same block carries it to the casualty and sets it down."""
+        if item not in KIT or action not in ("deliver", "grip", "fetch") or (action == "fetch" and not block):
+            raise ValueError("unsupported Responder item or action")
+        await self.cancel_request("mission replaced")
         self.mission_args = {"start": tuple(start), "goal": tuple(goal), "goal_text": goal_text,
-                             "item": item, "casualty": casualty}
-        self.replans, self.unstable = 0, {}
+                             "item": item, "casualty": casualty, "action": action, "block": block}
+        self.replans, self.unstable, self.relooked = 0, {}, {}
         return await self.propose(f"mission: {goal_text}")
 
     async def propose(self, why):
+        await self.cancel_request("route replaced")
+        self.verified_route = None
         m = self.mission_args
         self.router.hazards = self.hazards + [
-            {"cell": list(c), "status": "at_risk", "why": w, "estimate": True} for c, w in self.unstable.items()]
+            {"cell": list(c), "status": "at_risk", "why": w, "estimate": True, "blocked": True}
+            for c, w in self.unstable.items()]  # physics-rejected: never routed through (route.find_route)
         with self._step():
-            result = await self.router.propose(m["start"], m["goal"], goal_text=m["goal_text"])
+            result = await self.router.propose(m["start"], m["goal"], goal_text=m["goal_text"], publish=False)
         if result["status"] == "ok":
             self.route, self.state, self.waiting_scan = result["proposal"], PROPOSED, None
             await self.log(why, "proposed", f"route {self.route['id']}: {len(self.route['cells'])} seen cells "
                            f"to {m['goal_text']}, waiting for the physics check")
+            # A sim subscriber may answer inside publish(), so register the route first.
+            await self.bus.publish("route/proposed", result["proposal"])
             return result
         # No route over seen cells: re-look at the frontier and try again when the map changes.
         self.route, self.state = None, IDLE
@@ -147,6 +170,7 @@ class Loop:
                            f"cells, re-plan {self.replans} of {MAX_REPLANS}", physics=physics)
             return await self.propose(f"re-plan after {rid} failed the physics check")
         self.state, self.replans = VERIFIED, 0
+        self.verified_route = rid
         await self.gate(f"{rid} verified: {data['detail'] or 'stable'}")
 
     def confidence(self):
@@ -173,15 +197,24 @@ class Loop:
         rid = self.route["id"]
         if outcome == "act":
             agree, review_why = await self.online_review()
+            if not self.route or self.route["id"] != rid or self.state != GATED:
+                return  # a scene change or replacement mission invalidated the review
             if agree is False:
                 return await self.refer(conf, f"online review disagrees: {review_why}", physics)
             if not self.online:
                 self.offline_acts.append({"route": self.route, "hazards": list(self.router.hazards)})
             await self.decide("act", conf, f"{rid} verified and {why}; online review {self.review}")
             await self.log(why, "act", f"send the Responder along {rid}", physics=physics, model=self._model())
-            return await self.execute()
+            return await self.execute(expected_route=rid)
         if outcome == "relook":
             cell = weakest
+            before = self.relooked.get(tuple(cell))
+            if before is not None and conf <= before:
+                # A re-look that left confidence where it was will not raise it next time either
+                # (e.g. vision is a stand-in with Gemini off): hand the call to a human.
+                return await self.refer(conf, f"{why}; re-look at cell {cell} did not raise confidence "
+                                        f"({before:.2f} -> {conf:.2f})", physics)
+            self.relooked[tuple(cell)] = conf
             await self.decide("relook", conf, f"{why}; re-look at cell {cell} before acting")
             await self.log(why, "relook", f"Scout re-scans cell {cell}", physics=physics)
             await self.goto(cell, f"re-look at cell {cell}: {why}")
@@ -228,38 +261,134 @@ class Loop:
             counts[key] = counts.get(key, 0) + 1
         return counts
 
-    async def refer(self, conf, why, physics=""):
+    def _clear_request(self):
+        request, self.request = self.request, None
+        if self._gate_timer is not None:
+            self._gate_timer.cancel()
+            self._gate_timer = None
+        self._gate_deadline = None
+        return request
+
+    async def cancel_request(self, why):
+        request = self._clear_request()
+        if request:
+            await self.log(f"gate {request['id']}", "hold", f"approval cancelled: {why}")
+
+    def _arm_timeout(self):
+        request_id = self.request["id"]
+        self._gate_deadline = self.clock() + self.gate_timeout
+
+        def expire():
+            task = asyncio.create_task(self._expire_request(request_id))
+            self._gate_tasks.add(task)
+            task.add_done_callback(self._gate_tasks.discard)
+
+        self._gate_timer = asyncio.get_running_loop().call_later(self.gate_timeout, expire)
+
+    async def _expire_request(self, request_id):
+        if self.request and self.request["id"] == request_id:
+            self._clear_request()
+            self.state = IDLE
+            await self.log(f"gate {request_id}", "hold", "approval timeout: refused; Responder idle")
+
+    async def refer(self, conf, why, physics="", *, kind="risky_move"):
+        await self.cancel_request("new approval request")
         self.state = GATED
         rid = self.route["id"] if self.route else "none"
-        self.request = {"id": self._id("g"), "kind": "risky_move", "route": rid,
+        self.request = {"id": self._id("g"), "kind": kind, "route": rid,
                         "summary": f"{self.mission_args['goal_text']} via {rid}: {why}"}
+        self._arm_timeout()
         await self.decide("refer", conf, why)
-        await self.bus.publish("gate/request", self.request)
         await self.log(why, "refer", f"a human decides on {rid}", physics=physics)
+        if self.request:
+            await self.bus.publish("gate/request", dict(self.request))
+
+    async def prepare_emergency_call(self, summary):
+        """Show a prepared message and request approval; never contact any phone service."""
+        if not isinstance(summary, str) or not summary.strip():
+            raise ValueError("emergency summary is required")
+        await self.cancel_request("emergency message prepared")
+        self.state = GATED
+        self.request = {"id": self._id("g"), "kind": "emergency_call",
+                        "route": self.route["id"] if self.route else "none",
+                        "summary": f"Prepared emergency message: {summary}"}
+        request = dict(self.request)
+        self._arm_timeout()
+        await self.log(summary, "refer", "emergency message prepared for operator approval; no call placed")
+        await self.bus.publish("gate/request", request)
+        return request
 
     async def on_answer(self, data):
-        if not self.request or data["id"] != self.request["id"]:
+        if not self.request or data.get("id") != self.request["id"]:
             return
-        req, self.request = self.request, None
-        if data["approved"] and self.route and req["route"] == self.route["id"]:
+        if data.get("by", "operator") != "operator":
+            return
+        if self.clock() >= self._gate_deadline:
+            return await self._expire_request(self.request["id"])
+        req = self._clear_request()  # consume once, before any await/re-entrant publish
+        if data.get("approved") is True and req["kind"] == "emergency_call":
+            self.state = IDLE
+            return await self.log(f"operator approved {req['id']}", "prepared",
+                                  f"{req['summary']}; operator must place the call; no call placed")
+        if data.get("approved") is True and self.route and req["route"] == self.route["id"]:
             await self.log(f"operator approved {req['id']}", "act", f"human approved {self.route['id']}")
-            return await self.execute()
+            return await self.execute(approved_kind=req["kind"], expected_route=req["route"])
         self.state = IDLE
-        await self.log(f"operator rejected {req['id']}", "hold", "the Responder waits; no route approved")
+        await self.log(f"operator rejected {req['id']}", "hold", "approval refused; Responder idle")
 
-    async def execute(self):
+    def execution_risk(self):
+        """Recheck observations and physics; human approval never overrides a collapsed cell."""
+        if not self.route or self.route["id"] != self.verified_route:
+            return "hold", "route has no successful physics verification"
+        records = {tuple(r["cell"]): r for r in (self.router.map_cells or {}).get("cells", [])}
+        cells = {tuple(c) for c in self.route["cells"]}
+        if any(records.get(c, {}).get("state") != "seen" or records[c]["occupied"] for c in cells):
+            return "hold", "route is no longer fully seen and free"
+        if any(c in self.unstable for c in cells):
+            return "hold", "route includes physics-rejected cells"
+        if any(tuple(h["cell"]) in cells and h["status"] == "collapsed" for h in self.hazards):
+            return "hold", "route includes a collapsed cell"
+        if any(tuple(h["cell"]) in cells and h["status"] == "at_risk" for h in self.hazards):
+            return "enter_at_risk", "route enters an at-risk cell; includes any requested supply grip"
+        if self.mission_args["action"] == "grip":
+            return "risky_move", "grip the requested supply, then place it; obstacle targeting is not on this wire interface"
+        return None, "seen, free and physics verified"
+
+    async def execute(self, *, approved_kind=None, expected_route=None):
+        if expected_route is not None and (not self.route or self.route["id"] != expected_route):
+            return await self.log("execution check", "hold", "stale dispatch discarded; route changed")
+        kind, why = self.execution_risk()
+        if kind == "hold":
+            self.state = IDLE
+            return await self.log("execution check", "hold", f"{why}; Responder idle")
+        if kind and approved_kind != kind:
+            return await self.refer(self.confidence()[0], why, kind=kind)
+        rid, item, block = self.route["id"], self.mission_args["item"], self.mission_args.get("block")
         self.state = EXECUTING
-        await self.bus.publish("responder/action", {"action": "move", "route": self.route["id"],
-                                                    "item": self.mission_args["item"]})
+        act = self.mission_args["action"]
+        actions = ["move"] + (["grip"] if act in ("grip", "fetch") else [])
+        for action in actions + ([] if act == "fetch" else ["place_supply", "release"]):
+            if not self.route or self.route["id"] != rid or self.state != EXECUTING:
+                return
+            current_kind, why = self.execution_risk()
+            if current_kind == "hold" or (current_kind and current_kind != approved_kind):
+                self.state = IDLE
+                return await self.log("execution check", "hold", f"{why}; remaining commands cancelled")
+            msg = {"action": action, "route": rid, "item": item}
+            if block and action != "move":
+                msg["block"] = block          # Y2: grip / place the found material, not a kit item
+            await self.bus.publish("responder/action", msg)
 
     # ---- perception updates and the visible re-plan -------------------------------------------
 
     async def on_world_change(self, data):
+        await self.cancel_request("world changed")
+        self.verified_route = None
         moved = ", ".join(data["moved_blocks"]) or "no blocks"
         was = self.state
         old = self.route["id"] if self.route else None
         self.state, self.route, self.request = IDLE, None, None
-        self.replans = 0  # cells physics called unstable stay avoided: an aftershock rarely fixes them
+        self.replans, self.relooked = 0, {}  # cells physics called unstable stay avoided: an aftershock rarely fixes them
         detail = f"Responder held, route {old} dropped" if old else "no active route"
         await self.log(f"{data['kind']} moved {moved}", "replanning",
                        f"{detail} (was {was}); waiting for the Scout to re-scan")
@@ -309,13 +438,17 @@ class Loop:
 
     async def on_command(self, data):
         """operator/command -> a mission. The local model (or keywords) only reads the goal."""
-        if not self.places or self.interpret is None:
-            return
         text = data["text"]
         low = text.lower().strip()
+        if is_report_command(text):
+            return  # ReportCollector handles this command; it must not become a navigation goal.
         if low in ("stop", "hold"):
+            await self.cancel_request("operator stopped the mission")
+            self.verified_route = None
             self.state, self.route = IDLE, None
-            return await self.log(f"operator: {text}", "hold", "operator stopped the Responder")
+            return await self.log(f"operator: {text}", "hold", "operator stopped the mission; further dispatch held")
+        if not self.places or self.interpret is None:
+            return
         with self._step():  # the goal read counts toward ms_per_step: it is on the operator's path
             got = await asyncio.to_thread(self.interpret, text, list(self.places))
         place, model = got.get("place"), got.get("model", "keyword-stand-in")

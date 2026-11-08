@@ -1,5 +1,5 @@
 import './style.css';
-import { connect, on, send } from './bus';
+import { connect, on } from './bus';
 import {
   MapViewer,
   type MapCellsPayload,
@@ -7,36 +7,43 @@ import {
   type CasualtyRecord,
   type ScoutSensorsPayload,
   type ResponderActionPayload,
-  type RouteProposedPayload
+  type RouteProposedPayload,
+  type RouteVerifiedPayload,
+  type WorldChangePayload
 } from './map';
+import { setupPanels } from './panels';
+import { setupHardwarePanel } from './hardware';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);
+(window as unknown as { aftershockMap: MapViewer }).aftershockMap = mapViewer;  // read by the browser tests
 
+// Connect HUD and Banner elements
 const fpsBadge = document.querySelector<HTMLElement>('#fps-badge');
 const cellCountBadge = document.querySelector<HTMLElement>('#cell-count-badge');
 mapViewer.setHudElements(fpsBadge, cellCountBadge);
+
+const banner = document.querySelector<HTMLElement>('#world-change-banner');
+const bannerText = document.querySelector<HTMLElement>('#banner-text');
+const bannerIcon = document.querySelector<HTMLElement>('#banner-icon');
+mapViewer.setBannerElements(banner, bannerText, bannerIcon);
 
 // UI Button actions
 document.querySelector<HTMLButtonElement>('#btn-demo-scene')?.addEventListener('click', () => {
   mapViewer.loadBackupSceneDemo();
 });
 
+document.querySelector<HTMLButtonElement>('#btn-demo-replan')?.addEventListener('click', () => {
+  mapViewer.simulateAftershockAndReplan();
+});
+
 document.querySelector<HTMLButtonElement>('#btn-benchmark-100k')?.addEventListener('click', () => {
   mapViewer.generate100kBenchmark();
 });
 
-const connection = document.querySelector<HTMLElement>('#connection-status')!;
-const log = document.querySelector<HTMLOListElement>('#reasoning-log')!;
-
 const searchParams = new URLSearchParams(window.location.search);
 const isFakeMode = searchParams.get('fake') === '1';
 const isBenchmarkMode = searchParams.has('benchmark');
-
-document.querySelector<HTMLElement>('#mode-label')!.textContent = isFakeMode
-  ? 'FAKE MODE · fixture replay'
-  : 'LIVE HUB';
-connection.textContent = isFakeMode ? 'Fixture replay' : 'Connecting…';
 
 // 3D Map Event Subscriptions
 on('map/cells', data => {
@@ -59,45 +66,55 @@ on('responder/action', data => {
   mapViewer.updateResponderAction(data as ResponderActionPayload);
 });
 
+// Task T19: Route Proposed, Route Verified, and World Change
 on('route/proposed', data => {
   mapViewer.updateRouteProposed(data as RouteProposedPayload);
 });
 
-// System Status and Reasoning Log
-on('console/connection', data => {
-  const online = Boolean((data as { online?: boolean })?.online);
-  connection.textContent = online ? 'Online' : 'Offline · reconnecting';
+on('route/verified', data => {
+  mapViewer.onRouteVerified(data as RouteVerifiedPayload);
 });
 
-on('*', data => {
-  const event = data as { topic: string; data: unknown };
-  if (event.topic === 'console/connection') return;
-  const item = document.createElement('li');
-  item.textContent = event.topic + ' · ' + JSON.stringify(event.data).slice(0, 180);
-  log.prepend(item);
-  while (log.children.length > 30) log.lastElementChild?.remove();
+// Task L1: Move permission & proof evidence
+on('permit/route', data => {
+  mapViewer.onPermitRoute(data as any);
 });
 
-on('gate/decision', data => {
-  document.querySelector<HTMLElement>('#confidence-panel')!.textContent = JSON.stringify(data);
-});
+on('world/change', data => {
+  const change = data as WorldChangePayload;
+  mapViewer.onWorldChange(change);
 
-// Operator Command Submission
-const input = document.querySelector<HTMLInputElement>('#operator-command')!;
-function submit(): void {
-  const text = input.value.trim();
-  if (text && send('operator/command', { text, source: 'typed' })) {
-    input.value = '';
+  // In fake mode: when world/change arrives, simulate re-plan route arriving after re-scanning
+  if (isFakeMode) {
+    window.setTimeout(() => {
+      mapViewer.updateRouteProposed({
+        id: 'r4',
+        robot: 'responder',
+        cells: [
+          [-16, -24, 0],
+          [-13, -17, 0],
+          [-4, -8, 0],
+          [8, -4, 0],
+          [20, 2, 0],
+          [39, 20, 0]
+        ],
+        goal: 'deliver water to c1',
+        reason: 'avoiding collapsed block b7 toward casualty c1',
+        model: 'local-astar'
+      });
+    }, 1500);
   }
-}
-document.querySelector<HTMLButtonElement>('#send-command')!.addEventListener('click', submit);
-input.addEventListener('keydown', event => {
-  if (event.key === 'Enter') submit();
 });
+
+// Setup operator reasoning, approval and status panels (T20)
+setupPanels();
+
+// Setup robot hardware specification panel (Y7c)
+setupHardwarePanel();
 
 // Initial boot
 if (isFakeMode) {
-  // Populate the backup building demo scene immediately so the coloured map, casualty and hazards are visible
+  // Populate the backup building demo scene immediately so the coloured map, casualty, hazards and route are visible
   mapViewer.loadBackupSceneDemo();
 }
 

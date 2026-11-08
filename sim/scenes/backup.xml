@@ -73,6 +73,10 @@
     <body name="b14" pos="1.9 -0.4 0.04"><freejoint/><geom name="b14_rubble" type="box" size="0.35 0.1 0.04" density="600" rgba="0.7 0.6 0.45 1"/></body>
     <!-- b15: block against the north-west corner of room 1 -->
     <body name="b15" pos="-1.0 1.2 0.1"><freejoint/><geom name="b15_rubble" type="box" size="0.12 0.1 0.1" density="600" rgba="0.55 0.5 0.45 1"/></body>
+    <!-- Y2 found material: a loose pine board (0.4 x 0.06 x 0.04 m, about 0.43 kg at 450 kg/m3) on the floor of
+         room 3, 0.17 m off the east wall, light enough for the arm's 0.5 kg payload and long enough to splint a
+         forearm or shin. Below the LiDAR (0.075 m), so only depth points show it. -->
+    <body name="b16" pos="2.25 0.1 0.02"><freejoint/><geom name="b16_rubble" type="box" size="0.03 0.2 0.02" mass="0.43" rgba="0.8 0.65 0.4 1"/></body>
 
     <!-- Casualty marker c1, lying in room 3. No collisions, no joint: a fixed visual marker only. -->
     <body name="casualty_c1" pos="2.0 1.0 0.12" euler="0 90 0">
@@ -96,6 +100,30 @@
       <camera name="scout_cam" pos="0.1 0 0.03" xyaxes="0 -1 0 0 0 1" fovy="60"/>
     </body>
 
+    <!-- Responder (T06): the heavier robot, a mocap body driven cell by cell by sim/responder.py.
+         Like the Scout its geoms do not collide; responder.py casts collision rays before every step
+         and refuses to move into a block. It starts outside the breach, right behind the Scout (1 cm gap), facing +y:
+         at y -1.77 its start is within 0.35 m of floor the Scout's first scans see (open ground further
+         out stays unmapped, because a LiDAR beam that hits nothing marks no cells free).
+         Narrow enough (0.14 m) to pass the breach between the b12/b13 pile and wall b4 (route cells at x = -0.475).
+         Its geoms are in group 3 (robot geoms) so the Scout's sensors can leave them out of the map. -->
+    <body name="responder" mocap="true" pos="-0.5 -1.77 0.05" quat="0.7071068 0 0 0.7071068">
+      <geom name="responder_chassis" type="box" size="0.16 0.07 0.05" group="3" contype="0" conaffinity="0" rgba="0.95 0.6 0.1 1"/>
+      <geom name="responder_gripper" type="box" size="0.02 0.06 0.015" pos="0.17 0 0.03" group="3" contype="0" conaffinity="0" rgba="0.15 0.15 0.15 1"/>
+    </body>
+
+    <!-- Supplies: small free bodies carried on the Responder's deck by the carry_* welds below.
+         Positions here equal the deck slots (responder pose + slot), so nothing jumps at load. -->
+    <body name="water" pos="-0.5 -1.87 0.16"><freejoint/><geom name="water_supply" type="cylinder" size="0.035 0.06" mass="0.5" rgba="0.2 0.55 1 1"/></body>
+    <body name="first_aid_kit" pos="-0.5 -1.77 0.13"><freejoint/><geom name="first_aid_kit_supply" type="box" size="0.05 0.035 0.03" mass="0.4" rgba="0.9 0.15 0.15 1"/></body>
+    <body name="radio" pos="-0.5 -1.67 0.145"><freejoint/><geom name="radio_supply" type="box" size="0.025 0.02 0.045" mass="0.3" rgba="0.15 0.15 0.15 1"/></body>
+    <!-- Y2 supply kit, stacked on the deck under the gripped-block slot (0.18 m over the Responder centre):
+         a mylar thermal blanket (60 g) folded on the first aid kit, a SAM-style splint (120 g) on the blanket,
+         and a bandage roll (50 g) on the radio. -->
+    <body name="thermal_blanket" pos="-0.5 -1.77 0.172"><freejoint/><geom name="thermal_blanket_supply" type="box" size="0.045 0.03 0.01" mass="0.06" rgba="0.85 0.75 0.2 1"/></body>
+    <body name="splint" pos="-0.5 -1.77 0.187"><freejoint/><geom name="splint_supply" type="box" size="0.06 0.02 0.004" mass="0.12" rgba="0.95 0.5 0.1 1"/></body>
+    <body name="bandage" pos="-0.5 -1.67 0.206"><freejoint/><geom name="bandage_supply" type="cylinder" size="0.02 0.015" mass="0.05" rgba="0.95 0.95 0.9 1"/></body>
+
     <camera name="overview" pos="0.5 -4 3.5" xyaxes="1 0 0 0 0.6 0.8"/>
   </worldbody>
 
@@ -109,5 +137,18 @@
     <weld name="brace_b3" body1="b3" body2="plate"/>
     <weld name="brace_b4" body1="b4" body2="plate"/>
     <weld name="brace_b5" body1="b5" body2="plate"/>
+
+    <!-- T06 gripper. carry_<item>: the Responder holds a supply (active at start: it sets out loaded).
+         grip_<block>: one weld per light rubble block (< 2 kg) it may clear; responder.py sets the held
+         pose and switches the weld on (grip) or off (release, the block falls). -->
+    <weld name="carry_water" body1="responder" body2="water" active="true"/>
+    <weld name="carry_first_aid_kit" body1="responder" body2="first_aid_kit" active="true"/>
+    <weld name="carry_radio" body1="responder" body2="radio" active="true"/>
+    <weld name="carry_bandage" body1="responder" body2="bandage" active="true"/>
+    <weld name="carry_splint" body1="responder" body2="splint" active="true"/>
+    <weld name="carry_thermal_blanket" body1="responder" body2="thermal_blanket" active="true"/>
+    <weld name="grip_b11" body1="responder" body2="b11" active="false"/>
+    <weld name="grip_b13" body1="responder" body2="b13" active="false"/>
+    <weld name="grip_b16" body1="responder" body2="b16" active="false"/>
   </equality>
 </mujoco>

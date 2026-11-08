@@ -1,0 +1,10 @@
+{
+  "topic": "casualty/reply",
+  "data": {
+    "id": "c1",
+    "t": 12.3,
+    "text": "Yes. My left leg hurts, I think it's broken.",
+    "source": "sim",
+    "level": 0.6
+  }
+}

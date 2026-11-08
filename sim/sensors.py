@@ -2,7 +2,9 @@
 
 Conventions (scene frame, metres, radians unless named _deg):
 - LiDAR ray k points at angle 2*pi*k/n from world +x, counter-clockwise, horizontal, from the
-  Scout origin. A miss reads max_range. The Scout's own body is excluded.
+  Scout origin. A miss reads max_range. The Scout's own body and every robot geom (group 3: the
+  Responder and its supplies) are excluded, as is the line of sight used by thermal and acoustic.
+  The Scout's drive check (world.py) still sees the robots, so it does not drive through them.
 - Bearings are relative to the Scout heading, degrees in (-180, 180], positive to the left.
 """
 
@@ -20,9 +22,15 @@ THERMAL_FOV_H, THERMAL_FOV_V = np.radians(60.0), np.radians(45.0)
 THERMAL_RANGE = 4.0
 
 
-def _ray(m, d, origin, vec, exclude):
+ROBOT_GROUP = 3        # geom group of the robots and what they carry (scenes/backup.xml)
+# Sensing rays skip ROBOT_GROUP: the map, thermal and sound describe the building, not our own robots.
+SENSE_GROUPS = np.array([g != ROBOT_GROUP for g in range(mujoco.mjNGROUP)], dtype=np.uint8)
+
+
+def _ray(m, d, origin, vec, exclude, groups=None):
+    """(distance or -1, geom id) of the first geom hit. `groups` is an mj_ray geomgroup mask; None = all."""
     geomid = np.zeros(1, dtype=np.int32)
-    dist = mujoco.mj_ray(m, d, np.asarray(origin, float), np.asarray(vec, float), None, 1, exclude, geomid)
+    dist = mujoco.mj_ray(m, d, np.asarray(origin, float), np.asarray(vec, float), groups, 1, exclude, geomid)
     return dist, int(geomid[0])
 
 
@@ -31,7 +39,7 @@ def lidar(m, d, origin, exclude_body, n=360, max_range=MAX_RANGE):
     ranges = np.full(n, max_range)
     for k in range(n):
         a = 2 * np.pi * k / n
-        dist, _ = _ray(m, d, origin, [np.cos(a), np.sin(a), 0.0], exclude_body)
+        dist, _ = _ray(m, d, origin, [np.cos(a), np.sin(a), 0.0], exclude_body, SENSE_GROUPS)
         if dist >= 0:
             ranges[k] = min(dist, max_range)
     return ranges
@@ -41,7 +49,7 @@ def first_hit(m, d, origin, target, exclude_body):
     """(geom id, distance) of the first geom on the segment origin->target, or (-1, length)."""
     delta = np.asarray(target, float) - np.asarray(origin, float)
     length = float(np.linalg.norm(delta))
-    dist, geom = _ray(m, d, origin, delta / length, exclude_body)
+    dist, geom = _ray(m, d, origin, delta / length, exclude_body, SENSE_GROUPS)
     if dist < 0 or dist > length:
         return -1, length
     return geom, dist
@@ -93,11 +101,25 @@ def thermal(origin, yaw, casualty_pos, visible):
     return grid
 
 
-def acoustic(origin, yaw, casualty_pos, walls, rng, noise=0.05):
-    """{"bearing": deg relative to heading, "level": 0..1}, falling with distance and walls."""
+TAP_RANGE = 10.0       # m: knocking on rubble carries further than a voice (L2)
+TAP_WALL_LOSS = 0.6    # level kept per wall for a tap (a voice keeps 0.5)
+TAP_BEARING_NOISE = 3.0  # deg: sharp taps give a cleaner direction than a voice
+
+
+def acoustic(origin, yaw, casualty_pos, walls, rng, noise=0.05, voice=1.0, tapping=False):
+    """{"bearing": deg relative to heading, "level": 0..1}, falling with distance and walls.
+
+    `voice` is how loud the casualty is (0 silent .. 1 calling out); a silent one reads noise only.
+    `tapping` (L2): the casualty is knocking in answer to a call, louder and easier to place; a
+    casualty too weak to call out can still knock.
+    """
     dist = float(np.linalg.norm(np.asarray(casualty_pos, float)[:2] - np.asarray(origin, float)[:2]))
-    level = max(0.0, 1.0 - dist / 8.0) * (0.5**walls) + rng.normal(0.0, noise)
-    bearing = relative_bearing(origin, yaw, casualty_pos) + rng.normal(0.0, 5.0)
+    level = max(0.0, 1.0 - dist / 8.0) * (0.5**walls) * voice
+    if tapping:
+        level = max(level, max(0.0, 1.0 - dist / TAP_RANGE) * (TAP_WALL_LOSS**walls))
+    level += rng.normal(0.0, noise)
+    spread = TAP_BEARING_NOISE if tapping else 5.0
+    bearing = relative_bearing(origin, yaw, casualty_pos) + rng.normal(0.0, spread)
     bearing = (bearing + 180.0) % 360.0 - 180.0
     return {"bearing": round(float(bearing), 1), "level": round(float(np.clip(level, 0.0, 1.0)), 3)}
 

@@ -109,7 +109,7 @@ def test_clearance_threshold_is_measured_in_metres(res, expected_cost):
     assert result["cost"] == pytest.approx(expected_cost)
 
 
-@pytest.mark.parametrize("blocker", ["occupied", "inferred", "unknown", "at_risk", "collapsed"])
+@pytest.mark.parametrize("blocker", ["occupied", "inferred", "unknown", "collapsed"])
 def test_diagonal_never_cuts_a_blocked_corner(blocker):
     grid = {
         "res": 0.1,
@@ -186,7 +186,9 @@ class RecordingBus:
     async def publish(self, topic, data):
         self.history.append({"topic": topic, "data": data})
         for callback in self.subscribers.get(topic, []):
-            callback(data)
+            result = callback(data)
+            if asyncio.iscoroutine(result):
+                await result
 
 
 def test_bus_uses_latest_snapshots_and_only_publishes_success(doorway):
@@ -296,3 +298,36 @@ def test_fake_run_accepts_hub_fixture_envelopes(tmp_path, doorway):
         cwd=FIXTURES.parents[1], capture_output=True, text=True, check=True,
     )
     assert json.loads(process.stdout)["data"]["cells"] == [[x, 2, 0] for x in range(7)]
+
+
+# ---- X1: predicted at_risk cells are avoided pre-emptively, entered only when there is no other way ----
+
+def test_at_risk_doorway_is_entered_only_when_it_is_the_only_way(doorway):
+    """No detour exists, so the route goes through the predicted cell (the loop then asks enter_at_risk)."""
+    result = find_route(doorway, [hazard((3, 2, 0), "at_risk")], (0, 2, 0), (6, 2, 0))
+    assert result["status"] == "ok"
+    assert [3, 2, 0] in result["cells"]
+    assert result["cost"] >= 50
+
+
+def test_route_keeps_a_margin_from_predicted_failures():
+    """Open 9x9 room, at_risk cell in the middle: the route avoids the cell and the cells around it."""
+    room = {"res": 0.05, "cells": [{"cell": [x, y, 0], "state": "seen", "occupied": False}
+                                   for x in range(9) for y in range(9)]}
+    result = find_route(room, [hazard((4, 4, 0), "at_risk")], (0, 4, 0), (8, 4, 0))
+    assert result["status"] == "ok"
+    assert all(max(abs(c[0] - 4), abs(c[1] - 4)) >= 3 for c in result["cells"]), result["cells"]
+    assert result["cost"] < 5
+
+
+def test_physics_rejected_cells_stay_impassable(doorway):
+    """The loop marks physics-rejected cells "blocked": never routed through, even as the only way."""
+    rejected = {**hazard((3, 2, 0), "at_risk"), "blocked": True}
+    assert find_route(doorway, [rejected], (0, 2, 0), (6, 2, 0))["status"] == "no_verified_route"
+
+
+def test_exclusion_zone_is_never_entered_even_as_the_only_way(doorway):
+    """L5: perception sensed debris moving here; the keep-out zone is a wall until fresh scans lift it."""
+    zone = {**hazard((3, 2, 0), "at_risk"), "exclusion": True}
+    assert find_route(doorway, [zone], (0, 2, 0), (6, 2, 0))["status"] == "no_verified_route"
+    assert find_route(doorway, [{**zone, "exclusion": False}], (0, 2, 0), (6, 2, 0))["status"] == "ok"

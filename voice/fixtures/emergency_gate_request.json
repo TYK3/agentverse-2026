@@ -1,0 +1,6 @@
+{
+  "id": "g_emerg_c1",
+  "kind": "emergency_call",
+  "summary": "EMERGENCY CALL: Trapped casualty c1 at cell [3, 4, 0]. Detection confidence: 0.85 via clues: [pose, thermal, sound]. Estimated vitals (all simulated): breathing_rate=14 (SIMULATED). Human approval required before dispatch.",
+  "route": ""
+}

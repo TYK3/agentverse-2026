@@ -126,27 +126,37 @@ def test_loop_times_its_steps_into_the_budget():
 def test_start_publishes_budget_every_second():
     async def go():
         bus = __import__("planner.tests.test_loop", fromlist=["Bus"]).Bus()
-        lp = await L.start(bus, gem=Gem())
+        ready = asyncio.Event()
+        bus.subscribe("status/budget", lambda _: ready.set())
+        lp = await L.start(bus, gem=Gem(), budget=B.Budget(bus, model_mb=lambda: 0.0))
         await bus.publish("map/cells", two_gap_map())
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(ready.wait(), timeout=1.0)
         lp.task.cancel()
+        await asyncio.gather(lp.task, return_exceptions=True)
         return bus
     bus = asyncio.run(go())
     assert bus.of("status/budget") and json.dumps(bus.of("status/budget")[0])
 
 
-def test_hub_entry_point_wires_loop_and_budget():
+def test_hub_entry_point_wires_loop_and_budget(monkeypatch):
     import planner
     from planner.tests.test_loop import Bus
 
+    # Wiring tests measure publication, independently of a running Ollama server.
+    budget_class = B.Budget
+    monkeypatch.setattr(B, "Budget", lambda bus: budget_class(bus, model_mb=lambda: 0.0))
+
     async def go():
         bus = Bus()
+        ready = asyncio.Event()
+        bus.subscribe("status/budget", lambda _: ready.set())
         router = await planner.start(bus)
         await bus.publish("map/cells", two_gap_map())
         await bus.publish("map/hazards", [])
         await router.loop.mission(START, (8, 3, 0), casualty=None)
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(ready.wait(), timeout=1.0)
         router.task.cancel()
+        await asyncio.gather(router.task, return_exceptions=True)
         return bus
     bus = asyncio.run(go())
     assert bus.of("route/proposed") and bus.of("status/budget")

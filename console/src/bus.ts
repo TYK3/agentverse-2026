@@ -21,6 +21,9 @@ function dispatch(message: Envelope): void {
   listeners.get('*')?.forEach(handler => handler(message));
 }
 
+(window as unknown as { dispatchBusMessage: (topic: string, data: unknown) => void }).dispatchBusMessage =
+  (topic: string, data: unknown) => dispatch({ topic, data });
+
 function parseMessage(raw: string): void {
   try {
     const message: unknown = JSON.parse(raw);
@@ -54,7 +57,10 @@ async function replayFixtures(): Promise<void> {
     const events: unknown[] = Array.isArray(fixture) ? fixture : [fixture];
     for (const event of events) {
       if (event && typeof event === 'object' && 'topic' in event && 'data' in event &&
-          typeof (event as Envelope).topic === 'string') dispatch(event as Envelope);
+          typeof (event as Envelope).topic === 'string') {
+        if (['gate/answer', 'operator/command'].includes((event as Envelope).topic)) continue;
+        dispatch(event as Envelope);
+      }
       else console.warn('[bus] fixture missing topic/data envelope', path);
     }
   }

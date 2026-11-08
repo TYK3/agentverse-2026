@@ -24,7 +24,7 @@ class Block(Message):
 
 
 class SceneLoaded(Message):
-    scene: Literal["backup", "photo"]
+    scene: Literal["backup", "photo", "tower"]
     blocks: list[Block]
 
 
@@ -54,6 +54,8 @@ class SensorsScout(Message):
     lidar: list[Nonnegative]
     camera: str | CameraFrame | None = None
     motion: ScoutMotion | None = None
+    points: Annotated[list[Vec3], Field(max_length=2048)] | None = None  # depth camera, scene frame (Z1/Y9)
+    points_from: Vec3 | None = None  # where the depth camera was for `points`, scene frame (L5)
     thermal: list[list[Probability]]
     acoustic: Acoustic
 
@@ -100,6 +102,7 @@ class Hazard(Message):
     status: Literal["stable", "at_risk", "collapsed"]
     why: Text
     estimate: Literal[True]
+    exclusion: bool | None = None  # keep out: motion was sensed nearby (L5); routes never pass
 
 
 class MapHazards(RootModel[list[Hazard]]):
@@ -149,7 +152,10 @@ class GateAnswer(Message):
 class ResponderAction(Message):
     action: Literal["move", "place_supply", "grip", "release"]
     route: Text
-    item: Literal["water", "first_aid_kit", "radio"]
+    item: Literal["water", "first_aid_kit", "radio", "bandage", "splint", "thermal_blanket"]
+    # Y2: a block id (e.g. "b11" to clear, or a found board used as a splint). When set, grip/release
+    # act on that block and item names what it is used for; when absent, they act on the kit item.
+    block: Text | None = None
 
 
 class OperatorCommand(Message):
@@ -161,6 +167,51 @@ class WorldChange(Message):
     kind: Literal["aftershock", "block_added"]
     t: Nonnegative
     moved_blocks: list[Text]
+
+
+Vec2 = Annotated[list[Number], Field(min_length=2, max_length=2)]
+
+
+class DebrisEvent(Message):
+    id: Text
+    kind: Literal["moved", "fell", "settled"]
+    pos: Vec3
+    moved_m: Nonnegative
+    drop_m: Nonnegative
+
+
+class DebrisPile(Message):
+    ids: Annotated[list[Text], Field(min_length=1)]
+    risk: Probability
+    worst: Text
+    tilt_deg: Nonnegative
+    overhang: Probability
+    motion_m: Nonnegative
+    top_z: Number
+    min_xy: Vec2
+    max_xy: Vec2
+    unstable: bool
+
+
+class WorldDebris(Message):
+    t: Nonnegative
+    truth: Literal[True]
+    events: list[DebrisEvent]
+    stacks: list[DebrisPile]
+
+
+class PermitEvidence(Message):
+    kind: Literal["verified", "clear", "shift", "hazard", "fresh_scan"]
+    detail: Text
+    t: Nonnegative
+
+
+class PermitRoute(Message):
+    route: Text
+    granted: bool
+    t: Nonnegative
+    reason: Text
+    evidence: list[PermitEvidence]
 
 
 class LogDecision(Message):
@@ -190,11 +241,88 @@ class StatusGemini(Message):
     stand_ins: list[Text]
 
 
+TokenCount = Annotated[int, Field(ge=0)]
+
+
+class GeminiAttempt(Message):
+    attempt: Annotated[int, Field(ge=1)]
+    sdk_called: bool
+    outcome: Literal["ok", "error"]
+    error_type: Text | None
+
+
+class GeminiCacheOrigin(Message):
+    id: Text | None
+    provider_id: Text | None
+    model_requested: Text | None
+    model_reported: Text | None
+    usage: dict[str, TokenCount] | None
+
+
+class GeminiReceipt(Message):
+    id: Text
+    schema_version: Literal[1]
+    started_at: Text
+    feature: Text
+    model_key: Text
+    model_requested: Text | None
+    model_reported: Text | None
+    mode: Literal["off", "replay", "live"]
+    source: Literal["none", "disabled", "cache", "live"]
+    outcome: Literal["ok", "off", "error", "cap_reached"]
+    route: Text | None
+    evidence_ids: list[Text]
+    provider_id: Text | None
+    source_call_id: Text | None
+    usage: dict[str, TokenCount] | None
+    attempts: list[GeminiAttempt]
+    live_attempts: TokenCount
+    request_sha256: Text | None
+    output_sha256: Text | None
+    cache_write_error: Text | None
+    elapsed_ms: Nonnegative
+    cache_origin: GeminiCacheOrigin | None = None
+    error_type: Text | None = None
+
+    @model_validator(mode="after")
+    def source_matches_activity(self):
+        if self.live_attempts != sum(attempt.sdk_called for attempt in self.attempts):
+            raise ValueError("live_attempts must count actual SDK attempts")
+        if self.source != "live" and self.live_attempts:
+            raise ValueError("non-live sources cannot claim SDK attempts")
+        if self.source in ("cache", "disabled") and (self.usage is not None or self.provider_id is not None):
+            raise ValueError("cached/disabled calls cannot claim current provider usage or ID")
+        if self.source == "disabled" and self.outcome != "off":
+            raise ValueError("disabled calls must have an off outcome")
+        return self
+
+
 class Say(Message):
     to: Literal["casualty", "operator"]
     intent: Literal["first_aid", "guide_exit", "reassure"]
     text: Text
     lang: Text
+
+
+class CasualtyReply(Message):
+    """G3: what one casualty said back (sim persona now, a microphone later), in English."""
+    id: Text
+    t: Nonnegative
+    text: str
+    source: Literal["sim", "mic", "typed"]
+    level: Probability | None = None
+
+
+class CasualtyContact(Message):
+    """G3: a bounded live dialogue with one casualty; facts are what they said, never a diagnosis."""
+    id: Text
+    t: Nonnegative
+    status: Literal["talking", "done", "unresponsive", "stopped"]
+    turns: Annotated[int, Field(ge=0)]
+    max_turns: Annotated[int, Field(ge=1)]
+    facts: dict[str, bool | None | list[Text]]
+    injuries: list[Text]
+    receipts: list[Text]
 
 
 class ReportHandover(Message):
@@ -223,11 +351,16 @@ TOPICS: dict[str, type[BaseModel]] = {
     "responder/action": ResponderAction,
     "operator/command": OperatorCommand,
     "world/change": WorldChange,
+    "world/debris": WorldDebris,
     "log/decision": LogDecision,
+    "permit/route": PermitRoute,
     "status/link": StatusLink,
     "status/budget": StatusBudget,
     "status/gemini": StatusGemini,
+    "gemini/receipt": GeminiReceipt,
     "say": Say,
+    "casualty/reply": CasualtyReply,
+    "casualty/contact": CasualtyContact,
     "report/handover": ReportHandover,
 }
 
