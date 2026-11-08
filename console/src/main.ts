@@ -17,6 +17,7 @@ import { setupHardwarePanel } from './hardware';
 import { setupDemoAssets } from './assets';
 import { setupStory } from './story';
 import { setupStageRing } from './stage-ring';
+import { setupHud } from './hud';
 // Last, so the theme overrides lane styles (story.css is pulled in by story.ts).
 import './theme.css';
 
@@ -121,6 +122,8 @@ setupDemoAssets(mapViewer);
 // Story mode (DEMO-FLOW): phase strip, camera follow, report card; ?run=<url> replays a recording
 const story = setupStory(mapViewer);
 setupStageRing();
+// Run clock (sim time) and the four stages with split times, on the map's top bar (CONSOLE-HUD)
+setupHud(on);
 
 // Initial boot
 if (isFakeMode) {
