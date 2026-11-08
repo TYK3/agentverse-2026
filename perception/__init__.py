@@ -7,6 +7,7 @@ from perception.casualties import PROMPT, Casualties
 from perception.explore import Explorer
 from perception.grid import Grid
 from perception.hazards import Hazards
+from perception.listen import Listener
 
 PERIOD = 0.5          # map/cells and map/casualties (when changed) at 2 Hz
 SNAPSHOT_EVERY = 10   # ticks, so a full snapshot every 5 s
@@ -39,6 +40,13 @@ async def start(bus):
             _spawn(vision(b64))      # the frame lives only until this call returns
 
     bus.subscribe("sensors/scout", sensors)
+    listener = Listener(grid)  # L2: call out, listen for taps, listen again from a second spot
+
+    async def listen(data):
+        for topic, payload in listener.on_sensors(data, now()):
+            await bus.publish(topic, payload)
+
+    bus.subscribe("sensors/scout", listen)
     hazards = Hazards()
 
     async def scene(data):

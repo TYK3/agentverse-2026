@@ -45,6 +45,7 @@ async def start(bus, loop=True):
     world = World()
     await bus.publish("scene/loaded", scene.scene_loaded(world.m, world.d))
     bus.subscribe("scout/goto", world.goto)
+    bus.subscribe("say", world.on_say)  # L2: the casualty knocks back when the Scout calls out
 
     async def on_route(route):
         await bus.publish("route/verified", world.verify(route))

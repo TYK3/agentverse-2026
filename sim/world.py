@@ -18,6 +18,9 @@ CLEARANCE = 0.15       # metres of free space the Scout needs ahead before it mo
 HALF_WIDTH = 0.08      # Scout chassis half width; side rays check the corners
 ARRIVE = 0.02          # metres
 LAND = 1.0             # seconds an injected block gets to fall and settle before world/change
+HEAR_CALL_M = 6.0      # the casualty hears the Scout calling within this range (L2)
+TAP_DELAY_S = 1.0      # reaction time before they start knocking
+TAP_S = 6.0            # how long they knock after each call
 
 
 class World:
@@ -38,6 +41,7 @@ class World:
         self.shake_start = None     # block positions when it began
         self.events = []            # (topic, data) produced since the last tick
         self.landing = None         # (world time, name) when an injected block will have landed
+        self.tapping = None         # (from, until) world times the casualty knocks back (L2)
         self.refresh_unstable()
 
     # ---- physics route check ----------------------------------------------------
@@ -165,6 +169,29 @@ class World:
         events, self.events = self.events, []
         return events
 
+    # ---- the casualty answers a call (L2) ------------------------------------------
+    def on_say(self, msg):
+        """A `say` to the casualty, spoken by the Scout: if the casualty can hear it, they tap.
+
+        Heard when the Scout is within HEAR_CALL_M and at most two walls away; they start after a
+        short reaction time and knock for TAP_S seconds.
+        """
+        if msg.get("to") != "casualty":
+            return
+        origin = self.pos
+        casualty = self.d.geom_xpos[self.casualty_geom].copy()
+        if float(np.linalg.norm((casualty - origin)[:2])) > HEAR_CALL_M:
+            return
+        hit, _ = sensors.first_hit(self.m, self.d, origin, casualty, self.scout)
+        walls = 0 if hit == self.casualty_geom else sensors.walls_between(
+            self.m, self.d, origin, casualty, self.scout, self.casualty_geom)
+        if walls <= 2:
+            self.tapping = (self.t + TAP_DELAY_S, self.t + TAP_DELAY_S + TAP_S)
+
+    @property
+    def is_tapping(self):
+        return self.tapping is not None and self.tapping[0] <= self.t < self.tapping[1]
+
     # ---- sensors -----------------------------------------------------------------
     def sensors_message(self, camera=True):
         """Payload for sensors/scout. `camera` adds a base64 JPEG frame when a renderer exists."""
@@ -179,7 +206,7 @@ class World:
             "pose": {"pos": [round(float(v), 3) for v in origin], "yaw": round(yaw, 3)},
             "lidar": [round(float(r), 3) for r in sensors.lidar(self.m, self.d, origin, self.scout)],
             "thermal": np.round(sensors.thermal(origin, yaw, casualty, visible), 2).tolist(),
-            "acoustic": sensors.acoustic(origin, yaw, casualty, walls, self.rng),
+            "acoustic": sensors.acoustic(origin, yaw, casualty, walls, self.rng, tapping=self.is_tapping),
             "motion": {"state": self.state, "target": None if self.target is None else [round(float(v), 3) for v in self.target]},
         }
         if camera:
