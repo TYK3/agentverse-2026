@@ -23,11 +23,12 @@
 
 <p align="center">
   <a href="https://youtu.be/sXFX6Gd1DOk" title="Play the one-minute AFTERSHOCK submission video on YouTube">
-    <img src="https://img.youtube.com/vi/sXFX6Gd1DOk/hqdefault.jpg" alt="One-minute AFTERSHOCK submission video: one take with one unscripted change. Click to play on YouTube" width="80%">
+    <img src="docs/images/demo-preview.gif" alt="One-minute AFTERSHOCK submission video, playing here at 3x speed: the MuJoCo world, the Scout's live map and a sudden debris fall the robots re-plan around. Click for the full video with sound" width="90%">
   </a>
-  <br><b>▶️ <a href="https://youtu.be/sXFX6Gd1DOk">Play the one-minute submission video</a></b> (one take, one unscripted change)
-  <br><br>🎥 <b>3-minute full demo:</b> <a href="https://youtu.be/PmSziD3qm70">youtu.be/PmSziD3qm70</a>
-  <br>📄 <b>One-page submission PDF:</b> <a href="https://app.notion.com/p/AFTERSHOCK-PDF-412284d12338800cb7ebcac8fc0f203e">AFTERSHOCK PDF on Notion</a>
+  <br><b>▶️ <a href="https://youtu.be/sXFX6Gd1DOk">One-minute submission video</a></b> (one take, one unscripted change)
+  <br><sub>The preview above plays automatically at 3x speed; click it for the full video with sound.</sub>
+  <br><br>🎥 <b><a href="https://youtu.be/PmSziD3qm70">3-minute full demo</a></b>
+  <br>📄 <b><a href="https://app.notion.com/p/AFTERSHOCK-PDF-412284d12338800cb7ebcac8fc0f203e">One-page submission PDF</a></b>
 </p>
 
 | 🛰️ Sees before it sends | 🧱 Physics, not a chatbot, says "go" | 🔁 Adapts when the building moves |
