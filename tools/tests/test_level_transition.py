@@ -16,8 +16,7 @@ from itertools import pairwise
 
 import pytest
 
-from sim.levels import LEVEL_Z
-from tools.run_b2 import run
+from tools.run_b2 import run  # imports mujoco only inside run()
 
 pytest.importorskip("mujoco")
 
@@ -45,6 +44,10 @@ def test_levels_change_only_between_neighbours_and_first_go_down_in_order(rows):
 
 
 def test_each_level_is_reached_at_its_floor_height(rows):
+    from sim.levels import (
+        LEVEL_Z,  # sim imports mujoco: only after the module-level skip
+    )
+
     poses = [r for r in rows if r["kind"] == "pose"]
     for lv in levels(rows)[1:]:
         near = min(poses, key=lambda p: abs(p["t"] - lv["t"]))
