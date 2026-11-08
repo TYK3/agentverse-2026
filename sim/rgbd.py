@@ -31,9 +31,10 @@ ROBOT_GROUP = 3                # Scout and Responder geoms (sim/scenes/*.xml), h
 
 
 class RGBD:
-    def __init__(self, m, width=WIDTH, height=HEIGHT, seed=0, noise=NOISE_PER_M2):
+    def __init__(self, m, width=WIDTH, height=HEIGHT, seed=0, noise=NOISE_PER_M2, camera=CAMERA):
+        """`camera`: the Scout's depth camera in this scene (scout_cam, or the true-scale robot's depth_cam)."""
         self.m = m
-        self.cam = m.camera(CAMERA).id
+        self.cam = m.camera(camera).id
         self.width, self.height = width, height
         self.rng = np.random.default_rng(seed)
         self.noise = noise

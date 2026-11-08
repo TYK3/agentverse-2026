@@ -70,7 +70,8 @@ async def start(bus, loop=True):
     # move/place/release dispatch before later callbacks run (seen in a real-lane run).
     world.responder = responder.attach(world, bus)
     try:
-        world.rgbd = rgbd.RGBD(world.m)   # Y9: the Scout's depth camera (None frames without a GL context)
+        # Y9: the Scout's depth camera; a true-scale robot scene names its own (world.camera_name, #122)
+        world.rgbd = rgbd.RGBD(world.m, camera=getattr(world, "camera_name", rgbd.CAMERA))
     except KeyError:                    # a scene without scout_cam: no depth points
         world.rgbd = None
 
