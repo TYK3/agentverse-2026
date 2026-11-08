@@ -11,11 +11,11 @@ When GEMINI_MODE=off (or no API key), runs deterministic offline triage rules.
 
 Confidence scoring:
 - If confidence >= 0.8 and recommended first-aid item is clear:
-  emits gate/decision outcome="act", and triggers responder/action for the arm.
+  emits gate/decision outcome="act"; only an explicit route allows responder/action.
 - If unsure (confidence < 0.8 or ambiguous injuries):
   sends a needs-human triage card to console via gate/request (kind="risky_move")
   with alternative first-aid supply options, and waits for gate/answer from the operator.
-  Upon operator approval, triggers responder/action with the chosen first-aid step.
+  Approval chooses the supply; without a route it leaves physical delivery to the planner.
 
 Provides public triage summary for Y6 paramedic report via TRIAGE.summary(cid).
 """
@@ -396,6 +396,14 @@ class Triager:
             return None
         return res.to_dict()
 
+    @staticmethod
+    def _routed_supply_action(assessment: TriageAssessment) -> dict[str, Any] | None:
+        """A supply choice alone cannot place cargo at the Responder's current position."""
+        route = assessment.route.strip()
+        if not route or route.casefold() == "none":
+            return None
+        return {"action": "place_supply", "route": assessment.route, "item": assessment.recommended_item}
+
     async def on_casualties(self, casualties_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Process map/casualties message, publishing gate requests or decisions as required."""
         events = []
@@ -446,20 +454,18 @@ class Triager:
                     "confidence": assessment.confidence,
                     "reason": assessment.rationale,
                 }
-                resp_act = {
-                    "action": "place_supply",
-                    "route": assessment.route,
-                    "item": assessment.recommended_item,
-                }
+                resp_act = self._routed_supply_action(assessment)
                 events.append(("gate/decision", gate_dec))
-                events.append(("responder/action", resp_act))
+                if resp_act is not None:
+                    events.append(("responder/action", resp_act))
                 if self.bus and hasattr(self.bus, "publish"):
                     await self.bus.publish("gate/decision", gate_dec)
-                    await self.bus.publish("responder/action", resp_act)
+                    if resp_act is not None:
+                        await self.bus.publish("responder/action", resp_act)
         return events
 
     async def on_answer(self, data: dict[str, Any]) -> dict[str, Any] | None:
-        """Handle operator gate/answer. If approved, emit responder/action for chosen item."""
+        """Approve the supply choice; placement still needs an explicit delivery route."""
         req_id = data.get("id")
         approved = data.get("approved") is True
         assessment = self.pending_gates.get(req_id)
@@ -469,21 +475,19 @@ class Triager:
         cid = assessment.casualty_id
         if approved:
             item = assessment.recommended_item
-            action = {
-                "action": "place_supply",
-                "route": assessment.route,
-                "item": item,
-            }
+            action = self._routed_supply_action(assessment)
             log_entry = {
                 "t": time.monotonic(),
-                "perception": f"triage approved for {cid}, place_supply {item}",
+                "perception": f"triage approved for {cid}, supply choice {item}",
                 "model": "triage_gate",
                 "physics": "human_approved",
-                "outcome": "act",
-                "reason": f"Operator approved triage card {req_id} for {cid}: {item}",
+                "outcome": "act" if action is not None else "approved",
+                "reason": (f"Operator approved triage card {req_id} for {cid}: {item}"
+                           + ("; delivery awaits a verified route" if action is None else "")),
             }
             if self.bus and hasattr(self.bus, "publish"):
-                await self.bus.publish("responder/action", action)
+                if action is not None:
+                    await self.bus.publish("responder/action", action)
                 await self.bus.publish("log/decision", log_entry)
             del self.pending_gates[req_id]
             return action
