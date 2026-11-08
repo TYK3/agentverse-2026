@@ -49,11 +49,17 @@ async function replayFixtures(): Promise<void> {
   if (!response.ok) throw new Error('Fixture manifest unavailable');
   const paths: unknown = await response.json();
   if (!Array.isArray(paths)) throw new Error('Fixture manifest is invalid');
-  for (const path of paths) {
-    if (typeof path !== 'string' || !/^[\w.-]+\.json$/.test(path)) continue;
+  // Fetch every fixture at once, then dispatch in manifest order: one-by-one
+  // fetches made the replay slow enough to miss panel waits on a busy machine.
+  const valid = paths.filter((path): path is string => typeof path === 'string' && /^[\w.-]+\.json$/.test(path));
+  const loaded = await Promise.all(valid.map(async path => {
     const file = await fetch('/fixtures/' + encodeURIComponent(path));
-    if (!file.ok) { console.warn('[bus] fixture unavailable', path); continue; }
-    const fixture: unknown = await file.json();
+    if (!file.ok) { console.warn('[bus] fixture unavailable', path); return null; }
+    return { path, fixture: await file.json() as unknown };
+  }));
+  for (const entry of loaded) {
+    if (!entry) continue;
+    const { path, fixture } = entry;
     const events: unknown[] = Array.isArray(fixture) ? fixture : [fixture];
     for (const event of events) {
       if (event && typeof event === 'object' && 'topic' in event && 'data' in event &&
