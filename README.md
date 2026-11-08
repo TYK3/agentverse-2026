@@ -17,20 +17,14 @@
 </p>
 
 <p align="center">
-  🎬 <b><a href="https://youtu.be/sXFX6Gd1DOk">One-minute submission video</a></b> · 🎥 <b><a href="https://youtu.be/PmSziD3qm70">3-minute full demo</a></b> · 📄 <b><a href="https://app.notion.com/p/AFTERSHOCK-PDF-412284d12338800cb7ebcac8fc0f203e">One-page submission PDF</a></b>
-  <br>📐 <a href="docs/aftershock.md">Full spec</a> · 📝 <a href="docs/technical-summary.pdf">Technical summary (in repo)</a> · 🏗️ <a href="#️-architecture">Architecture</a> · 🛠️ <a href="#️-run-it-yourself">Run it yourself</a>
+  📐 <a href="docs/aftershock.md">Full spec</a> · 🏗️ <a href="#️-architecture">Architecture</a> · 🛠️ <a href="#️-run-it-yourself">Run it yourself</a>
 </p>
 
 ## 🎬 Demo
 
 <p align="center">
-  <a href="https://youtu.be/sXFX6Gd1DOk" title="Play the one-minute AFTERSHOCK submission video on YouTube">
-    <img src="docs/images/demo-preview.gif" alt="One-minute AFTERSHOCK submission video, playing here at 3x speed: the MuJoCo world, the Scout's live map and a sudden debris fall the robots re-plan around. Click for the full video with sound" width="90%">
-  </a>
-  <br><b>▶️ <a href="https://youtu.be/sXFX6Gd1DOk">One-minute submission video</a></b> (one take, one unscripted change)
-  <br><sub>The preview above plays automatically at 3x speed; click it for the full video with sound.</sub>
-  <br><br>🎥 <b><a href="https://youtu.be/PmSziD3qm70">3-minute full demo</a></b>
-  <br>📄 <b><a href="https://app.notion.com/p/AFTERSHOCK-PDF-412284d12338800cb7ebcac8fc0f203e">One-page submission PDF</a></b>
+  <img src="docs/images/demo-preview.gif" alt="The one-minute AFTERSHOCK submission video, playing here at 3x speed: the MuJoCo world, the Scout's live map and a sudden debris fall the robots re-plan around" width="90%">
+  <br><sub>A 3x-speed preview of the one-minute submission video (one take, one unscripted change). The full video with sound is linked at the top.</sub>
 </p>
 
 | 🛰️ Sees before it sends | 🧱 Physics, not a chatbot, says "go" | 🔁 Adapts when the building moves |
@@ -351,7 +345,7 @@ Runs every lane's test suite in its own subprocess plus the headless sim demos, 
 | [`tools/`](tools/) | Runners (`demo.py`, `demo60.py`, `play.py`, `run_b2.py`, `run_levels.py`), sweeps, profiling, evaluation |
 | [`eval/`](eval/) | Paired baseline results, comparison tables, archived traces and sources |
 | [`hw/`](hw/) | Hardware bridge and drivers for the real-robot concept |
-| [`docs/`](docs/) | [Spec](docs/aftershock.md), [technical summary](docs/technical-summary.pdf), [hackathon brief](docs/brief.md), [hardware](docs/hardware.md) and [electronics](docs/electronics.md) concepts |
+| [`docs/`](docs/) | [Spec](docs/aftershock.md), the technical summary (linked at the top), [hackathon brief](docs/brief.md), [hardware](docs/hardware.md) and [electronics](docs/electronics.md) concepts |
 
 ---
 
