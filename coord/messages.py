@@ -304,6 +304,27 @@ class Say(Message):
     lang: Text
 
 
+class CasualtyReply(Message):
+    """G3: what one casualty said back (sim persona now, a microphone later), in English."""
+    id: Text
+    t: Nonnegative
+    text: str
+    source: Literal["sim", "mic", "typed"]
+    level: Probability | None = None
+
+
+class CasualtyContact(Message):
+    """G3: a bounded live dialogue with one casualty; facts are what they said, never a diagnosis."""
+    id: Text
+    t: Nonnegative
+    status: Literal["talking", "done", "unresponsive", "stopped"]
+    turns: Annotated[int, Field(ge=0)]
+    max_turns: Annotated[int, Field(ge=1)]
+    facts: dict[str, bool | None | list[Text]]
+    injuries: list[Text]
+    receipts: list[Text]
+
+
 class ReportHandover(Message):
     # Alias avoids shadowing BaseModel.json while preserving the contract.
     report: dict = Field(alias="json")
@@ -338,6 +359,8 @@ TOPICS: dict[str, type[BaseModel]] = {
     "status/gemini": StatusGemini,
     "gemini/receipt": GeminiReceipt,
     "say": Say,
+    "casualty/reply": CasualtyReply,
+    "casualty/contact": CasualtyContact,
     "report/handover": ReportHandover,
 }
 
