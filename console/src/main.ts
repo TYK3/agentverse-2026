@@ -15,8 +15,11 @@ import { setupPanels } from './panels';
 import { setupHardwarePanel } from './hardware';
 import { setupDemoAssets } from './assets';
 import { setupStory } from './story';
+import { setupStripFit } from './strip-fit';
 // Last, so the theme overrides lane styles (story.css is pulled in by story.ts).
 import './theme.css';
+
+setupStripFit();
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);
