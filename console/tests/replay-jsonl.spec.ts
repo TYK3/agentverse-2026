@@ -134,7 +134,9 @@ test('S1: pause and stop cancel the pending step; an empty file just finishes', 
   player.pause();
   expect(timers.runNext()).toBe(false);
   expect(player.status()).toMatchObject({ state: 'paused', index: 1 });
-  player.start();                       // resume: the next event goes out at once
+  player.start();                       // resume: the next event keeps its remaining wait
+  expect(player.status()).toMatchObject({ state: 'playing', index: 1 });
+  expect(timers.runNext()).toBe(true);
   expect(player.status()).toMatchObject({ state: 'playing', index: 2 });
   player.stop();
   expect(timers.runNext()).toBe(false);
@@ -145,4 +147,44 @@ test('S1: pause and stop cancel the pending step; an empty file just finishes', 
   const p2 = new ReplayPlayer(parseJsonl('\n\n'), empty.dispatch, { scheduler: new FakeTimers() });
   p2.start();
   expect(p2.status()).toMatchObject({ state: 'done', total: 0 });
+});
+
+test('CONSOLE-LIVE: seeking rebuilds earlier events and waits for the next recorded time', () => {
+  const text = [0, 1, 2].map(t => JSON.stringify({ t, topic: 'x', data: t })).join('\n');
+  const timers = new FakeTimers();
+  const { out, dispatch } = record();
+  const player = new ReplayPlayer(parseJsonl(text), dispatch, { scheduler: timers, seekAt: 1.5 });
+  player.start();
+  expect(busOnly(out).map(m => m.data)).toEqual([0, 1]);
+  expect(player.status()).toMatchObject({ state: 'playing', duration: 2, index: 2, t: 1 });
+  expect(timers.waits).toEqual([500]);
+  timers.runAll();
+  expect(busOnly(out).map(m => m.data)).toEqual([0, 1, 2]);
+  expect(player.status()).toMatchObject({ state: 'done', t: 2 });
+});
+
+test('CONSOLE-LIVE: browser controls pause and scrub a recording', async ({ page }) => {
+  const jsonl = [
+    { t: 0, topic: 'scene/loaded', data: { scene: 'levels', blocks: [] } },
+    { t: 10, topic: 'world/change', data: { kind: 'aftershock', t: 10, moved_blocks: [] } },
+    { t: 20, topic: 'report/handover', data: { json: {}, markdown: '# Handover' } },
+  ].map(event => JSON.stringify(event)).join('\n');
+  await page.route(url => url.pathname === '/runs/replay-controls.jsonl', route =>
+    route.fulfill({ status: 200, contentType: 'text/plain', body: jsonl }));
+  await page.goto('/?run=/runs/replay-controls.jsonl');
+  const controls = page.locator('#replay-controls');
+  await expect(controls.getByRole('button', { name: 'Pause replay' })).toBeVisible();
+  await controls.getByRole('button', { name: 'Pause replay' }).click();
+  await expect(controls.getByRole('button', { name: 'Play replay' })).toBeVisible();
+  await controls.getByRole('button', { name: 'Play replay' }).click();
+  await expect(controls.getByRole('button', { name: 'Pause replay' })).toBeVisible();
+  await controls.getByRole('button', { name: 'Pause replay' }).click();
+  await controls.locator('input[type="range"]').evaluate(input => {
+    const slider = input as HTMLInputElement;
+    slider.value = '15';
+    slider.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForURL(/seek=15/);
+  await expect(controls.getByRole('button', { name: 'Pause replay' })).toBeVisible();
+  await expect(page.locator('#story .story-badge')).toContainText('t 10.0 s');
 });

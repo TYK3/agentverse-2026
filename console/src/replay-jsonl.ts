@@ -1,7 +1,7 @@
 // Replay a real sim recording in the console (ref S1): the runs/*.jsonl written by SIM_RECORD
 // (sim/recorder.py) or the integration runner (tools/run_rescue.py), one {"t","topic","data"} per line.
 //
-// Pure module: no DOM, no WebSocket, nothing runs on import. The console wires it in (c1):
+// No DOM or WebSocket runs on import. The console wires it in (c1):
 //   const parsed = parseJsonl(await (await fetch(url)).text());
 //   const player = new ReplayPlayer(parsed, (topic, data) => dispatchBusMessage(topic, data), { source: url });
 //   player.start();
@@ -31,6 +31,7 @@ export type ReplayStatus = {
   index: number;
   total: number;
   speed: number;
+  duration?: number;
   scene: string | null;
   skipped_lines: number;
 };
@@ -102,41 +103,79 @@ export class ReplayPlayer {
   private readonly file: string;
   private readonly scene: string | null;
   private readonly skipped: number;
+  private readonly seekAt: number;
+  private readonly duration: number;
   private index = 0;
   private handle: unknown = null;
+  private dueAt: number | null = null;
+  private remainingMs = 0;
   private state: ReplayStatus['state'] = 'ready';
   speed: number;
 
   constructor(parsed: ParsedRecording, dispatch: Dispatch,
-              opts: { source?: string; speed?: number; scheduler?: Scheduler } = {}) {
+              opts: { source?: string; speed?: number; scheduler?: Scheduler; seekAt?: number } = {}) {
     this.events = parsed.events;
     this.dispatch = dispatch;
     this.scheduler = opts.scheduler ?? timers;
     this.file = opts.source ?? 'recording';
     this.scene = parsed.scene;
     this.skipped = parsed.issues.filter(i => !i.reason.startsWith('time goes back')).length;
+    this.duration = parsed.events.reduce((latest, event) => Math.max(latest, event.t), 0);
     this.speed = opts.speed && opts.speed > 0 ? opts.speed : 1;
+    const querySeek = typeof window === 'undefined' ? 0 : Number(new URLSearchParams(window.location.search).get('seek'));
+    const requested = opts.seekAt ?? querySeek;
+    this.seekAt = Number.isFinite(requested) && requested > 0 ? requested : 0;
+    if (typeof window !== 'undefined') {
+      (window as unknown as { activeReplayPlayer: ReplayPlayer }).activeReplayPlayer = this;
+    }
   }
 
   status(): ReplayStatus {
     const at = this.events[Math.min(this.index, this.events.length) - 1];
     return { source: 'replay', file: this.file, state: this.state, t: at ? at.t : 0, index: this.index,
-             total: this.events.length, speed: this.speed, scene: this.scene, skipped_lines: this.skipped };
+             total: this.events.length, speed: this.speed, scene: this.scene, skipped_lines: this.skipped,
+             duration: this.duration };
   }
 
   private announce(): void {
     this.dispatch(STATUS_TOPIC, this.status());
   }
 
+  private schedule(wait: number): void {
+    this.remainingMs = wait;
+    this.dueAt = performance.now() + wait;
+    this.handle = this.scheduler.set(() => this.step(), wait);
+  }
+
   start(): void {
     if (this.state === 'playing' || this.state === 'done') return;
+    const resuming = this.state === 'paused';
     this.state = 'playing';
+    if (this.index === 0 && this.seekAt > 0) {
+      // A scrub reload starts with clean views. Rebuild them from the recording in
+      // file order, then wait the remaining recorded time before the next event.
+      while (this.index < this.events.length && this.events[this.index].t <= this.seekAt) {
+        const ev = this.events[this.index++];
+        this.dispatch(ev.topic, ev.data);
+      }
+      if (this.index >= this.events.length) {
+        this.state = 'done';
+        this.announce();
+        return;
+      }
+      this.announce();
+      const wait = Math.max(0, (this.events[this.index].t - this.seekAt) * 1000 / this.speed);
+      this.schedule(wait);
+      return;
+    }
     this.announce();
-    this.step();
+    if (resuming) this.schedule(this.remainingMs);
+    else this.step();
   }
 
   pause(): void {
     if (this.state !== 'playing') return;
+    if (this.dueAt !== null) this.remainingMs = Math.max(0, this.dueAt - performance.now());
     this.cancel();
     this.state = 'paused';
     this.announce();
@@ -151,11 +190,13 @@ export class ReplayPlayer {
   private cancel(): void {
     if (this.handle !== null) this.scheduler.clear(this.handle);
     this.handle = null;
+    this.dueAt = null;
   }
 
   /** Dispatch every event due now, then wait (scaled sim time) for the next one. */
   private step(): void {
     this.handle = null;
+    this.dueAt = null;
     if (this.state !== 'playing') return;
     const due = this.events[this.index]?.t;
     while (this.index < this.events.length && this.events[this.index].t <= due) {
@@ -169,6 +210,6 @@ export class ReplayPlayer {
       return;
     }
     const wait = Math.max(0, (this.events[this.index].t - due) * 1000 / this.speed);
-    this.handle = this.scheduler.set(() => this.step(), wait);
+    this.schedule(wait);
   }
 }
