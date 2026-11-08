@@ -14,6 +14,7 @@ import {
 import { setupPanels } from './panels';
 import { setupHardwarePanel } from './hardware';
 import { setupDemoAssets } from './assets';
+import { setupStory } from './story';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);
@@ -115,6 +116,8 @@ setupHardwarePanel();
 
 // Free 3D assets: tower model, robot models, HDRI lighting, credits card (A1)
 setupDemoAssets(mapViewer);
+// Story mode (DEMO-FLOW): phase strip, camera follow, report card; ?run=<url> replays a recording
+const story = setupStory(mapViewer);
 
 // Initial boot
 if (isFakeMode) {
@@ -126,4 +129,4 @@ if (isBenchmarkMode) {
   mapViewer.generate100kBenchmark();
 }
 
-connect();
+if (!story.replaying) connect();

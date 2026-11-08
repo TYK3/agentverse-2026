@@ -1,8 +1,9 @@
-"""L4 proof: the Scout finds its own way from L1 down to a basement (B1, or B2 below it) in the real sim,
+"""L4 proof: the Scout finds its own way from L1 down to a basement (B1, B2 or B3) in the real sim,
 no teleport.
 
     python -m sim.demo_descent            # L1 -> B1, prints each re-plan and the result
     python -m sim.demo_descent B2         # L1 -> B2 (b2: ground -> B1 on R1, then B1 -> B2 on R3)
+    python -m sim.demo_descent B3         # L1 -> B3 (b3: then B2 -> B3 on R4)
 
 Loop: the sim ticks at 10 Hz (sim.levels.LevelWorld: height only from the floor under the Scout);
 every sensors/scout frame updates the multi-level map (perception.levels); whenever the Scout stops,
@@ -25,6 +26,7 @@ RES = 0.05
 GOALS = {
     "B1": (0.75, 1.55, -0.6),   # beside casualty c1 in B1 (sim/scenes/levels.xml)
     "B2": (0.75, 0.8, -1.2),    # beside casualty c2 in B2
+    "B3": (0.75, 1.6, -1.8),    # beside casualty c3 in B3
 }
 GOAL = GOALS["B1"]
 DT = 0.1
@@ -130,6 +132,7 @@ def run(max_t=600.0, verbose=False, floor="B1"):
         "map_levels": gl.levels(), "log": log, "map": final,
         "start_cell": cell(start[1], start[2], start[3] - 0.075), "goal_cell": goal_cell,
         "trail": [cell(x, y, z - 0.075) for _, x, y, z in w.trace[::10]],
+        "trace": [tuple(float(v) for v in row) for row in w.trace],   # (t, x, y, z) every tick
     }
 
 
@@ -141,6 +144,6 @@ if __name__ == "__main__":
     import sys
 
     out = run(verbose=True, floor=sys.argv[1] if len(sys.argv) > 1 else "B1")
-    for key in ("log", "map", "trail"):
+    for key in ("log", "map", "trail", "trace"):
         out.pop(key)
     print(out)
