@@ -817,7 +817,7 @@ export class MapViewer {
           obj.material.emissive.setHex(0xb91c1c);
         }
       });
-      this.showAftershockBanner(`MOVE PERMISSION REVOKED on ${payload.route}: ${payload.reason}`);
+      this.showAftershockBanner(`⚠️ MOVE PERMISSION REVOKED on ${payload.route}: ${payload.reason}`);
     } else {
       // Permission granted: restore solid blue
       this.activeRouteGroup.traverse(obj => {
@@ -893,7 +893,7 @@ export class MapViewer {
 
     if (this.bannerElement && this.bannerTextElement && this.bannerIconElement) {
       this.bannerElement.className = 'world-change-banner aftershock-banner visible';
-      this.bannerIconElement.textContent = ''; // icon drawn in CSS
+      this.bannerIconElement.textContent = '⚠️';
       this.bannerTextElement.textContent = text;
     }
   }
@@ -901,7 +901,7 @@ export class MapViewer {
   private showReplanReasonBanner(routeId: string, reason: string): void {
     if (this.bannerElement && this.bannerTextElement && this.bannerIconElement) {
       this.bannerElement.className = 'world-change-banner replan-banner visible';
-      this.bannerIconElement.textContent = ''; // icon drawn in CSS
+      this.bannerIconElement.textContent = '🔄';
       this.bannerTextElement.textContent = `Re-plan (${routeId}): ${reason}`;
 
       // Automatically hide banner after 8 seconds

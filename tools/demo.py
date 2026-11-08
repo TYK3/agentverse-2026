@@ -1,7 +1,7 @@
 """One command for the whole rescue, shown in the console's story mode (ref DEMO-FLOW-2).
 
-    python tools/demo.py                                    # backup scene, 120 s, opens the browser
-    python tools/demo.py --scene building --duration 90 --auto-approve --shift-at 45
+    python tools/demo.py                                    # building scene, 120 s, opens the browser
+    python tools/demo.py --scene backup --duration 90 --auto-approve --shift-at 45
     python tools/demo.py --replay runs/demo60-7.jsonl       # only open a recording in story mode
 
 What it does, in order:
@@ -43,7 +43,7 @@ CONSOLE_URL = f"http://127.0.0.1:{CONSOLE_PORT}"
 
 def parse(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--scene", default="backup", help="SIM_SCENE: backup (default), building, tower or an MJCF path")
+    p.add_argument("--scene", default="building", help="SIM_SCENE: building (default), tower, backup or an MJCF path")
     p.add_argument("--duration", type=float, default=120.0, help="seconds of live run before the replay")
     p.add_argument("--shift-at", type=float, default=None, help="inject the aftershock at this many seconds")
     p.add_argument("--auto-approve", action="store_true", help="answer every gate/request yes (unattended demo)")
