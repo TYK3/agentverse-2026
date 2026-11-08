@@ -40,7 +40,7 @@ function fixtures(): Plugin {
       const source = resolve(projectDir, '../coord/fixtures');
       const target = resolve(projectDir, 'public/fixtures');
       mkdirSync(target, { recursive: true });
-      const names = existsSync(source) ? readdirSync(source).filter(name => /^[\w.-]+\.json$/.test(name)) : [];
+      const names = existsSync(source) ? readdirSync(source).filter(name => /^[\w.-]+\.json$/.test(name)).sort() : [];
       for (const name of names) copyFileSync(join(source, name), join(target, name));
       const demo = resolve(projectDir, 'fixtures/panels.json');
       if (existsSync(demo)) { copyFileSync(demo, join(target, 'panels.json')); names.push('panels.json'); }
