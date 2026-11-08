@@ -216,10 +216,12 @@ async def ground_rescue(rec, bus, world, args):
                                show=lambda d: f"{d['reason']} | evidence: "
                                               + ", ".join(e["kind"] for e in d["evidence"]))
     stop_t = time.monotonic() + 5
-    while time.monotonic() < stop_t and r.state == "moving":
+    # Stopped means no longer driving the revoked route: it may already follow a re-planned one.
+    while time.monotonic() < stop_t and r.state == "moving" and r.route == rid:
         await asyncio.sleep(0.1)
     held = [float(v) for v in r.pos[:2]]
-    rec.step("Responder stopped", r.state != "moving", f"state {r.state} at {[round(v, 2) for v in held]}")
+    rec.step("Responder stopped on the revoked route", not (r.state == "moving" and r.route == rid),
+             f"state {r.state} on {r.route} at {[round(v, 2) for v in held]}")
     await asyncio.sleep(2.0)
     drift = math.dist(held, r.pos[:2])
     rec.step("Responder stays stopped", drift < STILL or r.route != rid,
