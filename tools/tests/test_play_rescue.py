@@ -32,8 +32,8 @@ def test_run_rescue_reaches_b1():
     assert result["route_k"] == (12, -12)
 
     drive = result["responder_drive"]
-    assert drive["driven"] is False
-    assert "no responder body" in drive["reason"]
+    assert drive["driven"] is True
+    assert drive.get("state")  # #267 put a responder body in the levels scene, so the route is driven
 
 
 def test_cli_rescue_no_viewer_prints_reached():
