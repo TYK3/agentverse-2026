@@ -258,3 +258,25 @@ def test_look_requests_are_rate_limited():
 
     w = run(go())
     assert len([d for d in w.topics("scout/goto") if d["reason"].startswith("handoff: map")]) == 1
+
+
+def test_blocked_route_replans_from_where_the_responder_stopped():
+    """ref BLOCKED-START: wired as the hub wires it (loop.start without start_cell), a blocked Responder
+    was re-planned from its mission start every time, so it drove back into the same block forever."""
+    async def go():
+        w = await World().start(start_cell=(2, 2, 0))
+        await w.bus.publish("map/casualties", [casualty(confidence=0.9)])
+        first = w.topics("route/proposed")[0]
+        await w.bus.publish("responder/pose", {"t": 5.0, "pos": [1.02, 1.02, 0.05], "yaw": 0.0,
+                                               "state": "blocked", "route": first["id"], "carrying": ["water"]})
+        n = len(w.topics("route/proposed"))
+        await w.bus.publish("log/decision", sim_log(
+            "blocked", f"collision ray: block ahead on route {first['id']}, stopped, dropped 2 queued action(s)",
+            at=(1.02, 1.02)))
+        await w.bus.publish("map/cells", map_cells())
+        return first, w.topics("route/proposed")[n:]
+
+    first, later = run(go())
+    assert first["cells"][0] == [2, 2, 0]
+    assert later, "a new route after the block"
+    assert all(r["cells"][0] == [20, 20, 0] for r in later), [r["cells"][0] for r in later]

@@ -392,5 +392,11 @@ class Handoff:
 
 
 def start(bus, loop, router, **kw):
-    """Attach the handoff to the hub bus beside the T13 loop; returns it."""
-    return Handoff(bus, loop, router, **kw).attach()
+    """Attach the handoff to the hub bus beside the T13 loop; returns it.
+
+    It also gives the loop the Responder's live cell (ref BLOCKED-START): without it a blocked route
+    was re-planned from the mission's first start, so the Responder drove back into the same block."""
+    handoff = Handoff(bus, loop, router, **kw).attach()
+    if getattr(loop, "start_cell", None) is None:
+        loop.start_cell = handoff.start_cell
+    return handoff
