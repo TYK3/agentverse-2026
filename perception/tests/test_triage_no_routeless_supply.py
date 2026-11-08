@@ -5,7 +5,6 @@ import asyncio
 import pytest
 
 from coord import gem
-from coord.hub import Bus
 from perception.triage import TriageAssessment, Triager
 
 
@@ -13,6 +12,16 @@ from perception.triage import TriageAssessment, Triager
 def gemini_off(monkeypatch):
     monkeypatch.setenv("GEMINI_MODE", "off")
     monkeypatch.setattr(gem, "MODE", "off")
+
+
+class RecordedEvents:
+    """Capture real handler output without adding hub dependencies to perception tests."""
+
+    def __init__(self):
+        self.published = []
+
+    async def publish(self, topic, data):
+        self.published.append((topic, data))
 
 
 def assessment(route="none"):
@@ -27,15 +36,14 @@ def assessment(route="none"):
 @pytest.mark.parametrize("route", ["none", None, "", "   ", "None"])
 def test_approved_triage_without_route_cannot_dispatch_placement(route):
     async def scenario():
-        bus = Bus()
-        actions, decisions = [], []
-        bus.subscribe("responder/action", actions.append)
-        bus.subscribe("log/decision", decisions.append)
+        bus = RecordedEvents()
         triager = Triager().attach(bus)
         triager.pending_gates["g_triage_c1"] = assessment(route)
 
-        await bus.publish("gate/answer", {"id": "g_triage_c1", "approved": True, "by": "operator"})
+        await triager.on_answer({"id": "g_triage_c1", "approved": True, "by": "operator"})
 
+        actions = [data for topic, data in bus.published if topic == "responder/action"]
+        decisions = [data for topic, data in bus.published if topic == "log/decision"]
         assert actions == [], "triage approval alone must not queue or drop a supply"
         assert "g_triage_c1" not in triager.pending_gates
         assert decisions[-1]["outcome"] == "approved"
@@ -46,10 +54,7 @@ def test_approved_triage_without_route_cannot_dispatch_placement(route):
 
 def test_high_confidence_triage_without_route_leaves_placement_to_planner():
     async def scenario():
-        bus = Bus()
-        actions, recommendations = [], []
-        bus.subscribe("responder/action", actions.append)
-        bus.subscribe("casualty/triage", recommendations.append)
+        bus = RecordedEvents()
         triager = Triager(dialogue_reader=lambda cid: {
             "casualty": cid,
             "answers": {"bleeding": "yes", "hurt": "yes", "breathing": "no", "move": "yes", "walk": "yes"},
@@ -60,6 +65,8 @@ def test_high_confidence_triage_without_route_leaves_placement_to_planner():
             "clues": ["thermal", "sound", "camera"],
         }])
 
+        actions = [data for topic, data in bus.published if topic == "responder/action"]
+        recommendations = [data for topic, data in bus.published if topic == "casualty/triage"]
         assert recommendations[-1]["recommended_action"] == "bandage"
         assert triager.assessments["c1"].needs_human is False
         assert actions == [], "a confident recommendation still has no delivery route"
@@ -70,14 +77,13 @@ def test_high_confidence_triage_without_route_leaves_placement_to_planner():
 
 def test_approved_triage_with_explicit_route_preserves_routed_action():
     async def scenario():
-        bus = Bus()
-        actions = []
-        bus.subscribe("responder/action", actions.append)
+        bus = RecordedEvents()
         triager = Triager().attach(bus)
         triager.pending_gates["g_triage_c1"] = assessment("r-approved")
 
-        await bus.publish("gate/answer", {"id": "g_triage_c1", "approved": True, "by": "operator"})
+        await triager.on_answer({"id": "g_triage_c1", "approved": True, "by": "operator"})
 
+        actions = [data for topic, data in bus.published if topic == "responder/action"]
         assert actions == [{"action": "place_supply", "route": "r-approved", "item": "water"}]
 
     asyncio.run(scenario())
