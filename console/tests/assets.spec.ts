@@ -20,9 +20,9 @@ test('A1: the demo model loads with every tower block named by its scene id, plu
   expect(a.blocks).toHaveLength(27);
   expect(a.blocks).toContain('b17');
   expect(a.visible).toBe(true);
-  expect(a.credits.map(c => c.licence).sort()).toEqual(['BSD-3-Clause', 'CC0', 'CC0', 'CC0', 'CC0']);
+  expect(a.credits.map(c => c.licence).sort()).toEqual(['CC0', 'CC0', 'CC0']);
   await page.locator('#asset-credits').evaluate(el => { (el as HTMLDetailsElement).open = true; });  // under the fake gate modal
-  await expect(page.locator('#asset-credits li')).toHaveCount(5);
+  await expect(page.locator('#asset-credits li')).toHaveCount(3);
   await expect(page.locator('#asset-credits')).toContainText('Quaternius');
   await page.goto('about:blank');   // stop drawing the tower now: in software GL it starves the next test's setup
 });

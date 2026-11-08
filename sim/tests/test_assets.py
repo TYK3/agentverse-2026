@@ -9,7 +9,7 @@ import mujoco
 import numpy as np
 import pytest
 
-from sim import aftershock, scene
+from sim import aftershock, robots, scene
 from sim.assets import annex, fetch
 from sim.world import World
 
@@ -79,6 +79,31 @@ def test_console_model_has_every_block_and_part_and_fits_the_budget():
     assert not robot_names & blocks and not names & {"scout", "responder", "first_aid_kit"}   # split, not copied
     for n in names | robot_names:                                     # casualties are perception's job
         assert not (n and n.startswith(("casualty", "c1", "c2", "c3", "c4"))), n
+
+
+def _mesh_bounds(path, node_name):
+    """Axis-aligned (low, high) of a node's mesh from the GLB's POSITION accessor bounds (node unposed)."""
+    gltf = _glb_json(path)
+    node = next(n for n in gltf["nodes"] if n.get("name") == node_name)
+    assert not any(k in node for k in ("translation", "rotation", "scale", "matrix")), node   # mesh in robot frame
+    prims = gltf["meshes"][node["mesh"]]["primitives"]
+    lo = np.min([gltf["accessors"][p["attributes"]["POSITION"]]["min"] for p in prims], axis=0)
+    hi = np.max([gltf["accessors"][p["attributes"]["POSITION"]]["max"] for p in prims], axis=0)
+    return lo, hi
+
+
+@pytest.mark.parametrize("name", ["scout", "responder"])
+def test_robot_models_are_the_agreed_true_scale_robots(name):
+    """LIMO Pro and Jackal envelopes (docs/hardware.md), from the sim's own MJCF: no stand-in model."""
+    lo, hi = _mesh_bounds(MODELS / "robots.glb", f"{name}_body")
+    length, width = robots.SPEC[name]["size"][:2]
+    assert hi[0] - lo[0] == pytest.approx(length, abs=0.005)
+    assert hi[1] - lo[1] == pytest.approx(width, abs=0.005)
+    assert lo[2] == pytest.approx(0.0, abs=1e-3)                       # wheels on the ground
+    assert abs(lo[0] + hi[0]) < 0.01 and abs(lo[1] + hi[1]) < 0.01      # origin under the base centre
+    m, d = robots.load(name)                                            # same geoms, Responder arm stowed
+    mlo, mhi = robots.extent(m, d, f"{name}/{name}")
+    assert np.allclose(lo, mlo, atol=0.01) and np.allclose(hi, mhi, atol=0.01)
 
 
 def test_credits_ship_with_the_model_and_need_no_attribution_gaps():
