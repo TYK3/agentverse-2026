@@ -47,6 +47,7 @@ PROBE = 0.25                # the floor ray starts this far above the current fl
 MAX_RISE = 0.6              # max floor change per metre driven (as sim/levels.py); a bigger change is a drop, ignored
 STEP_SLACK = 0.004          # metres of floor change always allowed per step (ramp seams, float noise)
 ARRIVE = 0.005              # metres
+SKIP_NEAR = RES             # a route's leading waypoints closer than this are skipped, not turned to (B4-WALL-STOP)
 REACH = 0.45                # a supply or block further than this from the Responder centre cannot be gripped
 LIGHT_KG = 2.0              # blocks at or above this mass are too heavy to clear
 ARM_PAYLOAD_KG = 0.5        # found material carried to a casualty: the real arm's rated payload (docs/hardware.md)
@@ -306,9 +307,35 @@ class Responder:
             return self._refuse(f"move permit for route {route_id} is revoked until a fresh scan", tag)
         if route_id in self.needs_gate and route_id not in self.approved:
             return self._refuse(f"route {route_id} is risky and has no approved gate/answer", tag)
-        self.path = [cell_centre(c) for c in cells]
+        self.path = self._start_path(cells)
         self.route, self.state = route_id, "moving"
         return self._decide("act", f"following route {route_id}, {len(cells)} cells", tag)
+
+    def _start_path(self, cells):
+        """Waypoints for a move along `cells`, starting from where the Responder is parked.
+
+        A replan's first cell is the one the Responder is parked in, its centre a few cm off the pose.
+        Turning to face that centre, or cutting across to the route's line, angles the chassis and can
+        swing a side ray into a wall the route runs beside (B4-WALL-STOP: parked at [-0.49, -1.24], route
+        north at x -0.475, b4's end at x -0.40). So when the pose is within SKIP_NEAR of the first centre,
+        the first straight run is shifted sideways onto the pose (less than a cell, inside the planned
+        corridor) and driven parallel to the route; the turn at its end takes the offset up.
+        """
+        path = [cell_centre(c) for c in cells]
+        here = self.pos[:2]
+        if len(path) < 2 or float(np.linalg.norm(path[0] - here)) >= SKIP_NEAR:
+            return path
+        d = path[1] - path[0]
+        d = d / float(np.linalg.norm(d))
+        off = here - path[0]
+        off = off - d * float(off @ d)              # sideways part only
+        run = 2
+        while run < len(path):
+            v = path[run] - path[0]
+            if abs(v[0] * d[1] - v[1] * d[0]) > 1e-6 or float(v @ d) <= 0:
+                break
+            run += 1
+        return [p + off for p in path[1:run]] + path[run:]
 
     def grip_supply(self, item):
         tag = f"grip {item}"
