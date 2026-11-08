@@ -5,10 +5,11 @@ import logging
 import os
 import time
 
-from sim import debris, inject, responder, scene
+from sim import debris, inject, responder, rgbd, scene
 from sim.world import World
 
 RATE_HZ = 10
+RGBD_EVERY = 5   # ticks between depth frames: 2 Hz of sensors/scout.points (Y9)
 log = logging.getLogger("sim")
 
 
@@ -23,6 +24,8 @@ async def run(world, bus, rate_hz=RATE_HZ):
             events += world.relay.step(world.t, world.pos)
             world.hw.source.transport.flush()
         sensors = world.sensors_message()
+        if getattr(world, "rgbd", None) is not None and round(world.t / dt) % RGBD_EVERY == 0:
+            sensors.update(world.rgbd.frame(world.d) or {})   # Y9: measured depth points + camera position
         hw_robot = getattr(world, "hw", None)
         if hw_robot is not None:  # Y10: through the chip driver stubs and the bridge
             hw_robot.feed(sensors)
@@ -66,6 +69,10 @@ async def start(bus, loop=True):
     # physics check below publishes route/verified, which can trigger the planner's whole
     # move/place/release dispatch before later callbacks run (seen in a real-lane run).
     world.responder = responder.attach(world, bus)
+    try:
+        world.rgbd = rgbd.RGBD(world.m)   # Y9: the Scout's depth camera (None frames without a GL context)
+    except KeyError:                    # a scene without scout_cam: no depth points
+        world.rgbd = None
 
     async def on_route(route):
         await bus.publish("route/verified", world.verify(route))
