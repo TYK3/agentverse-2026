@@ -93,3 +93,36 @@ def test_with_the_real_hub_bus(tmp_path, monkeypatch):
     _run(hub.Bus(), 1.0)
     topics = {x["topic"] for x in _lines(out)}
     assert {"record/meta", "scene/loaded", "sensors/scout", "sim/truth"} <= topics
+
+
+def test_slim_keeps_the_story_and_drops_the_bulk(tmp_path):
+    src, dst = tmp_path / "full.jsonl", tmp_path / "slim.jsonl"
+    lines = [{"t": 0, "wall": 0.0, "topic": "record/meta", "data": {"scene": "building"}},
+             {"t": 0, "wall": 0.0, "topic": "scene/loaded", "data": {"scene": "building", "blocks": []}}]
+    for i in range(10):
+        t = round(0.1 * (i + 1), 1)
+        lines += [{"t": t, "wall": t, "topic": "sensors/scout",
+                   "data": {"t": t, "pose": {"pos": [0, 0, 0.26], "yaw": 0}, "lidar": [6.0] * 360,
+                            "thermal": [[0.1] * 16] * 12, "acoustic": {"bearing": 0, "level": 0.1}}},
+                  {"t": t, "wall": t, "topic": "sim/truth", "data": {"scout": {"pos": [0, 0, 0]}}},
+                  {"t": t, "wall": t, "topic": "status/gemini", "data": {"mode": "off"}}]
+    snap = {"t": 1.0, "res": 0.05, "cells": [{"cell": [1, 2, 0], "state": "seen", "occupied": True}]}
+    lines += [{"t": 1.0, "topic": "map/cells", "data": snap}, {"t": 1.05, "topic": "map/cells", "data": {**snap, "t": 1.05}},
+              {"t": 1.1, "topic": "map/cells", "data": {"t": 1.1, "res": 0.05, "cells": []}},
+              {"t": 1.15, "topic": "map/cells", "data": snap}]
+    lines += [{"t": 1.2, "wall": 1.3, "topic": "world/change", "data": {"kind": "aftershock", "t": 1.2, "moved_blocks": []}}]
+    src.write_text("\n".join(json.dumps(x) for x in lines) + "\nnot json\n", encoding="utf-8")
+    n_in, n_out = recorder.slim(src, dst)
+    out = _lines(dst)
+    assert n_in == len(lines) + 1 and n_out == len(out)
+    topics = [x["topic"] for x in out]
+    assert topics[:2] == ["record/meta", "scene/loaded"] and topics[-1] == "world/change"
+    assert "status/gemini" not in topics
+    assert topics.count("sensors/scout") == 5 and topics.count("sim/truth") == 2
+    assert [len(x["data"]["cells"]) for x in out if x["topic"] == "map/cells"] == [1, 0, 1]   # repeat dropped
+    scout = next(x["data"] for x in out if x["topic"] == "sensors/scout")
+    assert set(scout) == {"t", "pose", "acoustic"} and scout["pose"]["pos"][2] == 0.26      # z kept
+    assert out[0]["data"]["slimmed"]["dropped_topics"] == ["status/gemini", "map/points"]
+    assert all("wall" not in x for x in out)
+    ts = [x["t"] for x in out]
+    assert ts == sorted(ts)

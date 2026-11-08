@@ -2,6 +2,7 @@
 
     SIM_RECORD=runs/live.jsonl uvicorn coord.hub:app      # record while the hub runs
     python -m sim.recorder summary runs/live.jsonl        # what is in a recording
+    python -m sim.recorder slim runs/live.jsonl out.jsonl  # smaller copy to commit or serve
 
 One JSON object per line, in the order things happened:
     {"t": <sim seconds>, "wall": <seconds since the recording started>, "topic": "...", "data": {...}}
@@ -133,12 +134,61 @@ def summary(path):
             "truth_hz": round(counts["sim/truth"] / span, 1) if span else None}
 
 
+# What `slim` keeps: every story message as recorded; the 10 Hz streams thinned; bulky arrays dropped.
+SLIM_EVERY = {"sensors/scout": 2, "responder/pose": 2, "sim/truth": 5}   # keep 1 in N (5, 5 and 2 Hz)
+SLIM_DROP_TOPICS = ("status/gemini", "map/points")                    # periodic status; depth clouds
+SLIM_SENSOR_KEYS = ("t", "pose", "motion", "acoustic")                # the scout frame minus LiDAR/thermal
+
+
+def slim(src, dst):
+    """Write a smaller copy of a recording for committing or serving: story messages unchanged and in
+    order; sensors/scout keeps pose, motion and acoustic; 10 Hz streams thinned; status/gemini and
+    map/points dropped; a map/cells message identical to the one before it dropped (replaying it is a
+    no-op whether a viewer merges or replaces). The record/meta line says what was dropped. Returns (lines in, lines out)."""
+    seen, n_in, n_out, last_cells = collections.Counter(), 0, 0, None
+    with open(src, encoding="utf-8") as f, open(dst, "w", encoding="utf-8", newline="\n") as out:
+        for line in f:
+            n_in += 1
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            topic = rec.get("topic")
+            if topic in SLIM_DROP_TOPICS:
+                continue
+            if topic in SLIM_EVERY:
+                seen[topic] += 1
+                if (seen[topic] - 1) % SLIM_EVERY[topic]:
+                    continue
+            if topic == "map/cells":
+                cells = json.dumps(rec.get("data", {}).get("cells"), separators=(",", ":"))
+                if cells == last_cells:
+                    continue                  # same map as the message before: a no-op to replay
+                last_cells = cells
+            if topic == "sensors/scout" and isinstance(rec.get("data"), dict):
+                rec["data"] = {k: v for k, v in rec["data"].items() if k in SLIM_SENSOR_KEYS}
+            if topic == "record/meta" and isinstance(rec.get("data"), dict):
+                rec["data"]["slimmed"] = {"every": SLIM_EVERY, "dropped_topics": list(SLIM_DROP_TOPICS),
+                                          "sensors_scout_keys": list(SLIM_SENSOR_KEYS)}
+            rec.pop("wall", None)                                   # wall clock says nothing about the run
+            out.write(json.dumps(rec, separators=(",", ":")) + "\n")
+            n_out += 1
+    return n_in, n_out
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("summary", help="topics, counts and time span of a recording")
     s.add_argument("path")
+    sl = sub.add_parser("slim", help="a smaller copy for committing or serving (see slim())")
+    sl.add_argument("src")
+    sl.add_argument("dst")
     a = p.parse_args()
+    if a.cmd == "slim":
+        n_in, n_out = slim(a.src, a.dst)
+        print(f"{n_in} lines -> {n_out} lines in {a.dst}")
+        return
     print(json.dumps(summary(a.path), indent=2))
 
 
