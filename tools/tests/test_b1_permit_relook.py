@@ -6,7 +6,7 @@ pytest.importorskip("mujoco")
 
 import mujoco
 
-from planner.permit import Permits, RES
+from planner.permit import Permits
 from sim.levels import LevelWorld
 from tools.run_b2 import drop_slab, scene_with_slab
 
