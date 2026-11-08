@@ -15,7 +15,19 @@
 </p>
 
 <p align="center">
-  📄 <b><a href="docs/technical-summary.pdf">One-page technical summary (PDF)</a></b> · 📐 <a href="docs/aftershock.md">Full spec</a> · 🏗️ <a href="#️-architecture">Architecture</a> · 🛠️ <a href="#️-run-it-yourself">Run it yourself</a>
+  🎬 <b><a href="https://youtu.be/PmSziD3qm70">One-minute demo</a></b> · 🎥 <b><a href="https://youtu.be/PmSziD3qm70">3-minute full demo</a></b> · 📄 <b><a href="https://app.notion.com/p/AFTERSHOCK-PDF-412284d12338800cb7ebcac8fc0f203e">One-page submission PDF</a></b>
+  <br>📐 <a href="docs/aftershock.md">Full spec</a> · 📝 <a href="docs/technical-summary.pdf">Technical summary (in repo)</a> · 🏗️ <a href="#️-architecture">Architecture</a> · 🛠️ <a href="#️-run-it-yourself">Run it yourself</a>
+</p>
+
+## 🎬 Demo
+
+<p align="center">
+  <a href="https://youtu.be/PmSziD3qm70" title="Play the one-minute AFTERSHOCK demo on YouTube">
+    <img src="https://img.youtube.com/vi/PmSziD3qm70/hqdefault.jpg" alt="One-minute AFTERSHOCK demo: one take with one unscripted change. Click to play on YouTube" width="80%">
+  </a>
+  <br><b>▶️ <a href="https://youtu.be/PmSziD3qm70">Play the one-minute demo</a></b> (the submission video: one take, one unscripted change)
+  <br><br>🎥 <b>3-minute full demo:</b> <a href="https://youtu.be/PmSziD3qm70">youtu.be/PmSziD3qm70</a>
+  <br>📄 <b>One-page submission PDF:</b> <a href="https://app.notion.com/p/AFTERSHOCK-PDF-412284d12338800cb7ebcac8fc0f203e">AFTERSHOCK PDF on Notion</a>
 </p>
 
 | 🛰️ Sees before it sends | 🧱 Physics, not a chatbot, says "go" | 🔁 Adapts when the building moves |
@@ -29,6 +41,7 @@
 <details open>
 <summary><b>📑 Contents</b> (click to collapse)</summary>
 
+- [🎬 Demo](#-demo)
 - [📖 Overview](#-overview)
 - [🎯 The problem](#-the-problem)
 - [🧭 A 2-minute tour](#-a-2-minute-tour)
