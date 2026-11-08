@@ -1,5 +1,4 @@
 import './style.css';
-import './theme.css';
 import { connect, on } from './bus';
 import {
   MapViewer,
@@ -16,6 +15,8 @@ import { setupPanels } from './panels';
 import { setupHardwarePanel } from './hardware';
 import { setupDemoAssets } from './assets';
 import { setupStory } from './story';
+// Last, so the theme overrides lane styles (story.css is pulled in by story.ts).
+import './theme.css';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);

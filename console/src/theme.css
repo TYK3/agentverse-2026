@@ -21,6 +21,15 @@
   --pixel-font: 'Press Start 2P', monospace;
   --retro-font: 'VT323', 'Courier New', monospace;
   --shadow-px: 3px 3px 0 #000;
+  /* The only colours that carry meaning. Use nothing else for state. */
+  --ok: #34d399;
+  --ok-bg: rgba(52, 211, 153, 0.14);
+  --warn: #fbbf24;
+  --warn-bg: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-strong: #b91c1c;
+  --danger-bg: rgba(248, 113, 113, 0.14);
+  --info-bg: rgba(6, 182, 212, 0.14);
 }
 
 :root { background: var(--bg); }
@@ -105,3 +114,89 @@ progress { accent-color: var(--accent); }
 ::-webkit-scrollbar-track { background: #0a0e1a; }
 ::-webkit-scrollbar-thumb { background: var(--border); border: 1px solid var(--border-hi); }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+
+/* ---------- Colour consistency ----------
+   Rules: cyan = interactive or "in progress"; green = safe or passed;
+   amber = waiting or estimate; red = danger, revoked or reject.
+   Blue is kept only for the route (it matches the route tube in the 3D map). */
+
+/* Story strip: one family of chips, no filled rainbow */
+#story {
+  --story-bg: rgba(10, 10, 10, 0.88);
+  --story-line: var(--border);
+  --story-text: var(--text);
+  --story-dim: var(--muted);
+  --story-active: var(--accent);
+  --story-wait: var(--warn);
+  --story-held: var(--warn);
+  --story-done: var(--accent-soft);
+}
+.story-head, .story-caption { border-radius: 2px; border: 2px solid var(--border); backdrop-filter: none; }
+.story-phase { border-radius: 2px; font-family: var(--retro-font); font-size: 1.05rem; }
+.story-num { border-radius: 2px; font-size: 0.85rem; }
+.story-phase[data-state="done"] { color: var(--accent-soft); background: var(--info-bg); border-color: var(--accent-strong); }
+.story-phase[data-state="active"] { color: #000; background: var(--accent); border-color: var(--accent); }
+.story-phase[data-state="waiting"] { background: var(--warn-bg); }
+.story-phase[data-state="held"] { color: #000; background: var(--warn); }
+.story-phase.story-current { box-shadow: var(--shadow-px); }
+.story-badge { border-radius: 2px; font-family: var(--retro-font); font-size: 1rem; }
+.story-badge[data-mode="live"] { background: var(--danger-strong); color: #fff; }
+.story-badge[data-mode="replay"] { background: var(--accent-strong); color: #fff; }
+.story-follow, .story-card button {
+  border-radius: 2px; border: 2px solid var(--border); background: var(--panel); color: var(--text);
+  font-family: var(--retro-font); font-size: 1.05rem; box-shadow: var(--shadow-px);
+}
+.story-follow[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-soft); }
+.story-card { background: var(--panel); border: 2px solid var(--border-hi); border-radius: 2px; box-shadow: 6px 6px 0 #000; }
+.story-card h2 { font-size: 0.75rem; }
+.story-missed { color: var(--warn); }
+
+/* Top bar: Hardware Specs looks like every other secondary button */
+.btn-topbar { background: var(--panel); color: var(--muted); border: 2px solid var(--border); border-radius: 2px; font-size: 1.05rem; font-weight: 400; }
+.btn-topbar:hover { background: #1e293b; color: var(--focus); border-color: var(--focus); }
+.online, .act { color: var(--ok); }
+.offline, .refer { color: var(--danger); }
+.relook, .badge { color: var(--warn); }
+.over-budget { color: var(--danger); }
+.over-budget progress { accent-color: var(--danger); }
+
+/* Map HUD */
+.map-title-badge { background: var(--panel); border: 2px solid var(--border); color: var(--accent-soft); }
+.fps-badge.fps-good { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
+.fps-badge.fps-low { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
+.cell-count-badge { background: var(--panel); border: 2px solid var(--border); color: var(--muted); }
+.world-change-banner { border-radius: 2px; box-shadow: 6px 6px 0 #000; }
+.replan-banner { background: var(--panel); color: var(--text); border: 2px solid var(--accent); }
+.aftershock-banner { background: var(--danger-strong); color: #fff; border: 2px solid var(--danger); }
+.map-legend { background: rgba(10, 10, 10, 0.9); border: 2px solid var(--border); box-shadow: none; }
+.legend-header { color: var(--muted); border-bottom-color: var(--border); }
+
+/* Permit and evidence */
+.permit-status { border-radius: 2px; font-family: var(--retro-font); font-size: 1rem; }
+.permit-status.granted { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok); }
+.permit-status.revoked { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+.permit-route-label { color: var(--accent-soft); }
+.evidence-item { background: #0b1120; }
+.evidence-item.kind-verified, .evidence-item.kind-clear { border-left-color: var(--ok); }
+.evidence-item.kind-shift { border-left-color: var(--warn); }
+.evidence-item.kind-hazard { border-left-color: var(--danger); }
+.evidence-item.kind-fresh_scan { border-left-color: var(--accent); }
+.badge-estimate { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); border-radius: 2px; }
+
+/* Dialogs */
+.hardware-dialog { background: var(--panel); border: 2px solid var(--border-hi); border-radius: 2px; color: var(--text); }
+.hardware-table th { background: var(--panel-2); color: var(--accent-soft); }
+.hardware-table th, .hardware-table td { border-bottom-color: var(--border); }
+
+/* Credits card sat on top of the command bar: lift it and match the panels */
+#asset-credits {
+  left: auto !important;
+  right: 12px !important;
+  bottom: 76px !important;
+  background: var(--panel) !important;
+  border: 2px solid var(--border) !important;
+  border-radius: 2px !important;
+  font-family: var(--retro-font) !important;
+  font-size: 1rem !important;
+}
+#asset-credits a { color: var(--accent-soft) !important; }
