@@ -23,7 +23,8 @@ files are not edited) and placed on the B2 floor by this runner; World.add_block
 
 runs/b2-<seed>.jsonl: one record per line {"t": sim seconds, "kind": ..., ...}: "pose" (1 Hz),
 "level" (each level reached), "plan" (each re-plan: status, why, target), "shift", "step" (each
-check, ok or FAIL) and "summary". evaluate() turns the records into the verdict, so the same log
+check, ok or FAIL) and "summary". The summary record and the verdict record each carry `seed`,
+the value passed to run(). evaluate() turns the records into the verdict, so the same log
 always gives the same result. Exit 0 only if every step passed.
 """
 
@@ -279,13 +280,14 @@ def run(seed=0, max_t=500.0, out_dir=None, verbose=False, floor=FLOOR):
     route = find_route(final, [], cell(start[1], start[2], start[3] - 0.075), cell(here[0], here[1], w.floor_z))
     ks = [c[2] for c in route.get("cells", [])]
     rec("summary", floor=floor, reached=reached, final_pos=[round(float(v), 3) for v in here], final_level=w.level(),
-        max_jump=round(max_jump(w.trace), 4), route=route["status"], route_k=[max(ks), min(ks)] if ks else None)
+        max_jump=round(max_jump(w.trace), 4), route=route["status"], route_k=[max(ks), min(ks)] if ks else None,
+        seed=seed)
     path = out_dir / f"{floor.lower()}-{seed}.jsonl"
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(json.dumps(r) + "\n" for r in records)
     verdict = evaluate(records)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"t": round(w.t, 2), "kind": "verdict", **verdict}) + "\n")
+        f.write(json.dumps({"t": round(w.t, 2), "kind": "verdict", **verdict, "seed": seed}) + "\n")
     return verdict, path
 
 
