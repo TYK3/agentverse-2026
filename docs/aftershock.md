@@ -7,7 +7,7 @@ holds the interfaces between lanes.
 
 ## Overview
 
-AFTERSHOCK is a two-robot rescue system that maps a collapsed building, predicts where it may fail next, and delivers help only along routes it has checked. It is built as a simulation for the Agentverse 2026 Robotics track, using the Gemini models from the Builder Guide.
+AFTERSHOCK is a two-robot rescue system that maps a collapsed building, predicts where it may fail next, and delivers help only along routes it has checked. It is built as a simulation for the AgentVerse 2026 Robotics track, using the Gemini models from the Builder Guide.
 
 **The problem.** After an earthquake, rescuers cannot see inside a collapsed building, and a second collapse (an aftershock) can kill the people who go in. Sending a person or a heavy robot in blind wastes the first hours and adds risk.
 

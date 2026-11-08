@@ -1,4 +1,4 @@
-# AgentVerse 2026: shared context (read first)
+# AFTERSHOCK: shared context (read first)
 
 Compiled from the AFTERSHOCK spec on 7 Nov 2026. Information, not instructions. Each lane keeps its
 own status block current; the decisions log is append only.

@@ -42,7 +42,6 @@
 - [🛡️ Safety and responsibility](#️-safety-and-responsibility)
 - [🚧 Known limits](#-known-limits)
 - [🔭 From weekend build to real robots](#-from-weekend-build-to-real-robots)
-- [🤝 How we built it: five people, many agents, one board](#-how-we-built-it-five-people-many-agents-one-board)
 - [🙏 Team, credits and licence](#-team-credits-and-licence)
 
 </details>
@@ -198,7 +197,7 @@ All five lanes run as async Python modules on **one validated topic bus** ([coor
 | **Planner** | [planner/](planner/) | Routes, the confidence gate, permits, re-planning, Responder tasks, the human gate, offline Gemma, the edge budget, the handover report |
 | **Console** | [console/](console/) | The operator screen: Three.js 3D map, routes, reasoning log, permit evidence, budget meter, approvals, typed commands, report |
 | **Voice** | [voice/](voice/) | Operator voice and TTS, casualty translation, cited first-aid guidance, emergency-call preparation, spoken approval |
-| **Shared** | [coord/](coord/), [tools/](tools/) | The hub and topic contract, Gemini receipts, runners, evaluation and the team board |
+| **Shared** | [coord/](coord/), [tools/](tools/) | The hub and topic contract, Gemini receipts, runners, evaluation |
 
 <details>
 <summary><b>🔌 Run stages and what happens when one fails</b></summary>
@@ -226,13 +225,13 @@ All numbers below are from runs on the `main` branch with **local models only** 
 
 | Run | What is checked | Result |
 |---|---|---|
-| **B1 rescue**, seeds 3, 5, 18, 19 (one command, auto-approve) | 17 checks along the whole mission, from the Scout mapping and finding the casualty to a verified route, a revoked and re-granted permit, and the supply placed within 0.5 m of the casualty | **17 / 17** on every seed |
+| **B1 rescue**, seeds 4, 5, 18, 19 (one command, auto-approve) | 17 checks along the whole mission, from the Scout mapping and finding the casualty to a verified route, a revoked and re-granted permit, and the supply placed within 0.5 m of the casualty | **17 / 17** on every seed |
 | **Multi-level descent to B2**, seeds 0–4 | 9 checks: the Scout descends L1 → B1 → B2, maps a dropped slab, stops, re-routes and reaches the casualty | **9 / 9** on every seed |
 | **Stale-map recovery**, B1 seed 3 | Block lands 50.1 s → permit revoked 50.1 s → re-granted after a fresh check 52.3 s → moving on a new route 53.1 s | **3.0 s** from change to moving safely again |
 
 ### 🔍 Failures we found and fixed
 
-The most common miss in seed sweeps was *"supply placed within 0.5 m of the casualty"*. Two causes: the Responder's collision ray read the casualty's own body as a wall, and a re-plan after a block started from the mission's first start cell instead of the Responder's pose. With both fixed ([#452](https://github.com/TYK3/agentverse-2026/pull/452), [#453](https://github.com/TYK3/agentverse-2026/pull/453)), seeds 3 and 5 went from 16/17 to **17/17**.
+The most common miss in seed sweeps was *"supply placed within 0.5 m of the casualty"*. Two causes: the Responder's collision ray read the casualty's own body as a wall, and a re-plan after a block started from the mission's first start cell instead of the Responder's pose. With both fixed ([#452](https://github.com/TYK3/agentverse-2026/pull/452), [#453](https://github.com/TYK3/agentverse-2026/pull/453)), seeds 3 and 5 went from 16/17 to **17/17**. Seed 3 remains the hardest layout: one rerun stopped at 15/17 when the Responder was blocked on a re-planned route.
 
 ### ⚖️ Paired baseline (30 seeds × 2 policies)
 
@@ -333,10 +332,10 @@ Runs every lane's test suite in its own subprocess plus the headless sim demos, 
 | [`console/`](console/) | TypeScript 5.9 + Three.js 0.181 + Vite 7 operator screen, browser speech, Playwright tests |
 | [`voice/`](voice/) | Operator voice, typed twin, translation, cited first aid, casualty contact, spoken approval |
 | [`coord/`](coord/) | The hub (`hub.py`), topic schemas (`messages.py`), Gemini receipts (`gem.py`), the contract and its fixtures |
-| [`tools/`](tools/) | Runners (`demo.py`, `demo60.py`, `play.py`, `run_b2.py`, `run_levels.py`), sweeps, profiling, evaluation, the team board |
+| [`tools/`](tools/) | Runners (`demo.py`, `demo60.py`, `play.py`, `run_b2.py`, `run_levels.py`), sweeps, profiling, evaluation |
 | [`eval/`](eval/) | Paired baseline results, comparison tables, archived traces and sources |
 | [`hw/`](hw/) | Hardware bridge and drivers for the real-robot concept |
-| [`docs/`](docs/) | [Spec](docs/aftershock.md), [technical summary](docs/technical-summary.pdf), [hackathon brief](docs/brief.md), [hardware](docs/hardware.md) and [electronics](docs/electronics.md) concepts, [team board manual](docs/team-board.md) |
+| [`docs/`](docs/) | [Spec](docs/aftershock.md), [technical summary](docs/technical-summary.pdf), [hackathon brief](docs/brief.md), [hardware](docs/hardware.md) and [electronics](docs/electronics.md) concepts |
 
 ---
 
@@ -374,21 +373,11 @@ The hardware concept is written up in [docs/hardware.md](docs/hardware.md) and [
 
 ---
 
-## 🤝 How we built it: five people, many agents, one board
-
-AFTERSHOCK was built in one weekend by five people, each driving their own coding agents (Claude Code, Codex, Gemini, Antigravity), with one folder ("lane") per person. The agents coordinated on a **message board**: one pinned GitHub issue that every agent reads and posts to with [`tools/board`](tools/board), tagging teammates and waiting for its own ping. Tasks were GitHub issues, work arrived as small pull requests behind one required CI check, and decisions went into a shared log every new session reads first.
-
-- 📘 [**docs/team-board.md**](docs/team-board.md): joining the board, commands, several agents under one login, troubleshooting.
-- 📗 [**PLAYBOOK.md**](PLAYBOOK.md): the method (rules file, lanes, board, GitHub as the record) and the repo settings behind it.
-- 📕 [**AGENTS.md**](AGENTS.md): the rules every agent loads at start-up; [coord/CONTEXT.md](coord/CONTEXT.md) and [coord/CONTRACT.md](coord/CONTRACT.md) hold the shared plan and interfaces.
-
----
-
 ## 🙏 Team, credits and licence
 
 - **Team:** Anthony Tan Yen Kun ([@TYK3](https://github.com/TYK3), lead), Philbert ([@PhillysTheBest](https://github.com/PhillysTheBest)), Charlotte Huang, [@13abiazt-a11y](https://github.com/13abiazt-a11y) and [@AlifKhan03](https://github.com/AlifKhan03).
 - **Built for** AgentVerse 2026, UCL AI Society, Robotics track (*"give an agent a body"*). Brief: [docs/brief.md](docs/brief.md).
 - **Built with** [MuJoCo](https://github.com/google-deepmind/mujoco), Google Gemini and Gemma 4, [Ollama](https://ollama.com), FastAPI, Three.js and Vite. 3D model credits: [console/public/models/CREDITS.json](console/public/models/CREDITS.json).
-- **AI use:** the code was written by the team working with AI coding agents, coordinated through the board described above; every change went through a pull request and CI.
+- **AI use:** the code was written by the team working with AI coding agents (Claude Code, Codex, Gemini, Antigravity); every change went through a pull request and CI.
 
 MIT licensed. Copyright (c) 2026 Anthony Tan Yen Kun. See [LICENSE](LICENSE).

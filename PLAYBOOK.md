@@ -1,4 +1,4 @@
-# Five agents, one repo: hackathon playbook
+# AFTERSHOCK team playbook: five agents, one repo
 
 Give every teammate one coding agent and one lane (a folder), and start every agent from the same
 short rules file. The agents talk on a message board (one pinned GitHub issue, through `tools/board`),
