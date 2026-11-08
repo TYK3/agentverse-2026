@@ -14,6 +14,11 @@ FLOOR = "0.5 0.5 0.5 1"
 WALL = "0.8 0.7 0.5 1"
 RUBBLE = "0.55 0.5 0.45 1"
 OUT = pathlib.Path(__file__).with_name("levels.xml")
+# B3-SHIFT: a chunk of B1's slab that falls onto B2 across the way from R3's foot to R4. It is parked
+# PARK metres below its landed place (under B3, out of every ray's reach) until sim.levels shifts it.
+SHIFT_LO, SHIFT_HI = (4.45, 1.05), (5.0, 1.35)   # landed footprint on B2, x and y
+SHIFT_H = 0.12                                     # landed height above B2: a kerb the LiDAR sees
+PARK = 4.0
 
 
 def box(name, lo, hi, rgba=WALL):
@@ -84,6 +89,8 @@ def geoms():
         box("b21_rubble", [0.9, 0.9, -H], [1.2, 1.2, -H + 0.12], RUBBLE),
         box("b22_rubble", [2.0, 0.9, -2 * H], [2.3, 1.2, -2 * H + 0.12], RUBBLE),
         box("b23_rubble", [3.5, 1.2, -3 * H], [3.8, 1.5, -3 * H + 0.12], RUBBLE),
+        box("shift_slab", [SHIFT_LO[0], SHIFT_LO[1], -2 * H - PARK], [SHIFT_HI[0], SHIFT_HI[1], -2 * H + SHIFT_H - PARK],
+            RUBBLE),
     ]
 
 
@@ -108,6 +115,10 @@ HEADER = """<!--
   B2 plan view: ramp R4 (B2 -> B3) runs west over y 0..0.6, x 4.5 -> 2.5, in a railed shaft that is open
   down to B3 for x 1.5..4.5. B3 lies under the whole footprint; the Scout leaves R4's foot (x 1.5..2.5)
   north, under the rail at y = 0.6, which is 0.54 m above B3. Casualty c3 lies in B3 at the west end.
+
+  shift_slab is parked 4 m below its place until sim.levels.LevelWorld.shift_slab() drops it onto B2 at
+  x 4.45..5, y 1.05..1.35 (0.12 m high), across the direct way from R3's foot to R4. The detour west of it
+  (y 1.35..1.72, then x < 4.45, then y 0.68..1.05) stays open, so B3 is still reachable.
   Every drop is railed (0.2 m) except the ramp mouths, because a 2D LiDAR cannot see a drop.
   Levels are static geoms, not b<number> blocks, so the aftershock check has nothing to shake here.
 -->"""
