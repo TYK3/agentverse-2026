@@ -492,14 +492,25 @@ def final_xml(b, keep, alive, voids):
     welds = "\n".join(f'    <weld name="j{i}_{k}" body1="{a}" body2="{c}"/>' for i, (a, c, k) in enumerate(alive))
     spare = ('    <body name="x1" pos="0 -8 -1" gravcomp="1"><freejoint/><geom name="x1_rubble" type="box" '
              'size="0.3 0.3 0.25" density="2000" contype="0" conaffinity="0" material="concrete"/></body>\n')
+    supplies = (
+        '    <body name="water" pos="2 -2.9 0.16"><freejoint/><geom name="water_supply" type="cylinder" size="0.035 0.06" mass="0.5" group="3" rgba="0.2 0.55 1 1"/></body>\n'
+        '    <body name="first_aid_kit" pos="2 -2.8 0.13"><freejoint/><geom name="first_aid_kit_supply" type="box" size="0.05 0.035 0.03" mass="0.4" group="3" rgba="0.9 0.15 0.15 1"/></body>\n'
+        '    <body name="radio" pos="2 -2.7 0.145"><freejoint/><geom name="radio_supply" type="box" size="0.025 0.02 0.045" mass="0.3" group="3" rgba="0.15 0.15 0.15 1"/></body>\n'
+    )
+    carry_welds = (
+        '    <weld name="carry_water" body1="responder" body2="water" active="true"/>\n'
+        '    <weld name="carry_first_aid_kit" body1="responder" body2="first_aid_kit" active="true"/>\n'
+        '    <weld name="carry_radio" body1="responder" body2="radio" active="true"/>\n'
+    )
     text = (HEAD + "  <custom>\n" + voices + "\n  </custom>\n" + head + bodies + "\n"
-            + cas_xml + "\n" + spare
+            + cas_xml + "\n" + spare + supplies
             + '    <camera name="overview" pos="6 -11 10" xyaxes="1 0 0 0 0.7 0.71"/>\n'
             + "  </worldbody>\n  <equality>\n"
-            + '    <weld name="plate_to_ground" body1="plate" body2="ground"/>\n' + welds + "\n  </equality>\n</mujoco>\n")
+            + '    <weld name="plate_to_ground" body1="plate" body2="ground"/>\n' + welds + "\n"
+            + carry_welds + "  </equality>\n</mujoco>\n")
     spec = mujoco.MjSpec.from_string(text)
     robots.attach(spec, "scout", pos=(2.0, -1.6, 0.0), yaw=90, prefix="scout/")
-    robots.attach(spec, "responder", pos=(2.0, -2.8, 0.0), yaw=90, prefix="")
+    robots.attach(spec, "responder", pos=(2.0, -2.8, 0.05), yaw=90, prefix="")
     m = spec.compile()
     force, torque = calibrate(m)
     out = spec.to_xml()

@@ -942,7 +942,7 @@
         <camera name="scout/thermal_cam" quat="-0.5 -0.5 0.5 0.5" resolution="160 120" pos="0.15 0 0.21" fovy="44.3"/>
       </body>
     </frame>
-    <frame pos="2 -2.8 0" quat="0.707107 0 0 0.707107">
+    <frame pos="2 -2.8 0.05" quat="0.707107 0 0 0.707107">
       <body name="responder" mocap="true">
         <geom name="chassis" size="0.254 0.16 0.085" pos="0 0 0.15" type="box" contype="0" conaffinity="0" group="3" friction="1" solref="0.02" rgba="0.95 0.6 0.1 1" mass="13.4"/>
         <geom name="top_plate" size="0.254 0.215 0.0075" pos="0 0 0.2425" type="box" contype="0" conaffinity="0" group="3" friction="1" solref="0.02" rgba="0.2 0.2 0.2 1" mass="1.2"/>
@@ -1007,6 +1007,9 @@
         </body>
       </body>
     </frame>
+    <body name="water" pos="2 -2.9 0.16"><freejoint/><geom name="water_supply" type="cylinder" size="0.035 0.06" mass="0.5" group="3" rgba="0.2 0.55 1 1"/></body>
+    <body name="first_aid_kit" pos="2 -2.8 0.13"><freejoint/><geom name="first_aid_kit_supply" type="box" size="0.05 0.035 0.03" mass="0.4" group="3" rgba="0.9 0.15 0.15 1"/></body>
+    <body name="radio" pos="2 -2.7 0.145"><freejoint/><geom name="radio_supply" type="box" size="0.025 0.02 0.045" mass="0.3" group="3" rgba="0.15 0.15 0.15 1"/></body>
   </worldbody>
 
   <contact>
@@ -1036,6 +1039,9 @@
     <weld name="j18_wall-column" body1="b24" body2="b68"/>
     <weld name="j19_wall-column" body1="b20" body2="b69"/>
     <weld name="j20_wall-column" body1="b23" body2="b69"/>
+    <weld name="carry_water" body1="responder" body2="water" active="true"/>
+    <weld name="carry_first_aid_kit" body1="responder" body2="first_aid_kit" active="true"/>
+    <weld name="carry_radio" body1="responder" body2="radio" active="true"/>
   </equality>
 
   <actuator>
@@ -1061,8 +1067,8 @@
   </sensor>
 
   <custom>
-    <numeric name="weld_limit" data="0 115367 116552 123279 121957 52536 92593 91232 180157 120469 20745 20725 90976 113781 5749 3780 109079 64362 109144 423166 2294270 288356"/>
-    <numeric name="weld_torque_limit" data="0 1000 1000 29817 29817 2311 1000 1000 1000 1646 1559 1559 1000 4849 1000 1000 47373 50575 47454 3904 401223 16036"/>
+    <numeric name="weld_limit" data="0 115367 116552 123279 121957 52536 92593 91232 180157 120469 20745 20725 90976 113781 5749 3780 109079 64362 109144 423166 2294270 288356 0 0 0"/>
+    <numeric name="weld_torque_limit" data="0 1000 1000 29817 29817 2311 1000 1000 1000 1646 1559 1559 1000 4849 1000 1000 47373 50575 47454 3904 401223 16036 0 0 0"/>
     <numeric name="voice_c1" size="1" data="0"/>
     <numeric name="voice_c2" size="1" data="1"/>
     <numeric name="voice_c3" size="1" data="0.4"/>
