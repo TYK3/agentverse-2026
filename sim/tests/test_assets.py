@@ -87,3 +87,27 @@ def test_credits_ship_with_the_model_and_need_no_attribution_gaps():
     for c in credits:
         assert c["licence"] in ("CC0", "CC-BY-4.0", "BSD-3-Clause") and c["author"] and c["source"].startswith("https://")
     assert (MODELS / "parking_garage_1k.hdr").read_bytes()[:10] == b"#?RADIANCE"
+
+
+# ---------------------------------------------------------------- ASSET-LOD: the software-GL tower
+
+def test_lite_tower_matches_the_full_one_without_textures():
+    """aftershock_lite.glb (sim/assets/build_lod.py) must stay in step with aftershock.glb: same nodes, poses,
+    extras and geometry, flat materials. Re-run build_lod.py after build_glb.py if this fails."""
+    full, lite = _glb_json(MODELS / "aftershock.glb"), _glb_json(MODELS / "aftershock_lite.glb")
+    keys = ("name", "translation", "rotation", "scale", "matrix", "children", "mesh", "extras")
+    assert [{k: n.get(k) for k in keys} for n in lite["nodes"]] == [{k: n.get(k) for k in keys} for n in full["nodes"]]
+    assert lite["scenes"] == full["scenes"]
+    assert not lite.get("images") and not lite.get("textures")
+    for mf, ml in zip(full["meshes"], lite["meshes"], strict=True):
+        for pf, pl in zip(mf["primitives"], ml["primitives"], strict=True):
+            assert set(pl["attributes"]) == {"POSITION", "NORMAL"} and pl["material"] == pf["material"]
+            for attr in ("POSITION", "NORMAL"):
+                af, al = full["accessors"][pf["attributes"][attr]], lite["accessors"][pl["attributes"][attr]]
+                assert (al["count"], al.get("min"), al.get("max")) == (af["count"], af.get("min"), af.get("max"))
+            assert lite["accessors"][pl["indices"]]["count"] == full["accessors"][pf["indices"]]["count"]
+    assert [m["name"] for m in lite["materials"]] == [m["name"] for m in full["materials"]]
+    for m in lite["materials"]:
+        assert set(m) <= {"name", "doubleSided", "pbrMetallicRoughness", "alphaMode", "extras"}, m["name"]
+        assert all(0 < c <= 1 for c in m["pbrMetallicRoughness"]["baseColorFactor"])
+    assert (MODELS / "aftershock_lite.glb").stat().st_size < 0.35 * (MODELS / "aftershock.glb").stat().st_size

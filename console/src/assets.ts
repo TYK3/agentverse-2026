@@ -2,7 +2,8 @@
 //
 // - robots.glb (small) loads at idle time in every scene. aftershock.glb (the tower) and the HDRI load only
 //   the first time the tower is shown: parsing them costs seconds in software GL, and other scenes never
-//   need them. In software WebGL (no GPU, e.g. CI) the tower uses Lambert shading and skips the HDRI.
+//   need them. In software WebGL (no GPU, e.g. CI) the tower is aftershock_lite.glb (same nodes, no textures,
+//   from sim/assets/build_lod.py), drawn with Lambert shading and no HDRI; ?lod=full loads the full one anyway.
 // - parking_garage HDRI lights the model's materials (reflections only; the background stays the console's).
 // - The Scout and Responder primitives are swapped for the Go1 and Rover models, scaled to the
 //   footprint the console already draws, so poses, labels and tests are unchanged.
@@ -31,6 +32,7 @@ export interface DemoAssets {
   movedBlocks: string[];
   worldChanges: number;          // world/change messages seen (any scene)
   softwareGl: boolean;           // CPU WebGL: the tower is drawn with Lambert shading and no HDRI
+  towerFile: string;             // which tower model loads: aftershock.glb, or aftershock_lite.glb in software GL
   showBuilding(show: boolean): void;
   markMoved(ids: string[]): void;
 }
@@ -134,6 +136,7 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     movedBlocks: [],
     worldChanges: 0,
     softwareGl: false,
+    towerFile: 'aftershock.glb',
     showBuilding: () => {},
     markMoved: () => {},
   };
@@ -184,6 +187,8 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
 
   const software = softwareGl(viewer.renderer);
   state.softwareGl = software;
+  state.towerFile = software && new URLSearchParams(window.location.search).get('lod') !== 'full'
+    ? 'aftershock_lite.glb' : 'aftershock.glb';
   const internals = viewer as unknown as { scoutGroup?: THREE.Group; responderGroup?: THREE.Group };
 
   // The HDRI lights only the model's own materials, not scene.environment: that would put image-based
@@ -249,7 +254,7 @@ export function setupDemoAssets(viewer: MapViewer): DemoAssets {
     if (towerRequested) return;
     towerRequested = true;
     if (!software) loadHdr();
-    new GLTFLoader().load(`${BASE}aftershock.glb`, gltf => {
+    new GLTFLoader().load(`${BASE}${state.towerFile}`, gltf => {
       const root = gltf.scene;
       building = root.getObjectByName('building');
       annex = root.getObjectByName('annex');
