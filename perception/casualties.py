@@ -41,6 +41,7 @@ AVERAGE = 5           # acoustic samples in the moving average
 BASELINE = 1.0        # metres between two Scout poses before their rays are intersected
 MIN_ANGLE = math.radians(30.0)   # rays crossing at a shallower angle amplify bearing noise
 MERGE = 0.6           # metres: points this close are the same casualty
+FLOOR_H = 0.6         # metres between floors (sim/levels.py LEVEL_Z): rays, points and tracks are per floor
 VISION_PERIOD = 1.0   # seconds between vision calls
 VITALS = {"breathing_rate": 14, "simulated": True}
 CAM_FOVY = math.radians(60.0)   # sim/scenes/backup.xml scout_cam; horizontal FOV follows the frame's aspect
@@ -121,7 +122,9 @@ class Casualties:
         self.sound_rays = deque(maxlen=100)     # (xy, scene bearing), only loud, averaged samples
         self.crossings = deque(maxlen=300)      # triangulated points
         self.points = deque(maxlen=200)         # thermal + LiDAR range points
-        self.found = []                         # [{"pos", "z", "thermal", "sound", "vision", "supported"}]
+        self.found = []                         # [{"pos", "z", "floor", "thermal", "sound", "vision", "supported"}]
+        self.floor = None                       # floor index of the Scout's pose: the buffers above are its
+        self.floors = {}                        # floor index -> its saved (sound, rays, crossings, points)
         self.last_vision = -math.inf
         self.vision_stand_in = False            # True once vision was skipped (Gemini off): flag it
         self.suggested = False                  # the last frame had a thermal or sound clue
@@ -134,6 +137,7 @@ class Casualties:
         """Fuse one sensors/scout frame's thermal and sound; return True if map/casualties changed."""
         pos, yaw = data["pose"]["pos"], data["pose"].get("yaw", 0.0)
         xy = tuple(pos[:2])
+        self._to_floor(round(pos[2] / FLOOR_H))
         thermal_score = sound_score = 0.0
 
         hot = thermal_region(data["thermal"]) if data.get("thermal") else None
@@ -168,6 +172,25 @@ class Casualties:
         changed = self._update(estimate, pos[2], thermal_score, sound_score, supported=bool(self.crossings))
         return self._local_vision(data, estimate) or changed
 
+    def _to_floor(self, floor):
+        """Swap in this floor's clue buffers. A casualty on another floor at the same x, y is someone else
+        (B1's c1 and B3's c3 are 0.1 m apart in plan view): its rays must not cross ours, nor its track take
+        our points (DESCEND-AFTER-LOCATE, #335)."""
+        if floor == self.floor:
+            return
+        if self.floor is not None:
+            self.floors[self.floor] = (self.sound, self.thermal_rays, self.sound_rays, self.crossings, self.points)
+        saved = self.floors.get(floor)
+        if saved is None:
+            saved = (deque(maxlen=AVERAGE), deque(maxlen=100), deque(maxlen=100), deque(maxlen=300),
+                     deque(maxlen=200))
+        self.sound, self.thermal_rays, self.sound_rays, self.crossings, self.points = saved
+        self.floor = floor
+
+    def _here(self):
+        """Tracks on the Scout's floor."""
+        return [c for c in self.found if c.get("floor", self.floor) == self.floor]
+
     def _local_vision(self, data, estimate):
         """Offline camera check (Z3), only while Gemini vision is off; True if a casualty's score rose."""
         camera = data.get("camera")
@@ -179,7 +202,7 @@ class Casualties:
         score = local_person(camera["b64"] if isinstance(camera, dict) else camera, self.thermal_rel)
         if not score:
             return False
-        c = min(self.found, key=lambda f: math.dist(f["pos"], estimate), default=None)
+        c = min(self._here(), key=lambda f: math.dist(f["pos"], estimate), default=None)
         if c is None or math.dist(c["pos"], estimate) >= MERGE or score <= c["vision"]:
             return False
         c["vision"] = score
@@ -252,14 +275,15 @@ class Casualties:
         the provisional track, else start a new one. Unsupported estimates only ever move the single
         provisional track: the median thermal point drifting is one hypothesis moving, not a new casualty.
         """
-        provisional = next((c for c in self.found if not c.get("supported", True)), None)
+        here = self._here()
+        provisional = next((c for c in here if not c.get("supported", True)), None)
         target = None
         if supported:
-            target = next((c for c in self.found if c.get("supported", True) and math.dist(c["pos"], xy) < MERGE),
+            target = next((c for c in here if c.get("supported", True) and math.dist(c["pos"], xy) < MERGE),
                           None) or provisional
         elif provisional is not None:
             target = provisional
-        elif any(math.dist(c["pos"], xy) < MERGE for c in self.found):
+        elif any(math.dist(c["pos"], xy) < MERGE for c in here):
             return False      # a stray thermal point beside a supported casualty: nothing new
         if target is not None:
             before = self._entry(target, 0)
@@ -271,8 +295,8 @@ class Casualties:
             return self._entry(target, 0) != before
         if thermal == 0:
             return False      # sound alone gives a bearing, not a place
-        self.found.append({"pos": xy, "z": z, "thermal": thermal, "sound": sound, "vision": 0.0,
-                           "supported": supported})
+        self.found.append({"pos": xy, "z": z, "floor": self.floor, "thermal": thermal, "sound": sound,
+                           "vision": 0.0, "supported": supported})
         return True
 
     @staticmethod

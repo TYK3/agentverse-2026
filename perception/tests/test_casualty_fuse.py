@@ -82,3 +82,45 @@ def test_triangulated_from_the_start_is_supported_and_single():
     out = c.message()
     assert len(out) == 1 and math.dist(out[0]["pos"][:2], CASUALTY) < 0.1
     assert c.found[0]["supported"] is True
+
+
+def on_floor(f, dz):
+    """The same frame with the Scout one or more floors lower (levels are 0.6 m apart)."""
+    return {**f, "pose": {**f["pose"], "pos": [*f["pose"]["pos"][:2], f["pose"]["pos"][2] + dz]}}
+
+
+def test_casualties_on_different_floors_are_not_merged():
+    """ref DESCEND-AFTER-LOCATE (#335): c1 on B1 and c3 on B3 are 0.1 m apart in plan view. Plan-view fusion
+    reported both (and c2) as one 'c1' that moved floor to floor. Rays, points and tracks are kept per floor."""
+    c = Casualties(vision_on=False)
+    for f in [frame((0.0, 0.0))] * 2 + FAR:              # a casualty at CASUALTY on this floor
+        c.on_sensors(f)
+    for f in [on_floor(frame((0.0, 0.0)), -1.2)] * 2 + [on_floor(f, -1.2) for f in FAR]:   # same x, y, 2 floors down
+        c.on_sensors(f)
+    out = c.message()
+    assert [e["id"] for e in out] == ["c1", "c2"], out
+    assert out[0]["pos"][2] == pytest.approx(0.075) and out[1]["pos"][2] == pytest.approx(-1.125)
+    for e in out:
+        assert math.dist(e["pos"][:2], CASUALTY) < 0.1, e
+
+
+def test_back_on_a_floor_its_casualty_is_the_same_one():
+    c = Casualties(vision_on=False)
+    for f in [frame((0.0, 0.0))] * 2 + FAR:
+        c.on_sensors(f)
+    for f in [on_floor(f, -0.6) for f in FAR]:           # a floor down, nothing hot there
+        c.on_sensors({**f, "thermal": None})
+    for f in FAR:                                        # back up: the same casualty again
+        c.on_sensors(f)
+    assert [e["id"] for e in c.message()] == ["c1"]
+
+
+def test_one_provisional_track_per_floor_never_drags_across_floors():
+    c = Casualties(vision_on=False)
+    for f in NEAR[:3]:                                   # provisional on this floor
+        c.on_sensors(f)
+    here = c.message()[0]["pos"]
+    for f in [on_floor(f, -0.6) for f in NEAR[:3]]:      # an unsupported thermal point a floor down
+        c.on_sensors(f)
+    out = c.message()
+    assert len(out) == 2 and out[0]["pos"] == here, out  # the first floor's track did not move
