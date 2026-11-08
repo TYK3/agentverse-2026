@@ -19,6 +19,10 @@
   B2 plan view: ramp R4 (B2 -> B3) runs west over y 0..0.6, x 4.5 -> 2.5, in a railed shaft that is open
   down to B3 for x 1.5..4.5. B3 lies under the whole footprint; the Scout leaves R4's foot (x 1.5..2.5)
   north, under the rail at y = 0.6, which is 0.54 m above B3. Casualty c3 lies in B3 at the west end.
+
+  shift_slab is parked 4 m below its place until sim.levels.LevelWorld.shift_slab() drops it onto B2 at
+  x 4.45..5, y 1.05..1.35 (0.12 m high), across the direct way from R3's foot to R4. The detour west of it
+  (y 1.35..1.72, then x < 4.45, then y 0.68..1.05) stays open, so B3 is still reachable.
   Every drop is railed (0.2 m) except the ramp mouths, because a 2D LiDAR cannot see a drop.
   Levels are static geoms, not b<number> blocks, so the aftershock check has nothing to shake here.
 -->
@@ -63,6 +67,7 @@
     <geom name="b21_rubble" type="box" pos="1.0500 1.0500 -0.5400" size="0.1500 0.1500 0.0600" rgba="0.55 0.5 0.45 1"/>
     <geom name="b22_rubble" type="box" pos="2.1500 1.0500 -1.1400" size="0.1500 0.1500 0.0600" rgba="0.55 0.5 0.45 1"/>
     <geom name="b23_rubble" type="box" pos="3.6500 1.3500 -1.7400" size="0.1500 0.1500 0.0600" rgba="0.55 0.5 0.45 1"/>
+    <geom name="shift_slab" type="box" pos="4.7250 1.2000 -5.1400" size="0.2750 0.1500 0.0600" rgba="0.55 0.5 0.45 1"/>
     <!-- Casualty c1 in B1: a fixed visual marker, no collisions. -->
     <body name="casualty_c1" pos="0.45 1.9 -0.48" euler="0 90 0">
       <geom name="c1_g" type="capsule" size="0.1 0.25" contype="0" conaffinity="0" rgba="1 0.3 0.3 1"/>

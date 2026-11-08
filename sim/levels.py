@@ -9,6 +9,12 @@
     (x, y) AND its floor is within LEVEL_TOL of the target z. Over the right spot on the wrong
     level it reports `blocked`, because it cannot change level where it stands.
 
+B3-SHIFT: `shift_slab()` drops a chunk of slab (shift_slab in levels.xml, parked out of reach until
+then) onto B2 across the direct way to R4. The Scout stops at once (state `blocked`, target cleared),
+`world/change` {"kind": "aftershock", "moved_blocks": ["shift_slab"]} goes out, and for SETTLE seconds
+every scout/goto is refused: nothing drives on a map made before the shift. What the Scout knew of
+that area is stale; sim.demo_descent shows the fresh recheck that must come before it moves again.
+
 Everything else (sensors, sensors/scout payload, verify, inject) is World's. The hub's sim lane is
 unchanged; run this scene with `python -m sim.levels` or `await sim.levels.start(bus)`.
 """
@@ -17,6 +23,7 @@ import asyncio
 import math
 import time
 
+import mujoco
 import numpy as np
 
 from sim import scene, sensors
@@ -29,6 +36,9 @@ MAX_RISE = 0.6      # max floor change per metre driven (tan 31 deg); ramps here
 STEP_SLACK = 0.004  # metres of floor change always allowed per step (ramp seams, float noise)
 LEVEL_TOL = 0.10    # metres: the Scout's floor must be this close to a target's z to have arrived
 LEVEL_Z = {"L1": 0.6, "ground": 0.0, "B1": -0.6, "B2": -1.2, "B3": -1.8}   # floor heights in levels.xml
+SHIFT_GEOM = "shift_slab"
+SHIFT_PARK = 4.0    # metres the slab is parked below its landed place (sim/scenes/make_levels.py PARK)
+SETTLE = 1.0        # seconds after a slab shift during which scout/goto is refused
 SUBSTEP = 0.01      # metres: long steps are checked in pieces so a drop between samples is not missed
 
 
@@ -41,6 +51,7 @@ class LevelWorld(World):
             raise ValueError("the Scout starts over no floor")
         self._set_z(self.floor_z)
         self.trace = [(self.t, *self.pos)]   # every pose, for the no-teleport check
+        self.shifted_at = None               # world time of the slab shift, or None
 
     # ---- support ----------------------------------------------------------------
     def _floor_at(self, xy, z_from):
@@ -54,7 +65,27 @@ class LevelWorld(World):
         self.d.mocap_pos[self.scout_mocap][2] = floor_z + RIDE
 
     # ---- commands ----------------------------------------------------------------
+    def shift_slab(self):
+        """B3-SHIFT: drop shift_slab onto B2 and stop the Scout. Returns False if it already shifted."""
+        if self.shifted_at is not None:
+            return False
+        g = self.m.geom(SHIFT_GEOM).id
+        self.m.geom_pos[g][2] += SHIFT_PARK
+        mujoco.mj_forward(self.m, self.d)
+        self.shifted_at = self.t
+        self.state, self.target, self.target_z = "blocked", None, None
+        self.events.append(("world/change", {"kind": "aftershock", "t": round(self.t, 2),
+                                             "moved_blocks": [SHIFT_GEOM]}))
+        return True
+
+    def settling(self):
+        """True while the slab shift is still settling (scout/goto is refused)."""
+        return self.shifted_at is not None and self.t - self.shifted_at < SETTLE - 1e-9
+
     def goto(self, msg):
+        if self.settling():
+            self.state, self.target = "blocked", None      # refused: the world just changed under it
+            return
         super().goto(msg)
         target = msg["target"]
         self.target_z = float(target[2]) if len(target) > 2 else None
