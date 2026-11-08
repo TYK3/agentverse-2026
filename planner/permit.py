@@ -173,10 +173,11 @@ class Permits:
 
     def _keep_relooking(self, t: float, scout_xy) -> list:
         """The newest revoked route re-sends its re-look until it is re-earned (one route drives the Scout)."""
-        waiting = [p for p in self.permits.values() if p.verified and not p.granted and p.revoked_at is not None]
-        if not waiting:
+        if not self.permits:
             return []
-        p = waiting[-1]
+        p = list(self.permits.values())[-1]  # only the newest route: a replaced route's re-look parks the
+        if not p.verified or p.granted or p.revoked_at is None:  # Scout in the passage the new one uses
+            return []
         if t - p.relook_at < RELOOK_EVERY_S:
             return []
         return self._relook(p, t, scout_xy)
