@@ -55,6 +55,7 @@ class SensorsScout(Message):
     camera: str | CameraFrame | None = None
     motion: ScoutMotion | None = None
     points: Annotated[list[Vec3], Field(max_length=2048)] | None = None  # depth camera, scene frame (Z1/Y9)
+    points_from: Vec3 | None = None  # where the depth camera was for `points`, scene frame (L5)
     thermal: list[list[Probability]]
     acoustic: Acoustic
 
@@ -101,6 +102,7 @@ class Hazard(Message):
     status: Literal["stable", "at_risk", "collapsed"]
     why: Text
     estimate: Literal[True]
+    exclusion: bool | None = None  # keep out: motion was sensed nearby (L5); routes never pass
 
 
 class MapHazards(RootModel[list[Hazard]]):
