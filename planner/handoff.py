@@ -73,12 +73,15 @@ class Handoff:
         self.finder = supply.BoardFinder()
         self.fetching = None       # {"cid", "block", "item"} while the Responder fetches found material
         self.holding_block = None  # a found block gripped and not yet placed
+        self.heard = {}            # casualty id -> injuries from voice's casualty/contact (G3)
+        self.delivered = {}        # casualty id -> items placed for them
 
     def attach(self):
         for topic, fn in (("map/casualties", self.on_casualties), ("map/cells", self.on_map),
                           ("map/hazards", self.on_hazards), ("sensors/scout", self.on_sensors),
                           ("log/decision", self.on_log), ("world/change", self.on_world_change),
-                          ("scene/loaded", self.finder.on_scene), ("casualty/triage", self.on_triage)):
+                          ("scene/loaded", self.finder.on_scene), ("casualty/triage", self.on_triage),
+                          ("casualty/contact", self.on_contact)):
             self.bus.subscribe(topic, fn)
         return self
 
@@ -194,7 +197,30 @@ class Handoff:
         return None
 
     def injuries_of(self, cas):
-        return list(cas.get("injuries") or []) + list(self.triage.get(cas["id"], []))
+        return (list(cas.get("injuries") or []) + list(self.triage.get(cas["id"], []))
+                + list(self.heard.get(cas["id"], [])))
+
+    async def on_contact(self, data):
+        """G3 casualty/contact: what the casualty told the robot. Their words and stated facts become
+        injuries for the supply choice; if they need something they were not given yet (e.g. a splint
+        after the water), they are queued for one more delivery."""
+        cid, facts = data["id"], data.get("facts") or {}
+        said = list(data.get("injuries") or [])
+        said += [w for k, w in (("bleeding", "bleeding"), ("cold", "cold"), ("breathing_hard", "hard to breathe"))
+                 if facts.get(k) is True]
+        if facts.get("can_move") is False and facts.get("hurt"):
+            said.append(f"{', '.join(facts['hurt'])} hurt, cannot move it, may be broken")
+        self.heard[cid] = said
+        cas = self.casualties.get(cid)
+        if not cas or cid not in self.served or data.get("status") == "talking":
+            return
+        got = supply.choose(self.injuries_of(cas), self.kit, self.finder.best(near=cas["pos"][:2]))
+        if got and got["item"] not in self.delivered.get(cid, set()):
+            self.served.discard(cid)
+            self.attempts[cid] = 0
+            await self.log(f"contact with {cid}: {'; '.join(said)[:120]}", "requeued",
+                           f"{got['why']}; one more delivery for {cid}")
+            await self.dispatch()
 
     def pick(self, cas):
         """(item, block or None, why) for this casualty: planner/supply.py from its injuries, else the
@@ -243,6 +269,8 @@ class Handoff:
             if outcome == "done" and reason.startswith("placed") and self.active:
                 placed = reason.split()[1]
                 self.kit.discard(placed)
+                self.delivered.setdefault(self.active, set()).add(
+                    self.fetching["item"] if placed == self.holding_block and self.fetching else placed)
                 if placed == self.holding_block:
                     self.finder.taken.add(placed)
                     self.holding_block, self.fetching = None, None

@@ -12,16 +12,18 @@ import re
 import mujoco
 import numpy as np
 
-from sim import aftershock, scene, sensors
+from sim import aftershock, breakage, persona, scene, sensors
 
 SPEED = 0.3            # m/s
 CLEARANCE = 0.15       # metres of free space the Scout needs ahead before it moves
 HALF_WIDTH = 0.08      # Scout chassis half width; side rays check the corners
 ARRIVE = 0.02          # metres
+WARMUP_S = 0.5         # seconds of settling, breaking disarmed, before a breakable scene starts
 LAND = 1.0             # seconds an injected block gets to fall and settle before world/change
 HEAR_CALL_M = 6.0      # the casualty hears the Scout calling within this range (L2)
 TAP_DELAY_S = 1.0      # reaction time before they start knocking
 TAP_S = 6.0            # how long they knock after each call
+REPLY_DELAY_S = 1.5    # G3: a casualty who can speak answers this long after the robot's line
 
 
 def casualties(m):
@@ -43,8 +45,12 @@ class World:
         self.m, self.d = scene.load(path)
         self.t = 0.0
         self.rng = np.random.default_rng(seed)
-        self.scout = self.m.body("scout").id
-        self.scout_mocap = int(self.m.body_mocapid[self.scout])
+        self._scout_model()
+        self.breaker = breakage.Breaker(self.m)    # no-op unless the scene has weld limits (building)
+        if self.breaker.active:
+            # The first steps load every weld at once; that spike is not damage. Settle before arming.
+            for _ in range(round(WARMUP_S / self.m.opt.timestep)):
+                mujoco.mj_step(self.m, self.d)
         self.casualties = casualties(self.m)   # [(name, geom id, voice)], c1 first
         self.casualty_geom = self.casualties[0][1]
         self.target = None          # [x, y] the Scout is driving to
@@ -58,7 +64,33 @@ class World:
         self.events = []            # (topic, data) produced since the last tick
         self.landing = None         # (world time, name) when an injected block will have landed
         self.tapping = {}           # casualty name -> (from, until) world times they knock back (L2)
+        self.replies = []           # G3: (world time due, casualty/reply payload) still to be said
         self.refresh_unstable()
+
+    def _scout_model(self):
+        """Small backup Scout (body `scout`, origin = LiDAR) or the true-scale LIMO (`scout/scout`, sim/robots:
+        origin on the ground, LiDAR site above it, camera `depth_cam`)."""
+        m = self.m
+        prefix = "" if mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "scout") >= 0 else "scout/"
+        self.scout = m.body(prefix + "scout").id
+        self.scout_mocap = int(m.body_mocapid[self.scout])
+        site = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, prefix + "lidar")
+        if site >= 0:                                        # true scale: sizes from the robot spec
+            half_len, half_w = 0.161, 0.11
+            self.sensor_offset = m.site_pos[site].copy()
+            self.clearance, self.half_width, self.drive_z = half_len + CLEARANCE, half_w, 0.1
+            self.camera_name = prefix + "depth_cam"
+        else:
+            self.sensor_offset = np.zeros(3)
+            self.clearance, self.half_width, self.drive_z = CLEARANCE, HALF_WIDTH, 0.0
+            self.camera_name = "scout_cam"
+
+    @property
+    def sensor_origin(self):
+        """Where the LiDAR, thermal and microphones sit: the Scout origin plus the LiDAR offset, turned by yaw."""
+        c, s = math.cos(self.yaw), math.sin(self.yaw)
+        x, y, z = self.sensor_offset
+        return self.pos + np.array([c * x - s * y, s * x + c * y, z])
 
     # ---- physics route check ----------------------------------------------------
     def refresh_unstable(self):
@@ -142,9 +174,10 @@ class World:
         """True if nothing is within CLEARANCE + step ahead along the centre line or either side."""
         fwd = np.array([math.cos(heading), math.sin(heading), 0.0])
         side = np.array([-fwd[1], fwd[0], 0.0])
-        need = CLEARANCE + step
-        for offset in (0.0, HALF_WIDTH, -HALF_WIDTH):
-            dist, _ = sensors._ray(self.m, self.d, self.pos + side * offset, fwd, self.scout)
+        need = self.clearance + step
+        base = self.pos + np.array([0.0, 0.0, self.drive_z])
+        for offset in (0.0, self.half_width, -self.half_width):
+            dist, _ = sensors._ray(self.m, self.d, base + side * offset, fwd, self.scout)
             if 0 <= dist < need:
                 return False
         return True
@@ -175,6 +208,7 @@ class World:
                 offset = aftershock.shake_offset(self.t + n * h - self.shake_t0)
                 self.d.mocap_pos[self.ground] = self.ground_base + offset
             mujoco.mj_step(self.m, self.d)
+            self.breaker.step(self.m, self.d)
         self.t = round(self.t + dt, 6)
         if self.shaking and self.t - self.shake_t0 >= aftershock.DURATION - 1e-9:
             self._finish_aftershock()
@@ -182,6 +216,10 @@ class World:
             name, self.landing = self.landing[1], None
             self.refresh_unstable()
             self.events.append(("world/change", {"kind": "block_added", "t": round(self.t, 2), "moved_blocks": [name]}))
+        due = [r for r in self.replies if self.t >= r[0] - 1e-9]
+        if due:
+            self.replies = [r for r in self.replies if self.t < r[0] - 1e-9]
+            self.events += [("casualty/reply", data) for _, data in due]
         events, self.events = self.events, []
         return events
 
@@ -190,12 +228,14 @@ class World:
         """A `say` to the casualty, spoken by the Scout: every casualty who can hear it taps back.
 
         Heard when the Scout is within HEAR_CALL_M and at most two walls away; they start after a
-        short reaction time and knock for TAP_S seconds.
+        short reaction time and knock for TAP_S seconds. G3: a casualty with a voice also answers in
+        words (sim/persona.py) as `casualty/reply`, REPLY_DELAY_S later; fainter through walls. A new line
+        before they answered replaces the pending answer: they answer the last thing they heard.
         """
         if msg.get("to") != "casualty":
             return
-        origin = self.pos
-        for name, geom, _voice in self.casualties:
+        origin = self.sensor_origin
+        for name, geom, voice in self.casualties:
             casualty = self.d.geom_xpos[geom].copy()
             if float(np.linalg.norm((casualty - origin)[:2])) > HEAR_CALL_M:
                 continue
@@ -203,6 +243,13 @@ class World:
             walls = 0 if hit == geom else sensors.walls_between(self.m, self.d, origin, casualty, self.scout, geom)
             if walls <= 2:
                 self.tapping[name] = (self.t + TAP_DELAY_S, self.t + TAP_DELAY_S + TAP_S)
+                said = persona.answer(persona.persona(name), msg.get("text", "")) if voice > 0 else None
+                if said:
+                    # Two lines back to back get one answer, to the last one (as a person would).
+                    self.replies = [r for r in self.replies if r[1]["id"] != name]
+                    level = round(min(1.0, voice * (0.8 if walls == 0 else 0.45 / walls)), 2)
+                    self.replies.append((self.t + REPLY_DELAY_S, {"id": name, "t": round(self.t + REPLY_DELAY_S, 2),
+                                                                  "text": said, "source": "sim", "level": level}))
 
     def is_tapping(self, name=None):
         """Whether casualty `name` (any casualty when None) is knocking right now."""
@@ -212,7 +259,7 @@ class World:
     # ---- sensors -----------------------------------------------------------------
     def sensors_message(self, camera=True):
         """Payload for sensors/scout. `camera` adds a base64 JPEG frame when a renderer exists."""
-        origin, yaw = self.pos, self.yaw
+        origin, yaw = self.sensor_origin, self.yaw
         heard, thermal = [], None
         for name, geom, voice in self.casualties:
             casualty = self.d.geom_xpos[geom].copy()
@@ -234,7 +281,7 @@ class World:
             "motion": {"state": self.state, "target": None if self.target is None else [round(float(v), 3) for v in self.target]},
         }
         if camera:
-            frame = sensors.camera_jpeg(self.d, self.renderer)
+            frame = sensors.camera_jpeg(self.d, self.renderer, name=self.camera_name)
             if frame is not None:
                 data["camera"] = {"format": "jpeg", "b64": frame}
         return data

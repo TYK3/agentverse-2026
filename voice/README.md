@@ -54,3 +54,26 @@ pytest voice/tests -v
 # Run ruff linter:
 ruff check voice
 ```
+
+## Bounded live casualty contact (G3)
+
+`voice/contact.py`, started by `voice.start(bus)`. For the most confident located casualty
+(`map/casualties`, confidence >= 0.5) the robot holds a short conversation where every line answers what
+it just heard on `casualty/reply`: "it's bleeding" brings the press-a-cloth line next, "my leg, I think
+it's broken" skips "where does it hurt", asks about moving, then says "keep it still" and never suggests
+walking. Bounds: lines only from `MOVES` (self-care lines cite `voice/firstaid.json`), at most 8 lines
+and 120 s, an unanswered line is repeated once, two unanswered lines end it as `unresponsive`, and an
+aftershock stops it with the protect-your-head line. Gemini (`coord/gem.py`, `fast_subagent`, one
+receipt per reply) may only pick the next move id, fill known fact keys and add a 12-word
+acknowledgement with no advice; anything else falls back to the local reader. Publishes `say`,
+`casualty/contact` and `log/decision` (heard -> understood -> said). In the sim the casualty answers from
+`sim/persona.py`, only when the Scout is within earshot.
+
+## Spoken approval (ref G7)
+`voice/approve.py`: while the planner waits on a `gate/request`, the operator's next push-to-talk turn
+can answer it. "approve" sends `gate/answer {"approved": true}`; "hold" sends `approved: false`, which
+the planner turns into "approval refused; Responder idle", so the robot's next physical move waits.
+Gemini (`fast_router`, only through `coord/gem.py`) classifies the turn, and the words said must agree:
+Gemini alone never approves, and a hold from either side wins. `GEMINI_MODE=off`: no spoken answers,
+use the console button. After 60 s with no answer nothing is sent and the planner's deadline expires
+the request. A button answer first means the voice does not answer again.

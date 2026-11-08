@@ -9,7 +9,8 @@ import mujoco
 SCENES = pathlib.Path(__file__).parent / "scenes"
 BACKUP = SCENES / "backup.xml"
 TOWER = SCENES / "tower.xml"
-NAMED = {"backup": BACKUP, "tower": TOWER}
+BUILDING = SCENES / "building.xml"
+NAMED = {"backup": BACKUP, "tower": TOWER, "building": BUILDING}
 
 
 def resolve(name=None):

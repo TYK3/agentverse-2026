@@ -19,7 +19,7 @@ import asyncio
 import os
 import sys
 
-from voice import command, typed
+from voice import approve, command, typed
 from voice import intent as intents
 
 FEATURE = "operator_voice"
@@ -63,7 +63,15 @@ def stand_in(why):
 
 
 async def handle_reply(bus, reply, heard, log_path=None):
-    """Turn the live model's reply for one push-to-talk turn into operator/command."""
+    """Turn the live model's reply for one push-to-talk turn into operator/command.
+
+    While the planner waits on a gate, "approve" / "hold" answers it instead (G7, voice/approve.py).
+    """
+    approval = approve.active()
+    if approval is not None and heard:
+        answer = await approval.heard(heard)
+        if answer is not None:
+            return None
     try:
         intent = intents.from_model_json(reply)
         how = model_id()

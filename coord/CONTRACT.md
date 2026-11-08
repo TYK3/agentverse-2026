@@ -12,6 +12,8 @@ Browser clients may publish only `operator/command`, `gate/answer` and `status/l
 connection with code 1008 before dispatch. The gateway forwards all topics except `sensors/scout`
 and replays its latest 200 forwarded envelopes to each new connection. This is bounded event
 history, not a complete map snapshot: perception also publishes full map snapshots every 5 s (T08).
+`map/points` is a separate latest-only frame: only one bounded cloud is retained and
+replayed after event history, without consuming its 200 slots (D1).
 
 The shapes below are JSON.
 Coordinates are metres in the scene frame; `cell` is a grid index `[i, j, k]`; `t` is seconds since the
@@ -20,9 +22,10 @@ run started. These are first drafts: the owning lane refines them by PR.
 ## Messages
 | Name | Producer | Consumer | Shape |
 |---|---|---|---|
-| `scene/loaded` | sim | all | `{"scene":"backup"|"photo"|"tower",\|"photo","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
+| `scene/loaded` | sim | all | `{"scene":"backup"|"photo"|"tower"|"building",|"photo"|"tower",\|"photo","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
 | `sensors/scout` | sim | perception, planner (L1 permits trace the LiDAR) | LiDAR ranges, camera frame, thermal grid, acoustic `{"bearing":deg,"level":0..1}`, pose |
 | `map/cells` | perception | planner, console | `{"t":0,"res":0.05,"cells":[{"cell":[i,j,k],"state":"seen"\|"inferred"\|"unknown","occupied":true}]}` |
+| `map/points` | hub from measured Scout depth | console (Y4) | `{"t":0.5,"res":0.05,"points":[[x,y,z],...],"points_from":[x,y,z]}`; max 2048 points/frame, at most 2 Hz, latest-only (D1) |
 | `map/casualties` | perception | planner, console | `[{"id":"c1","pos":[x,y,z],"confidence":0.8,"clues":["pose","thermal","sound"],"vitals":{"breathing_rate":14,"simulated":true}}]` |
 | `map/hazards` | perception | planner, console | `[{"cell":[i,j,k],"status":"stable"\|"at_risk"\|"collapsed","why":"unsupported wall b7","estimate":true}]` |
 | `scout/goto` | planner, perception | sim | `{"target":[x,y,z],"reason":"re-look at cell [3,4,0]"}` |
@@ -32,6 +35,7 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `gate/request` | planner | console | `{"id":"g4","kind":"risky_move"\|"enter_at_risk"\|"emergency_call","summary":"...","route":"r3"}` |
 | `gate/answer` | console | planner | `{"id":"g4","approved":true,"by":"operator"}` |
 | `responder/action` | planner | sim | `{"action":"move"\|"place_supply"\|"grip"\|"release","route":"r3","item":"water"\|"first_aid_kit"\|"radio"\|"bandage"\|"splint"\|"thermal_blanket","block":"b11"}` (`block` optional, Y2: grip/release that block, e.g. debris to clear or a board used as a splint) |
+| `responder/pose` | sim | console, planner | `{"t":12.3,"pos":[x,y,z],"yaw":1.57,"state":"idle"\|"moving"\|"arrived"\|"blocked"\|"frozen","route":"r3","carrying":["water"]}` (E2: every sim tick, 10 Hz; the Responder's actual pose, `route` null when none) |
 | `operator/command` | console (typed), voice (spoken) | planner, console | `{"text":"send water to the back room","source":"voice"\|"typed"}` (after any change of mind is resolved) |
 | `world/change` | sim | planner, perception, console | `{"kind":"aftershock"\|"block_added","t":0,"moved_blocks":["b7"]}` |
 | `world/debris` | sim | console, scoring (never perception: sim truth) | `{"t":0,"truth":true,"events":[{"id":"b8","kind":"moved"\|"fell"\|"settled","pos":[x,y,z],"moved_m":0.7,"drop_m":0.37}],"stacks":[{"ids":["b10","b8"],"risk":0.69,"worst":"b10","tilt_deg":30,"overhang":0.83,"motion_m":0,"top_z":0.72,"min_xy":[x,y],"max_xy":[x,y],"unstable":true}]}` (Y8) |
@@ -65,6 +69,17 @@ run started. These are first drafts: the owning lane refines them by PR.
   from them; without them it maps from the 2D LiDAR alone. Sending them in every other frame or less is enough.
   `points_from: [x,y,z]` (optional) is where the camera was for that frame, so perception can mark
   the space along each ray as free and tell moving debris from a new viewpoint (L5).
+- D1 projects only those measured `sensors/scout.points` into browser-read-only
+  `map/points`. `t` is the source frame time; coordinates and optional `points_from`
+  stay in scene metres, including negative basement heights. `res=0.05` is the
+  voxel deduplication resolution: each voxel retains an actual input point, never
+  an inferred centre or a simulation-truth surface. Each message is one frame
+  batch, not an accumulated mesh or a navigation safety map. The hub coalesces
+  bursts to the newest frame at <=2 Hz, holds at most one pending cloud plus one
+  reconnect cloud, and clears stale clouds on `scene/loaded`. Empty points clear
+  a cloud; missing/null points produce no cloud update. Raw sensor frames,
+  camera images, thermal and acoustic data remain local. A consumer that fuses
+  frames must bound its own storage and clear it on `scene/loaded`.
 - `map/hazards` cells may carry `exclusion: true`: a keep-out zone around debris whose motion the
   Scout sensed (L5). Routes never pass through it. It is a precaution from observed motion, not a
   collapse prediction, and it is lifted only after fresh scans of the zone show no further motion.

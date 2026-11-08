@@ -147,3 +147,45 @@ def test_start_publishes_only_contract_topics():
 
     want = ["permit/route", "log/decision"] if "permit/route" in messages.TOPICS else ["log/decision"]
     assert bus.sent == want
+
+
+def elsewhere(t_pos=(3.0, 3.0)):
+    """A sweep from far off the route that sees none of it (every ray stops after 0.2 m)."""
+    return {"pose": {"pos": [*t_pos, 0.075], "yaw": 0.0}, "lidar": [0.2] * 360}
+
+
+def gotos(out):
+    return [d for t, d in out if t == "scout/goto"]
+
+
+def test_relook_is_resent_until_the_route_is_re_earned():
+    """#52: an L5 zone revoked the route, cleared, and the Scout was taken elsewhere: keep asking."""
+    ps, _ = verified_permits()
+    ps.on_hazards([{"cell": [12, 10, 0], "status": "stable", "why": "slab motion", "estimate": True,
+                    "exclusion": True}], 2.0)
+    assert ps.on_hazards([], 3.0) == []                   # zone lifted: no shift or hazard left to aim at
+    sent = []
+    for k in range(40):                                   # 20 s of Scout frames from elsewhere, 2 Hz
+        sent += [(2.0 + k * 0.5, g) for g in gotos(ps.on_sensors(elsewhere(), 3.0 + k * 0.5))]
+    assert len(sent) == 2, sent                           # at most once every RELOOK_EVERY_S
+    assert sent[1][0] - sent[0][0] >= permit.RELOOK_EVERY_S
+    target = sent[0][1]["target"]
+    nearest = max(ROUTE, key=lambda c: c[0])              # the route end nearest (3.0, 3.0)
+    assert target[:2] == [round((nearest[0] + 0.5) * RES, 3), round((nearest[1] + 0.5) * RES, 3)]
+    assert "r1" in sent[0][1]["reason"]
+    out = ps.on_sensors(sweep(), 30.0)                    # the Scout finally scans the whole route
+    assert out[0][1]["granted"] is True
+    assert all(gotos(ps.on_sensors(elsewhere(), 30.0 + k)) == [] for k in range(1, 20))
+
+
+def test_only_the_newest_revoked_route_drives_the_scout():
+    ps, _ = verified_permits()
+    ps.on_route_proposed({"id": "r2", "robot": "responder", "cells": [[i, 20, 0] for i in range(10, 30)],
+                          "goal": "water", "model": "x"})
+    ps.on_route_verified({"id": "r2", "ok": True, "unstable_cells": [], "detail": ""}, 1.5)
+    zone = [{"cell": [12, 10, 0], "status": "stable", "why": "m", "estimate": True, "exclusion": True},
+            {"cell": [12, 20, 0], "status": "stable", "why": "m", "estimate": True, "exclusion": True}]
+    ps.on_hazards(zone, 2.0)
+    ps.on_hazards([], 3.0)
+    sent = [g for k in range(40) for g in gotos(ps.on_sensors(elsewhere(), 3.0 + k * 0.5))]
+    assert sent and all("route r2" in g["reason"] for g in sent)
