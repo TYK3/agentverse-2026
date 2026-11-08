@@ -70,3 +70,13 @@ Owner: see the owner table in `AGENTS.md`. Only this lane's agent edits files he
 - Speed: braced pieces are gravity-compensated and do not collide with each other or the plate
   (collision bits in the generator), so a 0.1 s tick takes about 18 ms (it was 226 ms, slower than real time).
 - Light debris the Responder can clear: b19 (lean-to closure) and b24 (in the breach), both under 2 kg.
+
+## Recording a real run (ref S1)
+- `SIM_RECORD=runs/live.jsonl uvicorn coord.hub:app` writes the run as JSONL, one
+  `{"t": sim s, "wall": s, "topic": ..., "data": ...}` per line (the #52 runner's format): a
+  `record/meta` line, then every contract topic as delivered (`scene/loaded` first, maps, casualties,
+  permits, Gemini receipts, routes, `world/change`, ...), and `sim/truth` after every world tick (10 Hz
+  of sim time): Scout and Responder `pos` [x, y, z] and `yaw`, the Scout's sensor origin and state, the
+  Responder's state and route, true casualty positions, whether the ground is shaking.
+- Camera frames and depth points are dropped from `sensors/scout`; `SIM_RECORD_FULL=1` keeps them.
+- `python -m sim.recorder summary runs/live.jsonl`: topics, counts, sim-time span, truth rate.
