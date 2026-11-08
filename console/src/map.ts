@@ -776,6 +776,32 @@ export class MapViewer {
   }
 
   /**
+   * L1: Move permission revoked or granted on sensed change
+   */
+  public onPermitRoute(payload: { route: string; granted: boolean; t: number; reason: string }): void {
+    if (!payload) return;
+    if (!payload.granted) {
+      // Permission revoked: turn active route into warning red alert color
+      this.activeRouteGroup.traverse(obj => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+          obj.material.color.setHex(0xef4444);
+          obj.material.emissive.setHex(0xb91c1c);
+        }
+      });
+      this.showAftershockBanner(`⚠️ MOVE PERMISSION REVOKED on ${payload.route}: ${payload.reason}`);
+    } else {
+      // Permission granted: restore solid blue
+      this.activeRouteGroup.traverse(obj => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+          obj.material.color.setHex(0x2563eb);
+          obj.material.emissive.setHex(0x1d4ed8);
+        }
+      });
+      this.showReplanReasonBanner(payload.route, payload.reason || 'move permission granted');
+    }
+  }
+
+  /**
    * On world/change:
    * Show banner "Aftershock detected: b7 moved. Re-scanning" and flash moved blocks red.
    */

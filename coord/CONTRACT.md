@@ -21,7 +21,7 @@ run started. These are first drafts: the owning lane refines them by PR.
 | Name | Producer | Consumer | Shape |
 |---|---|---|---|
 | `scene/loaded` | sim | all | `{"scene":"backup"|"photo"|"tower",\|"photo","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
-| `sensors/scout` | sim | perception | LiDAR ranges, camera frame, thermal grid, acoustic `{"bearing":deg,"level":0..1}`, pose |
+| `sensors/scout` | sim | perception, planner (L1 permits trace the LiDAR) | LiDAR ranges, camera frame, thermal grid, acoustic `{"bearing":deg,"level":0..1}`, pose |
 | `map/cells` | perception | planner, console | `{"t":0,"res":0.05,"cells":[{"cell":[i,j,k],"state":"seen"\|"inferred"\|"unknown","occupied":true}]}` |
 | `map/casualties` | perception | planner, console | `[{"id":"c1","pos":[x,y,z],"confidence":0.8,"clues":["pose","thermal","sound"],"vitals":{"breathing_rate":14,"simulated":true}}]` |
 | `map/hazards` | perception | planner, console | `[{"cell":[i,j,k],"status":"stable"\|"at_risk"\|"collapsed","why":"unsupported wall b7","estimate":true}]` |
@@ -36,11 +36,15 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `world/change` | sim | planner, perception, console | `{"kind":"aftershock"\|"block_added","t":0,"moved_blocks":["b7"]}` |
 | `world/debris` | sim | console, scoring (never perception: sim truth) | `{"t":0,"truth":true,"events":[{"id":"b8","kind":"moved"\|"fell"\|"settled","pos":[x,y,z],"moved_m":0.7,"drop_m":0.37}],"stacks":[{"ids":["b10","b8"],"risk":0.69,"worst":"b10","tilt_deg":30,"overhang":0.83,"motion_m":0,"top_z":0.72,"min_xy":[x,y],"max_xy":[x,y],"unstable":true}]}` (Y8) |
 | `log/decision` | planner | console | `{"t":0,"perception":"...","model":"...","physics":"...","outcome":"...","reason":"one line"}` |
+| `permit/route` | planner | sim (Responder stops and refuses moves while `granted` is false), console (evidence per action) | `{"route":"r3","granted":false,"t":12.3,"reason":"revoked: LiDAR hit inside the route at 2 cell(s)","evidence":[{"kind":"verified"\|"clear"\|"shift"\|"hazard"\|"fresh_scan","detail":"...","t":12.3}]}` (L1: revoked only by sensed change, re-earned only by a fresh scan of every route cell) |
 | `status/link` | sim, planner or console offline toggle | planner, console | `{"online":false}` |
 | `status/budget` | planner | console | `{"device":"<open>","mem_mb":0,"model":"gemma-4-e2b","ms_per_step":0,"limit":{...}}` |
 | `say` | planner | voice, console (shown as text) | `{"to":"casualty"\|"operator","intent":"first_aid"\|"guide_exit"\|"reassure","text":"...","lang":"auto"}` |
+| `casualty/reply` | sim (persona answers a `say` to the casualty), voice (mic speech-to-text, later) | voice, console | `{"id":"c1","t":12.3,"text":"yes, my leg hurts","source":"sim"\|"mic"\|"typed","level":0.6}` (G3: what one casualty said back, in English; `level` 0..1 optional loudness) |
+| `casualty/contact` | voice | planner (supply choice, Y2), console, report | `{"id":"c1","t":40.1,"status":"talking"\|"done"\|"unresponsive"\|"stopped","turns":4,"max_turns":8,"facts":{"responsive":true,"hurt":["leg"],"bleeding":false},"injuries":["leg hurts, may be broken"],"receipts":["gem-..."]}` (G3: the bounded dialogue so far; `facts` values are true/false/null or lists of short strings; `receipts` are coord.gem call ids) |
 | `report/handover` | planner | console | Map, casualties with confidence, hazards, routes and re-plans, supplies delivered, human approvals |
 | `status/gemini` | hub | console | `{"mode":"off"\|"replay"\|"live","calls_last_hour":0,"stand_ins":["vision","tts"]}`, published every 2 s from `coord.gem.status()` |
+| `gemini/receipt` | hub from `coord.gem` | console, report | Completed call receipt (G1), shape below; browser read-only |
 
 ## T02 schema details (proposed, #10)
 
@@ -79,7 +83,32 @@ run started. These are first drafts: the owning lane refines them by PR.
   "stand_ins":[]}`. The hub publishes `coord.gem.status()` every 2 s once T26 is available; it
   makes no model calls. Until T26 merges, the publisher is skipped with a logged warning.
 
+## G1 Gemini receipts
+
+`gemini/receipt` has `id` (unique `gem-...` invocation ID), `schema_version: 1`,
+`started_at` (UTC ISO timestamp), `feature`, `model_key`, nullable
+`model_requested`/`model_reported`, `mode: off|replay|live`,
+`source: none|disabled|cache|live`, `outcome: ok|off|error|cap_reached`, nullable
+`route` (exactly the `permit/route.route` ID) and caller-owned `evidence_ids: [str]`.
+It also includes nullable `provider_id`, `source_call_id`, `usage` (provider token
+counts, nonnegative integers), `request_sha256`/`output_sha256`, `cache_write_error`,
+nonnegative `elapsed_ms`, and `live_attempts` counting the `sdk_called: true`
+entries in `attempts: [{attempt: int>=1, sdk_called: bool, outcome: ok|error,
+error_type: str|null}]`. Optional `error_type` contains the exception type only.
+
+Replay has a new invocation ID and zero live attempts, with no current provider
+ID/usage. Optional `cache_origin: {id,provider_id,model_requested,model_reported,
+usage}` attributes the original live call only when its cached output hash
+matches; its fields are nullable for legacy caches. Disabled calls have outcome
+`off`, no provider ID/usage and zero attempts. No prompt, media, model response
+text or exception text is carried. No receipt grants movement; physics and L1
+permission evidence remain separate and join by `route`. The hub forwards each
+completed receipt once per publisher lifetime; its existing 200-event replay bound
+still applies. This does not claim receipt coverage for existing direct Live
+session callers that only use `count_call()`.
+
 ## Rules the shapes encode
+
 - Only `seen` cells count as confirmed safe. A route through `inferred` or `unknown` cells is a re-look,
   not an act.
 - No message carries a face or an image crop of a person; casualties are positions and confidences.

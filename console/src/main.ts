@@ -75,6 +75,11 @@ on('route/verified', data => {
   mapViewer.onRouteVerified(data as RouteVerifiedPayload);
 });
 
+// Task L1: Move permission & proof evidence
+on('permit/route', data => {
+  mapViewer.onPermitRoute(data as any);
+});
+
 on('world/change', data => {
   const change = data as WorldChangePayload;
   mapViewer.onWorldChange(change);

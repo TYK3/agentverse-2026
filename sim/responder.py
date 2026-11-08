@@ -11,12 +11,19 @@ Messages (coord/CONTRACT.md):
 - in  `gate/request`     a risky_move / enter_at_risk request marks its route as needing approval
 - in  `gate/answer`      approved: true unlocks that route
 - in  `responder/action` move | place_supply | grip | release; actions that arrive while a move is
-                         running are queued and run in order when it ends (there is no completion message)
+                         running are queued and run in order when it ends (there is no completion message).
+                         Y2: with `block`, grip/release act on that block (release sets debris aside, off
+                         the route) and place_supply sets a held block down in front, toward the casualty
+                         (found material, e.g. a board used as a splint)
 - in  `world/change`     freeze in place, drop the current move and the queue (wait for a new responder/action)
+- in  `permit/route`     L1: granted false stops a move on that route at once and refuses new moves on it
+                         until a granted true arrives (routes with no permit message behave as before)
 - out `log/decision`     every action's outcome; refusals say outcome "refused" and why
 
-Clearing debris is `grip_block(block_id)` / `release_block(block_id)`: responder/action's `item` only
-names supplies, so the contract has no way to ask for a block yet (flagged on the board).
+Clearing debris is `grip_block(block_id)` / `release_block(block_id)`, reached from responder/action's
+optional `block` (Y2). Two mass limits: a block slid aside to clear a route may be up to LIGHT_KG; a block
+carried to a casualty (place_supply) must be within the arm's payload, ARM_PAYLOAD_KG (Kinova Gen3 lite,
+0.5 kg, docs/hardware.md).
 """
 
 import asyncio
@@ -34,11 +41,15 @@ RAY_HEIGHTS = (0.03, 0.09)  # world z of the collision rays (low rubble and wall
 ARRIVE = 0.005              # metres
 REACH = 0.45                # a supply or block further than this from the Responder centre cannot be gripped
 LIGHT_KG = 2.0              # blocks at or above this mass are too heavy to clear
-SUPPLIES = ("water", "first_aid_kit", "radio")
+ARM_PAYLOAD_KG = 0.5        # found material carried to a casualty: the real arm's rated payload (docs/hardware.md)
+SUPPLIES = ("water", "first_aid_kit", "radio", "bandage", "splint", "thermal_blanket")
+FOUND_USES = ("splint",)    # kit items a found block can stand in for: gripping one for this is a carry
 RISKY_KINDS = ("risky_move", "enter_at_risk")
 
 # Held poses in the Responder frame: supplies sit in deck slots, a gripped block is lifted above them.
-SLOTS = {"water": (-0.1, 0.0, 0.11), "first_aid_kit": (0.0, 0.0, 0.08), "radio": (0.1, 0.0, 0.095)}
+SLOTS = {"water": (-0.1, 0.0, 0.11), "first_aid_kit": (0.0, 0.0, 0.08), "radio": (0.1, 0.0, 0.095),
+         # Y2 kit, stacked: blanket on the first aid kit, splint on the blanket, bandage on the radio
+         "thermal_blanket": (0.0, 0.0, 0.122), "splint": (0.0, 0.0, 0.137), "bandage": (0.1, 0.0, 0.156)}
 BLOCK_SLOT_Z = 0.18         # above the tallest supply (water top is 0.17 over the Responder centre); add the block's half height
 PLACE_AHEAD = 0.08          # place_supply sets the item down this far in front of the chassis
 
@@ -76,10 +87,12 @@ class Responder:
         self.risky = {}            # gate request id -> route id needing approval
         self.approved = set()      # route ids with an approved gate/answer
         self.needs_gate = set()    # route ids with an open risky gate request
+        self.revoked = set()       # route ids whose move permit (L1, permit/route) is revoked
         self.path = []             # remaining (x, y) waypoints of the current move
         self.route = None
         self.state = "idle"        # idle | moving | arrived | blocked | frozen
         self.queue = []            # responder/action messages waiting for the current move to finish
+        self.failed_routes = set()  # routes whose move was refused: their other actions are refused too
         self.log = []              # every log/decision this Responder published
 
     # ---- pose -------------------------------------------------------------------
@@ -153,6 +166,19 @@ class Responder:
             self._decide("frozen", f"world/change {msg.get('kind', '')}: stopped, dropped {dropped} queued action(s), "
                                    "waiting for a new action")
 
+    def on_permit(self, msg):
+        """L1: a revoked move permit stops the Responder on that route; a re-earned one lifts the hold."""
+        route = msg.get("route")
+        if msg.get("granted"):
+            self.revoked.discard(route)
+            return
+        self.revoked.add(route)
+        if self.state == "moving" and self.route == route:
+            dropped = len(self.queue)
+            self.path, self.queue, self.state = [], [], "frozen"
+            self._decide("frozen", f"move permit for {route} revoked ({msg.get('reason', '')}): stopped, "
+                                   f"dropped {dropped} queued action(s)")
+
     def on_action(self, msg):
         """Run a responder/action now, or queue it behind the current move (the planner sends a whole
         move -> grip -> place_supply -> release sequence at once and there is no completion message)."""
@@ -174,14 +200,40 @@ class Responder:
         action, item, route = msg.get("action"), msg.get("item"), msg.get("route")
         tag = f"{action} {item}"
         if action == "move":
-            return self.move(route)
+            out = self.move(route)
+            if out["outcome"] == "refused":
+                self.failed_routes.add(route)
+            return out
+        if route in self.failed_routes:
+            # Never place or drop a supply where the Responder did not drive (its move was refused).
+            return self._refuse(f"move on route {route} was refused; {action} {item} not done", tag)
+        block = msg.get("block")
+        if block:
+            return self._run_block(action, block, item)
         if item not in SUPPLIES:
             return self._refuse(f"unknown item {item!r}", tag)
+        if self._eq("carry_" + item) < 0:
+            return self._refuse(f"{item} is not loaded in this scene's kit", tag)
         if action == "grip":
             return self.grip_supply(item)
         if action in ("place_supply", "release"):
             return self.place_supply(item, tag)
         return self._refuse(f"unknown action {action!r}", tag)
+
+    def _run_block(self, action, block, item=None):
+        """Y2: grip / release / place_supply on a named block. A grip whose `item` is one a block can stand
+        in for (FOUND_USES, e.g. splint) is found material for a casualty, so it must fit the arm's
+        payload; any other item (the contract always names one) means the block is debris to clear."""
+        carry = item in FOUND_USES
+        if action == "grip":
+            return self.grip_block(block, carry=carry)
+        if action == "release":
+            if carry and self._eq("grip_" + block) >= 0 and not self.holding(block):   # release after place_supply
+                return self._decide("done", f"gripper open, not holding {block}", f"release {block}")
+            return self.release_block(block)
+        if action == "place_supply":
+            return self.place_block(block, item)
+        return self._refuse(f"unknown action {action!r}", f"{action} {block}")
 
     # ---- actions ----------------------------------------------------------------
     def move(self, route_id):
@@ -189,6 +241,8 @@ class Responder:
         cells = self.routes.get(route_id)
         if not cells:
             return self._refuse(f"no route/proposed with id {route_id!r}", tag)
+        if route_id in self.revoked:
+            return self._refuse(f"move permit for route {route_id} is revoked until a fresh scan", tag)
         if route_id in self.needs_gate and route_id not in self.approved:
             return self._refuse(f"route {route_id} is risky and has no approved gate/answer", tag)
         self.path = [cell_centre(c) for c in cells]
@@ -233,14 +287,17 @@ class Responder:
         mujoco.mj_forward(self.m, self.d)
         return float(xy[0]), float(xy[1])
 
-    def grip_block(self, block_id):
-        """Clear light debris: hold block `block_id` above the deck. Refuses blocks of LIGHT_KG or more."""
+    def grip_block(self, block_id, carry=False):
+        """Hold block `block_id` above the deck. To clear debris it must be under LIGHT_KG; to carry it to
+        a casualty (`carry`, found material) it must be within ARM_PAYLOAD_KG."""
         tag = f"grip {block_id}"
         try:
             body = self.m.body(block_id).id
         except KeyError:
             return self._refuse(f"no block {block_id!r}", tag)
         mass = float(self.m.body_mass[body])
+        if carry and mass > ARM_PAYLOAD_KG:
+            return self._refuse(f"{block_id} is {mass:.2f} kg; the arm carries at most {ARM_PAYLOAD_KG} kg", tag)
         if mass >= LIGHT_KG:
             return self._refuse(f"{block_id} is {mass:.1f} kg; only blocks under {LIGHT_KG} kg can be cleared", tag)
         eq = self._eq("grip_" + block_id)
@@ -265,6 +322,21 @@ class Responder:
         left = np.array([-math.sin(self.yaw), math.cos(self.yaw)])
         x, y = self._put_down(block_id, self.pos[:2] + left * (HALF_WIDTH + max(sx, sy) + 0.03))
         return self._decide("done", f"released {block_id} at [{x:.2f}, {y:.2f}]", tag)
+
+    def place_block(self, block_id, item=None):
+        """Y2: set a held block down in front of the gripper, toward the casualty (found material)."""
+        tag = f"place_supply {block_id}"
+        if not self.holding(block_id):
+            return self._refuse(f"not holding {block_id}", tag)
+        if self.state == "moving":
+            return self._refuse("still moving; place supplies only when stopped", tag)
+        self.d.eq_active[self._eq("grip_" + block_id)] = 0
+        body = self.m.body(block_id).id
+        reach = float(max(self.m.geom_size[self.m.body_geomadr[body]][:2]))
+        fwd = np.array([math.cos(self.yaw), math.sin(self.yaw)])
+        x, y = self._put_down(block_id, self.pos[:2] + fwd * (HALF_LEN + PLACE_AHEAD + reach))
+        use = f" as a {item.replace('_', ' ')}" if item in FOUND_USES else ""
+        return self._decide("done", f"placed {block_id}{use} at [{x:.2f}, {y:.2f}]", tag)
 
     # ---- motion -----------------------------------------------------------------
     def free_ahead(self, heading, step):
@@ -346,4 +418,5 @@ def attach(world, bus):
     bus.subscribe("gate/answer", r.on_gate_answer)
     bus.subscribe("responder/action", r.on_action)
     bus.subscribe("world/change", r.on_world_change)
+    bus.subscribe("permit/route", r.on_permit)
     return r

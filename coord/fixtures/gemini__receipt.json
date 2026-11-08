@@ -1,0 +1,27 @@
+{
+  "topic": "gemini/receipt",
+  "data": {
+    "id": "gem-development-example",
+    "schema_version": 1,
+    "started_at": "2026-11-08T00:00:00+00:00",
+    "feature": "spatial_inspection",
+    "model_key": "embodied_reasoning",
+    "model_requested": "gemini-robotics-er-2-preview",
+    "model_reported": null,
+    "mode": "off",
+    "source": "disabled",
+    "outcome": "off",
+    "route": "r3",
+    "evidence_ids": ["scan-development-example"],
+    "provider_id": null,
+    "source_call_id": null,
+    "usage": null,
+    "attempts": [],
+    "live_attempts": 0,
+    "request_sha256": null,
+    "output_sha256": null,
+    "cache_write_error": null,
+    "elapsed_ms": 0.1,
+    "error_type": "GeminiOff"
+  }
+}

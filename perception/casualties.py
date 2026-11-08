@@ -9,6 +9,12 @@ Confidence = 0.4*thermal + 0.3*sound + 0.3*vision, each clue scored 0..1.
 Vision: the camera frame goes to gemini-3.8-flash through coord/gem.py, at most once a second and
 only when thermal or sound already suggests someone. With GEMINI_MODE=off (or no coord/gem.py) it is
 skipped and marked as a stand-in. The frame is dropped right after the call: never stored or sent.
+Offline camera check (Z3): with Gemini off, the Scout's own camera frame is checked locally instead,
+also at most once a second and only while thermal sees someone: the largest warm-coloured blob (the
+sim's casualty marker colour; a real robot would run a local person detector here) scores as vision
+only if it is in the same direction as the thermal peak (within AGREE_DEG) and big enough; lying
+(wider than tall) scores 1.0, otherwise 0.7. A red object with no heat behind it (the Responder's
+first aid kit) does not count. So thermal + sound + camera agreeing reach >= 0.8 with Gemini off.
 """
 
 import json
@@ -30,6 +36,10 @@ MIN_ANGLE = math.radians(30.0)   # rays crossing at a shallower angle amplify be
 MERGE = 0.6           # metres: points this close are the same casualty
 VISION_PERIOD = 1.0   # seconds between vision calls
 VITALS = {"breathing_rate": 14, "simulated": True}
+CAM_FOVY = math.radians(60.0)   # sim/scenes/backup.xml scout_cam; horizontal FOV follows the frame's aspect
+AGREE_DEG = 12.0      # camera blob and thermal peak must point within this many degrees of each other
+MIN_BLOB = 0.002      # blob area as a fraction of the frame, below this it is noise
+CAM_STEP = 4          # check every 4th pixel each way (80x60 for a 320x240 frame)
 PROMPT = ('Is there a person-shaped figure lying or sitting in this image? Answer JSON only: '
           '{"person": bool, "bbox": [x,y,w,h], "posture": "lying|sitting|standing|unknown"}. '
           'Do not describe faces.')
@@ -107,6 +117,8 @@ class Casualties:
         self.suggested = False                  # the last frame had a thermal or sound clue
         self.pending = False                    # a vision call is in flight
         self.dirty = False                      # map/casualties changed since it was last published
+        self.thermal_rel = None                 # bearing (radians, + left) of this frame's thermal peak
+        self.last_local = -math.inf             # clock() of the last offline camera check
 
     def on_sensors(self, data):
         """Fuse one sensors/scout frame's thermal and sound; return True if map/casualties changed."""
@@ -115,10 +127,12 @@ class Casualties:
         thermal_score = sound_score = 0.0
 
         hot = thermal_region(data["thermal"]) if data.get("thermal") else None
+        self.thermal_rel = None
         if hot:
             peak, col = hot
             thermal_score = min(1.0, (peak - BACKGROUND) / (0.8 - BACKGROUND))
-            bearing = wrap(yaw + column_bearing(col, len(data["thermal"][0])))
+            self.thermal_rel = column_bearing(col, len(data["thermal"][0]))
+            bearing = wrap(yaw + self.thermal_rel)
             self._cross((xy, bearing), list(self.thermal_rays) + list(self.sound_rays))
             self.thermal_rays.append((xy, bearing))
             r = _range_at(data.get("lidar"), bearing)
@@ -141,7 +155,25 @@ class Casualties:
         estimate = self._estimate()
         if estimate is None:
             return False
-        return self._update(estimate, pos[2], thermal_score, sound_score)
+        changed = self._update(estimate, pos[2], thermal_score, sound_score)
+        return self._local_vision(data, estimate) or changed
+
+    def _local_vision(self, data, estimate):
+        """Offline camera check (Z3), only while Gemini vision is off; True if a casualty's score rose."""
+        camera = data.get("camera")
+        vision_on = self.vision_on() if callable(self.vision_on) else bool(self.vision_on)
+        if (vision_on or camera is None or self.thermal_rel is None
+                or self.clock() - self.last_local < VISION_PERIOD):
+            return False
+        self.last_local = self.clock()
+        score = local_person(camera["b64"] if isinstance(camera, dict) else camera, self.thermal_rel)
+        if not score:
+            return False
+        c = min(self.found, key=lambda f: math.dist(f["pos"], estimate), default=None)
+        if c is None or math.dist(c["pos"], estimate) >= MERGE or score <= c["vision"]:
+            return False
+        c["vision"] = score
+        return True
 
     def vision_due(self, data):
         """The frame's base64 JPEG if a vision call is due now (a clue suggests someone, 1 s apart), else None.
@@ -235,6 +267,57 @@ def _range_at(lidar, bearing):
     n = len(lidar)
     k = round((bearing % (2 * math.pi)) / (2 * math.pi) * n) % n
     return min(lidar[(k + d) % n] for d in (-1, 0, 1))
+
+
+def local_person(b64, thermal_rel):
+    """Offline camera score: 1.0 lying / 0.7 upright for a warm-coloured blob in the thermal direction, else 0.
+
+    The frame is decoded, checked and dropped here; nothing is stored. Needs Pillow; without it, 0.
+    """
+    try:
+        import base64
+        import io
+
+        from PIL import Image
+        img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+    except Exception:  # noqa: BLE001 -- no Pillow, or a bad frame: no camera clue
+        return 0.0
+    width, height = img.size
+    px = img.load()
+    cols, rows = range(0, width, CAM_STEP), range(0, height, CAM_STEP)
+    warm = set()
+    for j, y in enumerate(rows):
+        for i, x in enumerate(cols):
+            r, g, b = px[x, y]
+            if r > 140 and r > 1.5 * g and r > 1.5 * b:
+                warm.add((i, j))
+    best, seen = None, set()
+    for start in warm:
+        if start in seen:
+            continue
+        blob, stack = [], [start]
+        seen.add(start)
+        while stack:
+            i, j = stack.pop()
+            blob.append((i, j))
+            for n in ((i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)):
+                if n in warm and n not in seen:
+                    seen.add(n)
+                    stack.append(n)
+        if best is None or len(blob) > len(best):
+            best = blob
+    if not best or len(best) < MIN_BLOB * len(cols) * len(rows):
+        return 0.0
+    xs, ys = [i for i, _ in best], [j for _, j in best]
+    blob_w, blob_h = max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
+    # Agreement: the blob covers the thermal direction (within AGREE_DEG). Its centre alone is not
+    # used: close up the body fills the frame and is cut off at the edge, which moves the centre.
+    fov_h = 2 * math.atan(math.tan(CAM_FOVY / 2) * width / height)
+    col = (0.5 - thermal_rel / fov_h) * len(cols)              # thermal direction as a column (+ left)
+    margin = math.radians(AGREE_DEG) / fov_h * len(cols)
+    if not (min(xs) - margin <= col <= max(xs) + 1 + margin):
+        return 0.0
+    return 1.0 if blob_w >= 1.3 * blob_h else 0.7
 
 
 def gem_on():

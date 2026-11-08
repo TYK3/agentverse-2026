@@ -102,7 +102,7 @@ def test_scripted_demo_delivers_water_and_clears_b11():
     assert water[2] < 0.1, "water should be on the floor"
     b11 = pos_of(world, "b11")
     assert not (1.15 < b11[0] < 1.35 and 0.3 < b11[1] < 0.9), "b11 should be out of the room 2/3 gap"
-    assert r.status()["carrying"] == ["first_aid_kit", "radio"]
+    assert r.status()["carrying"] == ["first_aid_kit", "radio", "bandage", "splint", "thermal_blanket"]
 
 
 def test_never_overlaps_a_block_during_the_demo():
@@ -117,7 +117,7 @@ def test_never_overlaps_a_block_during_the_demo():
 
 def test_refuses_to_drive_through_a_wall(world, resp):
     # Into room 1, then east straight at interior wall b6 (x = 0)
-    route(resp, "rw", [(-0.48, -2.1), (-0.48, -0.6), (0.6, -0.6)])
+    route(resp, "rw", [(-0.48, -1.77), (-0.48, -0.6), (0.6, -0.6)])
     resp.on_action({"action": "move", "route": "rw", "item": "water"})
     drive(world, resp)
     assert resp.state == "blocked"
@@ -327,3 +327,37 @@ def test_sim_loop_steps_the_responder_without_its_own_task():
     moved, after_cancel = asyncio.run(go())
     assert moved > 0.02, "the sim loop should drive the Responder"
     assert after_cancel == 0.0, "cancelling world.task stops the Responder too"
+
+
+def test_no_supply_is_placed_on_a_route_whose_move_was_refused(world, resp):
+    """Real-lane run: move refused (route unknown), then place_supply must not drop water at the start."""
+    for action in ("move", "place_supply", "release"):
+        resp.on_action({"action": action, "route": "r9", "item": "water"})
+    assert [e["outcome"] for e in resp.log] == ["refused", "refused", "refused"]
+    assert resp.holding("water")
+
+
+def test_responder_hears_route_proposed_before_the_physics_check():
+    """sim.start: the Responder must store a route before route/verified can trigger its dispatch."""
+    import sim
+
+    class Bus:
+        def __init__(self):
+            self.order = []
+            self.subs = {}
+
+        def subscribe(self, topic, fn):
+            self.subs.setdefault(topic, []).append(fn)
+            if topic == "route/proposed":
+                self.order.append(getattr(fn, "__self__", fn))
+
+        async def publish(self, topic, data):
+            pass
+
+    async def go():
+        bus = Bus()
+        world = await sim.start(bus, loop=False)
+        return bus, world
+
+    bus, world = asyncio.run(go())
+    assert bus.order[0] is world.responder

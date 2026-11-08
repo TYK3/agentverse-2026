@@ -86,3 +86,9 @@ voice (spoken commands) --> planner        planner (say) --> voice (operator, ca
 - Sat 7 Nov: sim T05 and console/offline lanes requested a `block_added` world change
   and browser `status/link` toggle. Contract proposal PR #59 keeps `{kind,t,moved_blocks}`
   for both world-change kinds and requires a strict boolean `online` for the toggle.
+- Sun 8 Nov: G1 proposes per-invocation Gemini receipts from `coord/gem.py` while
+  preserving `ask()` text results. Receipt `route` matches `permit/route.route`;
+  caller-owned `evidence_ids` and the unique `gem-...` ID link observations and calls.
+  Replay is explicitly cached, token usage stays unknown when unavailable, and
+  each real retry consumes the hourly cap. Receipts do not grant movement; the
+  shared API is for human review and L1/G5 linkage alignment before merge.

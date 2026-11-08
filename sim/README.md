@@ -81,10 +81,10 @@ Owner: see the owner table in `AGENTS.md`. Only this lane's agent edits files he
 - The collapse is simulated, not placed: the east columns and walls have failed; their cracked hinges
   give way, the east floors pancake onto the furniture, seeded rubble rains down, everything settles.
   Casualties c2-c4 go into covered voids found by ray tests; c1 (silent) stands in the west room.
-- Real time: the settled ruins (columns, slabs, stair, about 250 rubble chunks) become fixed parts of the
+- Real time: the settled ruins (columns, slabs, stair, about 200 rubble chunks) become fixed parts of the
   floor plate: they collide, appear in `scene/loaded` and shake with the ground, but cost no dynamics.
   The middle bay's standing slabs and walls and the cracked columns beside the collapse stay live, with
-  welds at 1.5x their static load: the aftershock breaks them for real. Live bodies sleep when still.
+  welds at 2x their peak load at rest: the aftershock breaks them for real. Live bodies sleep when still.
 - The true-scale Scout (`scout/scout`): `World` uses its LiDAR site as the sensor origin (`pose.pos`
   is that point, 0.26 m up), its `depth_cam` for frames, and its footprint for the drive check.
 - The Responder model is the true-scale one, but `sim/responder.py` still uses the small robot's
