@@ -72,6 +72,18 @@ def test_step_clock_publishes_the_same_stream_every_run(monkeypatch):
     assert len(streams[0]) == 60   # responder/pose + sensors/scout per tick
 
 
+@pytest.mark.parametrize("clock_name", ["wall", "step"])
+def test_both_clocks_run_a_scout_only_world(monkeypatch, clock_name):
+    monkeypatch.setenv("SIM_CLOCK", clock_name)
+    world, bus = FakeWorld(ticks=3), FakeBus()
+    world.responder = None
+
+    _run(world, bus)
+
+    assert world.t == pytest.approx(0.3)
+    assert bus.seen == [("sensors/scout", pytest.approx(t)) for t in (0.1, 0.2, 0.3)]
+
+
 def test_default_clock_still_paces_to_real_time(monkeypatch):
     monkeypatch.delenv("SIM_CLOCK", raising=False)
     assert sim.clock() == "wall"
