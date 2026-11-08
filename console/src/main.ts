@@ -1,4 +1,5 @@
 import './style.css';
+import { setupLook } from './look';
 import { connect, on } from './bus';
 import {
   MapViewer,
@@ -125,5 +126,8 @@ if (isFakeMode) {
 if (isBenchmarkMode) {
   mapViewer.generate100kBenchmark();
 }
+
+// Blender models, PBR lighting, dust; robots follow live poses (BLENDER-LOOK)
+setupLook(mapViewer);
 
 connect();
