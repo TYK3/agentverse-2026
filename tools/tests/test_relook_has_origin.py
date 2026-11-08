@@ -21,6 +21,7 @@ Block poses are used only by the test world, to move x1, never by perception or 
 
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -106,7 +107,7 @@ def revocations(log, route):
 
 
 def route_of(goto):
-    return goto["data"]["reason"].rsplit("route ", 1)[-1]
+    return re.search(r"on route (r\d+)", goto["data"]["reason"]).group(1)
 
 
 def origin(log, goto):
