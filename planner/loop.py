@@ -45,10 +45,11 @@ class Loop:
 
     def __init__(self, bus, router: RoutePlanner, *, gem=None, clock=time.monotonic,
                  review_timeout=REVIEW_TIMEOUT_S, budget=None, places=None, start_cell=None, interpret=None,
-                 gate_timeout=GATE_TIMEOUT_S):
+                 gate_timeout=GATE_TIMEOUT_S, defer_approved_actions=False):
         if not 0 < gate_timeout <= GATE_TIMEOUT_S:
             raise ValueError("gate timeout must be positive and at most 60 seconds")
         self.bus, self.router = bus, router
+        self.defer_approved_actions = defer_approved_actions
         self.budget = budget  # planner.budget.Budget: times each local step for status/budget
         self.places = places or {}  # operator place name -> goal cell, for operator/command
         self.start_cell = start_cell  # () -> the Responder's current cell
@@ -332,7 +333,15 @@ class Loop:
                                   f"{req['summary']}; operator must place the call; no call placed")
         if data.get("approved") is True and self.route and req["route"] == self.route["id"]:
             await self.log(f"operator approved {req['id']}", "act", f"human approved {self.route['id']}")
-            return await self.execute(approved_kind=req["kind"], expected_route=req["route"])
+            dispatch = self.execute(approved_kind=req["kind"], expected_route=req["route"])
+            if not self.defer_approved_actions:
+                return await dispatch
+            # The hub may subscribe the sim after this loop. Let its synchronous approval
+            # handler run before issuing commands; execute still rechecks the route and risks.
+            task = asyncio.create_task(dispatch)
+            self._gate_tasks.add(task)
+            task.add_done_callback(self._gate_tasks.discard)
+            return
         self.state = IDLE
         await self.log(f"operator rejected {req['id']}", "hold", "approval refused; Responder idle")
 

@@ -51,7 +51,7 @@ _AT = re.compile(r"responder at \[(-?[\d.]+), (-?[\d.]+)\]")
 
 
 class Handoff:
-    def __init__(self, bus, loop, router, *, responder_start=RESPONDER_START, clock=None):
+    def __init__(self, bus, loop, router, *, responder_start=RESPONDER_START, clock=None, require_triage=False):
         self.bus, self.loop, self.router = bus, loop, router
         self.clock = clock or (lambda: loop._t())
         self.responder_cell = tuple(responder_start)
@@ -75,12 +75,14 @@ class Handoff:
         self.holding_block = None  # a found block gripped and not yet placed
         self.heard = {}            # casualty id -> injuries from voice's casualty/contact (G3)
         self.delivered = {}        # casualty id -> items placed for them
+        self.require_triage = require_triage  # hub waits for Y3's accepted supply choice
+        self.triage_items = {}     # casualty id -> accepted kit item (never a physical command)
 
     def attach(self):
         for topic, fn in (("map/casualties", self.on_casualties), ("map/cells", self.on_map),
                           ("map/hazards", self.on_hazards), ("sensors/scout", self.on_sensors),
                           ("log/decision", self.on_log), ("world/change", self.on_world_change),
-                          ("scene/loaded", self.finder.on_scene), ("casualty/triage", self.on_triage),
+                          ("scene/loaded", self.finder.on_scene), ("casualty/triage", self.on_triage_ready),
                           ("casualty/contact", self.on_contact)):
             self.bus.subscribe(topic, fn)
         return self
@@ -146,7 +148,8 @@ class Handoff:
         return min(near)[1] if near else None
 
     def _queue(self):
-        return sorted((c for cid, c in self.casualties.items() if cid not in self.served | self.skipped),
+        return sorted((c for cid, c in self.casualties.items() if cid not in self.served | self.skipped
+                       and (not self.require_triage or cid in self.triage_items)),
                       key=lambda c: (-c["confidence"], c["id"]))
 
     def _cell_of(self, x, y, res=0.05):
@@ -172,10 +175,19 @@ class Handoff:
                                    f"no free reachable cell within {GOAL_RADIUS_M} m of {cid} yet; Scout sent to look")
                 continue
             item, block, why = self.pick(cas)
+            if item is None:
+                self.skipped.add(cid)
+                await self.log(f"triage supply for {cid}", "hold", why)
+                continue
             if block and block != self.holding_block:
                 board = next((b for b in self.finder.boards() if b["block"] == block), None)
                 near = self.goal_for({"pos": board["pos"]}, BOARD_RADIUS_M) if board else None
                 if near is None:
+                    if self.require_triage:
+                        self.skipped.add(cid)
+                        await self.log(f"triage supply for {cid}", "hold",
+                                       f"accepted {item} material is not reachable; another supply choice is needed")
+                        continue
                     item, block, why = "first_aid_kit", None, f"{why}; board not reachable on the map yet, first aid kit"
                 else:
                     self.attempts[cid] = self.attempts.get(cid, 0) + 1
@@ -227,6 +239,15 @@ class Handoff:
         next supply in turn that is still on the deck."""
         if self.holding_block and self.fetching and self.fetching["cid"] == cas["id"]:
             return self.fetching["item"], self.holding_block, "carrying the found material already"
+        if self.require_triage:
+            approved = self.triage_items.get(cas["id"])
+            if approved in self.kit:
+                return approved, None, f"accepted triage supply choice: kit {approved}"
+            if approved == "splint":
+                found = supply.choose(["fracture"], self.kit, self.finder.best(near=cas["pos"][:2]))
+                if found and found["item"] == approved:
+                    return approved, found["block"], found["why"]
+            return None, None, f"accepted triage item {approved} unavailable; another supply choice is needed"
         got = supply.choose(self.injuries_of(cas), self.kit, self.finder.best(near=cas["pos"][:2]))
         if got:
             return got["item"], got["block"], got["why"]
@@ -239,6 +260,13 @@ class Handoff:
             if entry.get("id"):
                 self.triage[entry["id"]] = list(entry.get("injuries") or []) + (
                     [entry["recommended_action"]] if entry.get("recommended_action") else [])
+                if entry.get("recommended_action") in supply.KIT:
+                    self.triage_items[entry["id"]] = entry["recommended_action"]
+
+    async def on_triage_ready(self, data):
+        """An accepted Y3 supply choice may arrive before or after map/casualties."""
+        self.on_triage(data)
+        await self.dispatch()
 
     async def on_casualties(self, data):
         for c in data:

@@ -133,6 +133,22 @@ not part of this demo.
 
 ## Human approval and tasks (T14)
 
+On the hub, automatic casualty handoff first waits for Y3's accepted
+`casualty/triage` supply choice. An uncertain choice needs its clinical approval;
+that approval alone does not dispatch an arm command or grant route permission.
+The handoff honours the accepted kit item, constructs a route to a mapped free
+cell beside the casualty, and enters the normal physics/confidence/movement
+checks. If that item or its found material is unavailable, it holds for another
+choice instead of silently substituting a different supply. Standalone handoff
+callers can retain the previous lane-only behaviour with `require_triage=False`;
+`planner.start(bus)` enables the integrated mode.
+
+The hub also enables `defer_approved_actions` on the loop: an accepted navigation
+answer queues dispatch on the next event-loop turn so the sim's synchronous
+approval handler can run before move commands. Dispatch still checks the route
+ID and current risks; a scene change cancels stale work. Standalone loop callers
+retain immediate awaited dispatch by default.
+
 `router = await planner.start(bus)` attaches the verification loop as
 `router.loop`, plus the budget publisher as `router.task`. Use that existing loop.
 `await loop.mission(start, goal, item="water", action="deliver")` dispatches
