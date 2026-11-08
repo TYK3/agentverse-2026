@@ -1,4 +1,5 @@
 import { on, send } from './bus';
+import { setupSpeak } from './speak';
 
 type Data = Record<string, any>;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -91,6 +92,7 @@ export function setupTalkPanel(): void {
   log.setAttribute('aria-live', 'polite');
   const empty = text('p', 'No casualty contact yet', 'talk-empty');
   panel.append(contacts, facts, empty, log);
+  setupSpeak(panel);
   // Above the reasoning log: talk is what the operator reads first when a casualty is found.
   const before = Array.from(host.querySelectorAll('h2')).find(h => h.textContent === 'Reasoning log') ?? null;
   host.insertBefore(title, before);
