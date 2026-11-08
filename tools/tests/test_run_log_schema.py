@@ -17,11 +17,13 @@ SCHEMA = json.loads((ROOT / 'coord/run_log_schema.json').read_text())
 def valid(value, rule):
     """The small JSON Schema subset used here; unknown keywords fail explicitly."""
     supported = {'$ref', 'type', 'const', 'anyOf', 'properties', 'required',
-                 'additionalProperties', 'items', 'minItems', 'maxItems', 'minimum', 'minLength'}
+                 'additionalProperties', 'enum', 'items', 'minItems', 'maxItems', 'minimum', 'minLength'}
     assert set(rule) <= supported, f'Unsupported validation keywords: {set(rule) - supported}'
     if '$ref' in rule:
         return valid(value, SCHEMA['$defs'][rule['$ref'].removeprefix('#/$defs/')])
     if 'anyOf' in rule and not any(valid(value, option) for option in rule['anyOf']):
+        return False
+    if 'enum' in rule and value not in rule['enum']:
         return False
     if 'const' in rule and value != rule['const']:
         return False
@@ -81,13 +83,24 @@ def test_recorder_real_writer(tmp_path):
         assert line_valid(row)
 
 
-def test_short_real_b2_log(tmp_path, monkeypatch):
+@pytest.mark.parametrize('floor', ['B1', 'B2', 'B3'])
+def test_short_real_b2_log(tmp_path, monkeypatch, floor):
     pytest.importorskip('mujoco')
     monkeypatch.setenv('GEMINI_MODE', 'off')
-    _, path = run_b2.run(seed=0, max_t=0.2, out_dir=tmp_path)
+    _, path = run_b2.run(seed=0, max_t=0.2, out_dir=tmp_path, floor=floor)
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     assert {'level', 'pose', 'plan', 'summary', 'verdict'} <= {r['kind'] for r in rows}
-    assert all(line_valid(row) for row in rows)
+    for row in rows:
+        assert line_valid(row), row
+    summary = next(row for row in rows if row['kind'] == 'summary')
+    assert summary['floor'] == floor
+    assert not line_valid(dict(summary, floor='B4'))
+    assert not line_valid(dict(summary, floor=2))
+    assert not line_valid(dict(summary, invented=True))
+    # Older recordings predate --floor and must still validate.
+    historical = dict(summary)
+    del historical['floor']
+    assert line_valid(historical)
 
 
 @pytest.mark.parametrize('row', [
