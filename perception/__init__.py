@@ -58,6 +58,7 @@ async def start(bus):
     bus.subscribe("scout/goto", lambda d: listener.on_goto(d, now()))   # yield to permit re-looks
     hazards = Hazards(grid, Cloud(grid.res))
     bus.subscribe("sensors/scout", hazards.on_sensors)
+    bus.subscribe("responder/pose", hazards.motion.on_responder)   # its cargo moving is not debris (L5)
     _inspect(bus, now)          # G2: ER points, kept only where the depth points ground them
 
     def change(data):
