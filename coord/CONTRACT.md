@@ -32,6 +32,7 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `gate/request` | planner | console | `{"id":"g4","kind":"risky_move"\|"enter_at_risk"\|"emergency_call","summary":"...","route":"r3"}` |
 | `gate/answer` | console | planner | `{"id":"g4","approved":true,"by":"operator"}` |
 | `responder/action` | planner | sim | `{"action":"move"\|"place_supply"\|"grip"\|"release","route":"r3","item":"water"\|"first_aid_kit"\|"radio"\|"bandage"\|"splint"\|"thermal_blanket","block":"b11"}` (`block` optional, Y2: grip/release that block, e.g. debris to clear or a board used as a splint) |
+| `responder/pose` | sim | console, planner | `{"t":12.3,"pos":[x,y,z],"yaw":1.57,"state":"idle"\|"moving"\|"arrived"\|"blocked"\|"frozen","route":"r3","carrying":["water"]}` (E2: every sim tick, 10 Hz; the Responder's actual pose, `route` null when none) |
 | `operator/command` | console (typed), voice (spoken) | planner, console | `{"text":"send water to the back room","source":"voice"\|"typed"}` (after any change of mind is resolved) |
 | `world/change` | sim | planner, perception, console | `{"kind":"aftershock"\|"block_added","t":0,"moved_blocks":["b7"]}` |
 | `world/debris` | sim | console, scoring (never perception: sim truth) | `{"t":0,"truth":true,"events":[{"id":"b8","kind":"moved"\|"fell"\|"settled","pos":[x,y,z],"moved_m":0.7,"drop_m":0.37}],"stacks":[{"ids":["b10","b8"],"risk":0.69,"worst":"b10","tilt_deg":30,"overhang":0.83,"motion_m":0,"top_z":0.72,"min_xy":[x,y],"max_xy":[x,y],"unstable":true}]}` (Y8) |
