@@ -12,11 +12,15 @@ which blocks moved is sim truth, kept for scoring (perception/score.py).
                   and are now passed through have `cleared` (what stood there moved): at_risk.
                   Recent motion also lowers nearby pile stability (secondary falls).
 
+  any time        sensed motion (perception/motion.py, L5): where the Scout saw debris move, a keep-out
+                  zone (`exclusion: true`, routes never pass) until fresh scans show it has stopped.
+
 Cells are plan cells on the ground layer k=0, like map/cells. Only at_risk and collapsed cells are
 published; the planner replaces its list with each message, so a cell that drops out is clear.
 """
 
 from perception.cloud import Cloud
+from perception.motion import MotionWatch
 
 NEAR = 3              # cells (0.15 m) around new debris that become at_risk
 LAYERS = (0,)         # the ground layer, like map/cells
@@ -30,10 +34,12 @@ def _ring(ij, r):
 
 
 class Hazards:
-    def __init__(self, grid, cloud=None):
+    def __init__(self, grid, cloud=None, motion=None):
         self.grid = grid
         self.cloud = cloud if cloud is not None else Cloud(grid.res)
+        self.motion = motion if motion is not None else MotionWatch()
         self.labels = {}          # (i, j) -> (status, why), rebuilt by update()
+        self.excluded = set()     # (i, j) in a keep-out zone (L5)
         self.collapsed = {}       # (i, j) -> why: debris seen landing, kept across shakes
         self.predicted = {}       # (i, j) -> why: at_risk at the last shake, until re-scanned
         self.change = ""          # "the aftershock at 12.3 s", for the reasons
@@ -41,6 +47,7 @@ class Hazards:
 
     def on_sensors(self, data):
         self.cloud.add_sensors(data)
+        self.motion.add_sensors(data)
 
     def on_change(self, data, t=None):
         """A shake (or an injected block) happened: freeze the map and diff what the Scout sees next."""
@@ -79,9 +86,13 @@ class Hazards:
         for ij in self.collapsed:
             for n in _ring(ij, NEAR):
                 mark(n, "at_risk", f"within 0.15 m of debris that fell in {self.change}")
+        keep_out = self.motion.keep_out()
+        for ij, why in keep_out.items():
+            labels[ij] = ("at_risk", why)       # the keep-out reason wins over other at_risk reasons
         for ij, why in self.collapsed.items():
             labels[ij] = ("collapsed", why)
         self.labels = labels
+        self.excluded = set(keep_out)
         msg = self.message()
         if msg == self.last:
             return None
@@ -89,8 +100,14 @@ class Hazards:
         return msg
 
     def message(self):
-        return [{"cell": [i, j, k], "status": s, "why": why, "estimate": True}
-                for (i, j), (s, why) in sorted(self.labels.items()) for k in LAYERS]
+        out = []
+        for (i, j), (s, why) in sorted(self.labels.items()):
+            for k in LAYERS:
+                cell = {"cell": [i, j, k], "status": s, "why": why, "estimate": True}
+                if (i, j) in self.excluded:
+                    cell["exclusion"] = True
+                out.append(cell)
+        return out
 
     def status(self, ij):
         return self.labels.get(tuple(ij[:2]), ("stable", ""))[0]

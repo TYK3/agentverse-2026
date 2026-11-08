@@ -2,7 +2,8 @@
 Scout between.
 
 Stands in for sim's T04 driving (0.3 m/s, refuses to come within 0.15 m of anything ahead) and for the
-Y9 depth camera (`depth_points`: rays from the Scout's camera, 0.18 m up, 75 x 60 degrees). Perception
+Y9 depth camera (`depth_points`: rays from the Scout's camera, 0.15 m ahead and 0.18 m up, 75 x 60
+degrees, sent with `points_from`). Perception
 gets only what a real Scout would: its pose, LiDAR ranges and depth points. Block poses are used here,
 by the test world, to move blocks in the aftershock and to score the result, never by perception.
 """
@@ -20,7 +21,7 @@ from perception.hazards import Hazards
 from sim.sensors import SENSE_GROUPS
 
 HZ, SPEED, STOP = 10, 0.3, 0.15
-CAM_Z, CAM_H, CAM_V, COLS, ROWS = 0.18, math.radians(75), math.radians(60), 24, 18
+CAM_FWD, CAM_Z, CAM_H, CAM_V, COLS, ROWS = 0.15, 0.18, math.radians(75), math.radians(60), 24, 18
 DEPTH_RANGE = 4.0
 DEPTH_EVERY = 5      # frames: depth points at 2 Hz
 
@@ -56,9 +57,13 @@ def footprint(m, d, name, res=0.05):
             for j in range(math.floor(lo[1] / res), math.floor((hi[1] - 1e-9) / res) + 1)}
 
 
+def camera(pos, yaw):
+    return [pos[0] + CAM_FWD * math.cos(yaw), pos[1] + CAM_FWD * math.sin(yaw), CAM_Z]
+
+
 def depth_points(m, d, pos, yaw):
     """Scene-frame points the Scout's depth camera would return, looking along `yaw`."""
-    origin = np.array([pos[0], pos[1], CAM_Z])
+    origin = np.array(camera(pos, yaw))
     geomid = np.zeros(1, dtype=np.int32)
     out = []
     for r in range(ROWS):
@@ -101,6 +106,7 @@ class Loop:
                 "lidar": lidar(self.m, self.d, np.array(self.pos)).tolist()}
         if self.depth and self.frame % DEPTH_EVERY == 0:
             data["points"] = depth_points(self.m, self.d, self.pos, self.yaw)
+            data["points_from"] = camera(self.pos, self.yaw)
         self.grid.add_sensors(data)
         self.hazards.on_sensors(data)
         self.explorer.on_sensors(data)
@@ -141,6 +147,18 @@ class Loop:
         change = {"kind": "aftershock", "t": self.t, "moved_blocks": list(moved)}
         self.hazards.on_change(change, self.t)
         self.explorer.on_change(change)
+
+    def watch(self, x, y, yaw, frames, move=None):
+        """Park the Scout at (x, y) facing `yaw` for `frames` steps; `move(m, d)` changes the world each step."""
+        self.goto = None
+        self.explorer.hold = ([x, y, Z], math.inf, None, 0.0)   # as if the planner held it there
+        for _ in range(frames):
+            if move:
+                move(self.m, self.d)
+                mujoco.mj_forward(self.m, self.d)
+            self.pos[:2], self.yaw = [x, y], yaw
+            self.step()
+        self.pos[:2], self.yaw = [x, y], yaw
 
     def run(self, seconds):
         for _ in range(int(seconds * HZ)):
