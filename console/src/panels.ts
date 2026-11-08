@@ -74,6 +74,47 @@ export function setupPanels(): void {
     panel.replaceChildren(text('div', `${data.outcome} · ${Math.round(confidence * 100)}%`), meter, text('p', data.reason));
     badges(panel, data);
   });
+  // L1: Proof-carrying move permit & evidence panel
+  on('permit/route', value => {
+    const data = object(value);
+    const panel = el('permit-panel');
+    if (!panel) return;
+    panel.replaceChildren();
+
+    const header = document.createElement('div');
+    header.className = 'permit-header';
+    const granted = Boolean(data.granted);
+    header.append(
+      text('strong', `Route ${data.route ?? 'unknown'}`, 'permit-route-label'),
+      text('span', granted ? 'GRANTED' : 'REVOKED', `permit-status ${granted ? 'granted' : 'revoked'}`),
+      text('small', `t = ${Number(data.t || 0).toFixed(1)}s`, 'permit-time')
+    );
+    panel.append(header);
+
+    if (data.reason) {
+      panel.append(text('p', String(data.reason), 'permit-reason'));
+    }
+
+    const evidence = Array.isArray(data.evidence) ? data.evidence : [];
+    if (evidence.length > 0) {
+      panel.append(text('div', `Proof Evidence (${evidence.length})`, 'evidence-title'));
+      const ul = document.createElement('ul');
+      ul.className = 'evidence-list';
+      for (const item of evidence) {
+        const ev = object(item);
+        const li = document.createElement('li');
+        li.className = `evidence-item kind-${ev.kind}`;
+        li.append(
+          text('span', String(ev.kind ?? '').replace('_', ' '), `evidence-kind ${ev.kind}`),
+          text('span', String(ev.detail ?? ''), 'evidence-detail'),
+          text('small', `${Number(ev.t || 0).toFixed(1)}s`, 'evidence-time')
+        );
+        ul.append(li);
+      }
+      panel.append(ul);
+    }
+    badges(panel, data);
+  });
   function submit(): void {
     const input = el<HTMLInputElement>('operator-command'), command = input.value.trim();
     if (!command) return;
