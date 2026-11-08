@@ -87,3 +87,76 @@ def test_credits_ship_with_the_model_and_need_no_attribution_gaps():
     for c in credits:
         assert c["licence"] in ("CC0", "CC-BY-4.0", "BSD-3-Clause") and c["author"] and c["source"].startswith("https://")
     assert (MODELS / "parking_garage_1k.hdr").read_bytes()[:10] == b"#?RADIANCE"
+
+
+# ---------------------------------------------------------------- CASUALTY-MODEL: marker models
+
+LEVELS = ROOT / "sim" / "scenes" / "levels.xml"
+
+
+def _glb(path):
+    """(json, nodes by name) of a GLB."""
+    j = _glb_json(path)
+    return j, {n.get("name"): n for n in j["nodes"]}
+
+
+def _mesh_bounds(j, node):
+    """Axis-aligned bounds of a node's mesh in the node's own frame (from the POSITION accessors)."""
+    lo, hi = np.full(3, np.inf), np.full(3, -np.inf)
+    for prim in j["meshes"][node["mesh"]]["primitives"]:
+        acc = j["accessors"][prim["attributes"]["POSITION"]]
+        lo, hi = np.minimum(lo, acc["min"]), np.maximum(hi, acc["max"])
+    return lo, hi
+
+
+def _levels():
+    m = mujoco.MjModel.from_xml_path(str(LEVELS))
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    return m, d
+
+
+def test_casualty_model_is_a_template_inside_the_sims_casualty_capsule():
+    j, nodes = _glb(MODELS / "casualty.glb")
+    root, body = nodes["casualty"], nodes["casualty_body"]
+    # a template, not a position: perception's map/casualties says where people are
+    assert root.get("translation", [0, 0, 0]) == [0, 0, 0] and "matrix" not in root
+    assert root["children"] == [j["nodes"].index(body)]
+    assert body.get("translation", [0, 0, 0]) == [0, 0, 0] and "rotation" not in body and "scale" not in body
+    m, _ = _levels()
+    caps = [m.geom_size[g][:2] for g in range(m.ngeom)
+            if (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, int(m.geom_bodyid[g])) or "").startswith("casualty_")]
+    assert len(caps) == 3 and all(np.allclose(c, caps[0]) for c in caps)
+    r, half = (float(v) for v in caps[0])
+    envelope = [2 * (half + r), 2 * r, 2 * r]
+    assert root["extras"]["envelope_m"] == pytest.approx(envelope) and root["extras"]["head"] == "+x"
+    lo, hi = _mesh_bounds(j, body)
+    assert hi[0] - lo[0] == pytest.approx(envelope[0], abs=1e-3)       # as long as the sim's casualty
+    assert hi[1] - lo[1] <= envelope[1] + 1e-4 and hi[2] - lo[2] <= envelope[2] + 1e-4
+    assert lo[2] == pytest.approx(0, abs=1e-4)                           # lies on the floor at pos z
+    assert (lo[:2] + hi[:2]) / 2 == pytest.approx([0, 0], abs=1e-3)     # origin under the centre
+
+
+def test_debris_model_has_each_levels_rubble_geom_where_the_sim_has_it():
+    j, nodes = _glb(MODELS / "debris.glb")
+    m, d = _levels()
+    rubble = {}
+    for g in range(m.ngeom):
+        name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, g) or ""
+        if name.endswith("_rubble"):
+            rubble[name.split("_")[0]] = (d.geom_xpos[g].copy(), m.geom_size[g].copy(), d.geom_xmat[g].reshape(3, 3))
+    assert sorted(rubble) == ["b20", "b21", "b22", "b23"]
+    root = nodes["levels_debris"]
+    assert sorted(j["nodes"][i]["name"] for i in root["children"]) == sorted(rubble)
+    for bid, (pos, half, xmat) in rubble.items():
+        node = nodes[bid]
+        assert np.allclose(xmat, np.eye(3))                              # levels rubble is axis-aligned
+        assert node["translation"] == pytest.approx(list(pos), abs=1e-5)
+        assert node["extras"] == {"label": "rubble", "half_m": pytest.approx(list(half), abs=1e-4)}
+        lo, hi = _mesh_bounds(j, node)
+        assert np.all(lo >= -half - 1e-4) and np.all(hi <= half + 1e-4), bid   # never outside its sim box
+        assert lo[2] == pytest.approx(-half[2], abs=0.05 * half[2])         # resting on the floor (roughened)
+
+
+def test_marker_models_are_small():
+    assert (MODELS / "casualty.glb").stat().st_size + (MODELS / "debris.glb").stat().st_size < 0.5e6
