@@ -1065,15 +1065,10 @@ export class MapViewer {
       }
     }
 
-    // Empty points array clears the cloud per CONTRACT.md D1
-    if (payload.points.length === 0) {
-      this.accumulatedPointsMap.clear();
-      this.columnMaxZMap.clear();
-      this.pointCloudGroup.clear();
-      this.pointCloudPoints = null;
-      this.cellsDirty = true;
-      return;
-    }
+    // An empty frame clears that frame's cloud (CONTRACT.md D1), which adds nothing to the fused
+    // cloud. It must not wipe the accumulated points: one empty depth frame mid-run (nothing in
+    // range) used to make the whole 3D scene vanish. The fused cloud is cleared on scene/loaded.
+    if (payload.points.length === 0) return;
 
     const res = payload.res || DEFAULT_RES;
     const MAX_ACCUMULATED_POINTS = 40000;
