@@ -83,6 +83,15 @@ def test_scout_camera_motion_and_recording_shapes():
     assert validate_payload("sensors/scout", data) == data
 
 
+def test_scout_depth_points_are_optional_xyz_and_capped():
+    example = next(item for item in EXAMPLES if item["topic"] == "sensors/scout")
+    data = dict(example["data"], points=[[0.1, 0.2, 0.3], [1, 2, 0.05]])
+    assert validate_payload("sensors/scout", data) == data
+    for bad in ([[0.1, 0.2]], [[0, 0, 0]] * 2049):
+        with pytest.raises(ValueError):
+            validate_payload("sensors/scout", dict(data, points=bad))
+
+
 def test_broken_subscriber_and_disconnected_client(clean_bus):
     seen = []
 

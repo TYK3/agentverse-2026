@@ -56,6 +56,9 @@ run started. These are first drafts: the owning lane refines them by PR.
   are never retained in gateway history or replayed to browsers (T04).
 - T04 may include `motion: {"state":"idle"|"moving"|"arrived"|"blocked",
   "target":[x,y]|null}`. Motion is local sensor metadata, not a browser event.
+- `sensors/scout` may include `points: [[x,y,z], ...]`: up to 2048 points from the Scout's depth
+  camera (Y9), already in the scene frame (metres), downsampled. Perception (Z1) scores pile stability
+  from them; without them it maps from the 2D LiDAR alone. Sending them in every other frame or less is enough.
 - `scene/loaded` block `size` is MuJoCo half-extents in metres (T03); Three.js uses `2 * size`.
 - T05 publishes `world/change.kind="block_added"` after an operator-injected block lands.
   It carries the block id in `moved_blocks`, invalidates the prior route and triggers a re-scan
