@@ -51,15 +51,36 @@ def test_relook_first_then_planner_goto_holds():
     assert e.tick(21.0)["reason"].startswith("frontier")    # until the hold times out
 
 
-def test_world_change_forgets_cells_near_moved_blocks():
+def test_world_change_revisits_predicted_cells_nearest_first_without_block_poses():
     g, e = corridor()
-    e.on_scene({"blocks": [{"id": "b7", "label": "debris", "pos": [1.0, 0.0, 0.5], "size": [0.05, 0.05, 0.5]}]})
-    g.delta(0.0)
+    e.on_hazards([{"cell": [30, 0, 0], "status": "at_risk"}, {"cell": [31, 0, 0], "status": "at_risk"},
+                  {"cell": [60, 0, 0], "status": "at_risk"}])
+    n = len(g.cells)
     e.on_change({"kind": "aftershock", "t": 1.0, "moved_blocks": ["b7"]})
-    assert g.state((20, 0, K)) == "unknown" and g.state((5, 0, K)) == "seen"
-    changed = g.delta(1.0)["cells"]
-    assert changed and all(c["state"] == "unknown" for c in changed)
-    assert e.tick(1.0)["reason"].startswith("re-scan after the aftershock moved b7")
+    assert len(g.cells) == n                                # nothing forgotten: the scan diff needs the old map
+    assert [v[0] for v in e.visits] == [(30, 0, 0), (60, 0, 0)]     # one visit per 0.5 m patch, nearest first
+    goto = e.tick(1.0)
+    assert goto["reason"] == "re-scan after the aftershock: predicted at-risk cell [30, 0, 0]"
+    e.on_sensors({"pose": {"pos": [1.2, 0.025, Z]}})        # within LOOK (1 m) of cell 30: the LiDAR sees it
+    assert e.tick(2.0)["reason"] == "re-scan after the aftershock: predicted at-risk cell [60, 0, 0]"
+
+
+def test_scan_diff_cells_are_visited():
+    _, e = corridor()
+    e.on_diff([(35, 2, K)])
+    assert e.tick(0.0)["reason"] == "re-scan where the scan changed: cell [35, 2, 0]"
+
+
+def test_frontiers_outside_the_building_are_skipped():
+    """An open yard: walls only to the north, so no frontier is enclosed on 3 sides."""
+    g = Grid()
+    for i in range(-20, 20):
+        for j in range(-20, 8):
+            g.free((i, j, K))
+        g.hit((i, 8, K))
+    e = Explorer(g)
+    e.on_sensors({"pose": {"pos": [0.0, 0.0, Z]}})
+    assert e.tick(0.0) is None
 
 
 # ---- closed loop on the backup scene (needs mujoco) -----------------------------
@@ -78,19 +99,24 @@ def test_scout_visits_every_room_unscripted(explored, room, x0, x1):
     assert any(x0 < x < x1 and -0.95 < y < 1.45 for x, y in explored.trail), f"room {room} never visited"
 
 
-def test_rescans_moved_area_within_20_s(explored):
-    """b11 sits in the room 2/3 gap, so after it moves the gap is at_risk and the Scout must not cross:
-    it comes back from room 1 and re-scans the room 2 side (x < 1.2 m, the wall line is x = 1.25)."""
-    explored.aftershock(["b11"])                            # b11 collapsed, its surroundings at_risk
-    forgot = set(explored.explorer.rescan)
-    near_side = {c for c in forgot if (c[0] + 0.5) * 0.05 < 1.2}
-    step = len(explored.trail)
-    explored.run(20)
-    back = sum(explored.grid.state(c) != "unknown" for c in near_side) / len(near_side)
-    assert back > 0.8, f"only {back:.0%} of the reachable moved area re-seen in 20 s"
-    assert any(r.startswith("re-scan after the aftershock moved b11") for r in explored.reasons)
-    entered = {explored.hazards.status((int(x // 0.05), int(y // 0.05))) for x, y in explored.trail[step:]}
-    assert entered <= {"stable"}, f"the Scout drove into {entered - {'stable'}} cells"
+def test_after_a_real_shake_the_scout_rescans_and_keeps_out_of_debris():
+    """The test world moves b8, b10 and b11; perception hears only "aftershock". Within 30 s the Scout has
+    re-scanned (scan diff on), never stood in a collapsed cell, and spent under 10% of the time in cells
+    that turned at_risk (debris found right next to it, or after its last decision)."""
+    pytest.importorskip("mujoco")
+    from perception.tests.closed_loop import Loop
+    loop = Loop()
+    loop.run(90)
+    loop.aftershock()
+    statuses = []
+    for _ in range(300):
+        loop.step()
+        x, y = loop.pos[:2]
+        statuses.append(loop.hazards.status((int(x // 0.05), int(y // 0.05))))
+    assert loop.grid.appeared and loop.grid.cleared
+    assert any(r.startswith("re-scan") for r in loop.reasons)
+    assert "collapsed" not in statuses
+    assert statuses.count("at_risk") / len(statuses) < 0.1
 
 
 def test_waypoint_never_cuts_through_hazard_cells():
@@ -103,13 +129,3 @@ def test_waypoint_never_cuts_through_hazard_cells():
     for s in range(101):
         x, y = x0 + (x1 - x0) * s / 100, y0 + (y1 - y0) * s / 100
         assert (int(x // 0.05), int(y // 0.05)) not in e.bad
-
-
-def test_block_added_with_pos_is_rescanned():
-    g, e = corridor()
-    e.on_change({"kind": "block_added", "t": 2.0, "moved_blocks": ["x1"], "pos": [1.0, 0.0, 0.08]})
-    assert g.state((20, 0, K)) == "unknown" and g.state((5, 0, K)) == "seen"
-    assert e.tick(2.0)["reason"].startswith("re-scan where x1 was dropped: frontier at cell")
-    g2, e2 = corridor()
-    e2.on_change({"kind": "block_added", "t": 2.0, "moved_blocks": ["x1"]})       # no pos: nothing forgotten
-    assert g2.state((20, 0, K)) == "seen"
