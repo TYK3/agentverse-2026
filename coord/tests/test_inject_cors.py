@@ -128,3 +128,22 @@ def test_live_sim_route_replaces_the_stand_in_and_is_reachable_from_the_console(
     assert block.json() == {"ok": True, "block": "spare1"}
     assert bad.status_code == 400
     assert calls == ["aftershock", ("block_added", [0.6, 0.25, 0.1])]
+
+
+def test_console_hold_and_approve_reach_the_planner_as_gate_answer(clean_bus):
+    """LIVE-UI-2: the console's Approve / Reject (hold) use the contract's gate/answer write."""
+    seen = []
+    with TestClient(hub.app) as client, client.websocket_connect("/ws") as websocket:
+        clean_bus.subscribe("gate/answer", seen.append)
+        for gate, approved in (("g-a", True), ("g-h", False)):
+            websocket.send_json({"topic": "gate/answer",
+                                 "data": {"id": gate, "approved": approved, "by": "operator"}})
+            assert websocket.receive_json()["data"]["approved"] is approved
+    assert [(a["id"], a["approved"]) for a in seen] == [("g-a", True), ("g-h", False)]
+
+
+def test_slab_shift_block_added_without_a_sim_is_503(clean_bus):
+    with TestClient(hub.app) as client:
+        response = client.post("/inject", json={"kind": "block_added", "pos": [0.575, 0.025, 0.3]},
+                               headers={"Origin": CONSOLE})
+    assert response.status_code == 503 and not clean_bus.history
