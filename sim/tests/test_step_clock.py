@@ -34,7 +34,7 @@ class FakeWorld:
         self.t += dt
         return []
 
-    def sensors_message(self):
+    def sensors_message(self, camera=True):
         return {"t": self.t}
 
 

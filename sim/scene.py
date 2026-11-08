@@ -10,7 +10,8 @@ SCENES = pathlib.Path(__file__).parent / "scenes"
 BACKUP = SCENES / "backup.xml"
 TOWER = SCENES / "tower.xml"
 BUILDING = SCENES / "building.xml"
-NAMED = {"backup": BACKUP, "tower": TOWER, "building": BUILDING}
+TOWER_ANNEX = SCENES / "tower_annex.xml"
+NAMED = {"backup": BACKUP, "tower": TOWER, "tower_annex": TOWER_ANNEX, "building": BUILDING}
 
 
 def resolve(name=None):

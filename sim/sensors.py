@@ -34,14 +34,47 @@ def _ray(m, d, origin, vec, exclude, groups=None):
     return dist, int(geomid[0])
 
 
+def _directions(n):
+    """Flat (3n,) array of n horizontal unit vectors, world-frame angles 2*pi*k/n."""
+    a = 2 * np.pi * np.arange(n) / n
+    return np.stack([np.cos(a), np.sin(a), np.zeros(n)], axis=1).ravel()
+
+
+def _multi_ray(m, d, origin, vec, n, exclude, groups, cutoff):
+    """mj_multiRay distances (-1 = no hit within cutoff); None when this MuJoCo can't batch rays.
+
+    MuJoCo 3.3+ takes a `normal` output argument, older 3.x does not, so try both signatures.
+    """
+    fn = getattr(mujoco, "mj_multiRay", None)
+    if fn is None:
+        return None
+    geomid, dist = np.zeros(n, dtype=np.int32), np.zeros(n)
+    pnt = np.asarray(origin, float)
+    try:
+        fn(m, d, pnt, vec, groups, 1, exclude, geomid, dist, None, n, cutoff)
+    except TypeError:
+        try:
+            fn(m, d, pnt, vec, groups, 1, exclude, geomid, dist, n, cutoff)
+        except TypeError:
+            return None
+    return dist
+
+
 def lidar(m, d, origin, exclude_body, n=360, max_range=MAX_RANGE):
-    """n horizontal ranges around `origin`, world-frame angles (see module docstring)."""
+    """n horizontal ranges around `origin`, world-frame angles (see module docstring).
+
+    One batched mj_multiRay call per scan (SIM-SPEED): the same ranges as n separate mj_ray calls,
+    without n Python->C round trips. Falls back to the per-ray loop on a MuJoCo without it.
+    """
+    dist = _multi_ray(m, d, origin, _directions(n), n, exclude_body, SENSE_GROUPS, max_range)
+    if dist is not None:
+        return np.where(dist >= 0, np.minimum(dist, max_range), max_range)
     ranges = np.full(n, max_range)
     for k in range(n):
         a = 2 * np.pi * k / n
-        dist, _ = _ray(m, d, origin, [np.cos(a), np.sin(a), 0.0], exclude_body, SENSE_GROUPS)
-        if dist >= 0:
-            ranges[k] = min(dist, max_range)
+        hit, _ = _ray(m, d, origin, [np.cos(a), np.sin(a), 0.0], exclude_body, SENSE_GROUPS)
+        if hit >= 0:
+            ranges[k] = min(hit, max_range)
     return ranges
 
 

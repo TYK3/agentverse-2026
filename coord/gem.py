@@ -35,7 +35,7 @@ MODEL_IDS = {  # copied from the Builder Guide; change model IDs here only
     "fast_subagent": "gemini-3.8-flash",
     "fast_router": "gemini-3.5-flash-lite",
     "live_voice_vision": "gemini-3.8-live",
-    "live_translate": "gemini-3.5-live-translate-preview",
+    "live_translate": "gemini-3.8-flash",  # gemini-3.5-live-translate-preview returns 404 on the API
     "tts_studio": "gemini-3.8-flash-tts",
     "open_model": "gemma-4-31b-it",
     "embodied_reasoning": "gemini-robotics-er-2-preview",

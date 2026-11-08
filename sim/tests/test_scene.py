@@ -87,3 +87,9 @@ def test_start_publishes_scene_loaded():
     payload = bus.sent[0][1]
     assert payload["scene"] == "backup" and len(payload["blocks"]) == 16
     _check_scene_loaded(payload)
+
+
+def test_tower_annex_is_a_named_scene():
+    """SIM_SCENE=tower_annex resolves to sim/scenes/tower_annex.xml (TOWER-ANNEX-SCENE)."""
+    name, path = scene.resolve("tower_annex")
+    assert name == "tower_annex" and path.name == "tower_annex.xml" and path.is_file()
