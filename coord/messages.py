@@ -24,7 +24,7 @@ class Block(Message):
 
 
 class SceneLoaded(Message):
-    scene: Literal["backup", "photo"]
+    scene: Literal["backup", "photo", "tower"]
     blocks: list[Block]
 
 
@@ -54,6 +54,8 @@ class SensorsScout(Message):
     lidar: list[Nonnegative]
     camera: str | CameraFrame | None = None
     motion: ScoutMotion | None = None
+    points: Annotated[list[Vec3], Field(max_length=2048)] | None = None  # depth camera, scene frame (Z1/Y9)
+    points_from: Vec3 | None = None  # where the depth camera was for `points`, scene frame (L5)
     thermal: list[list[Probability]]
     acoustic: Acoustic
 
@@ -100,6 +102,7 @@ class Hazard(Message):
     status: Literal["stable", "at_risk", "collapsed"]
     why: Text
     estimate: Literal[True]
+    exclusion: bool | None = None  # keep out: motion was sensed nearby (L5); routes never pass
 
 
 class MapHazards(RootModel[list[Hazard]]):
@@ -149,7 +152,10 @@ class GateAnswer(Message):
 class ResponderAction(Message):
     action: Literal["move", "place_supply", "grip", "release"]
     route: Text
-    item: Literal["water", "first_aid_kit", "radio"]
+    item: Literal["water", "first_aid_kit", "radio", "bandage", "splint", "thermal_blanket"]
+    # Y2: a block id (e.g. "b11" to clear, or a found board used as a splint). When set, grip/release
+    # act on that block and item names what it is used for; when absent, they act on the kit item.
+    block: Text | None = None
 
 
 class OperatorCommand(Message):
@@ -161,6 +167,37 @@ class WorldChange(Message):
     kind: Literal["aftershock", "block_added"]
     t: Nonnegative
     moved_blocks: list[Text]
+
+
+Vec2 = Annotated[list[Number], Field(min_length=2, max_length=2)]
+
+
+class DebrisEvent(Message):
+    id: Text
+    kind: Literal["moved", "fell", "settled"]
+    pos: Vec3
+    moved_m: Nonnegative
+    drop_m: Nonnegative
+
+
+class DebrisPile(Message):
+    ids: Annotated[list[Text], Field(min_length=1)]
+    risk: Probability
+    worst: Text
+    tilt_deg: Nonnegative
+    overhang: Probability
+    motion_m: Nonnegative
+    top_z: Number
+    min_xy: Vec2
+    max_xy: Vec2
+    unstable: bool
+
+
+class WorldDebris(Message):
+    t: Nonnegative
+    truth: Literal[True]
+    events: list[DebrisEvent]
+    stacks: list[DebrisPile]
 
 
 class LogDecision(Message):
@@ -223,6 +260,7 @@ TOPICS: dict[str, type[BaseModel]] = {
     "responder/action": ResponderAction,
     "operator/command": OperatorCommand,
     "world/change": WorldChange,
+    "world/debris": WorldDebris,
     "log/decision": LogDecision,
     "status/link": StatusLink,
     "status/budget": StatusBudget,

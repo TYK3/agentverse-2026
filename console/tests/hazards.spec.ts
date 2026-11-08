@@ -4,6 +4,7 @@ type Viewer = { hazardOverlayCount(): number; updateHazards(h: unknown[]): void 
 
 test('X1: predicted hazards show as floor tiles before any aftershock, and are replaced not merged', async ({ page }) => {
   await page.goto('/?fake=1');
+  await expect(page.locator('#approval-meta')).toContainText('g4', { timeout: 10000 });
   const count = () => page.evaluate(() => (window as unknown as { aftershockMap: Viewer }).aftershockMap.hazardOverlayCount());
   await expect.poll(count).toBeGreaterThan(0);              // demo scene: leaning slab b10 at_risk, no world/change yet
   await page.evaluate(() => {

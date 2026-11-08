@@ -20,7 +20,7 @@ run started. These are first drafts: the owning lane refines them by PR.
 ## Messages
 | Name | Producer | Consumer | Shape |
 |---|---|---|---|
-| `scene/loaded` | sim | all | `{"scene":"backup"\|"photo","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
+| `scene/loaded` | sim | all | `{"scene":"backup"|"photo"|"tower",\|"photo","blocks":[{"id":"b7","label":"wall","pos":[x,y,z],"size":[x,y,z]}]}` |
 | `sensors/scout` | sim | perception | LiDAR ranges, camera frame, thermal grid, acoustic `{"bearing":deg,"level":0..1}`, pose |
 | `map/cells` | perception | planner, console | `{"t":0,"res":0.05,"cells":[{"cell":[i,j,k],"state":"seen"\|"inferred"\|"unknown","occupied":true}]}` |
 | `map/casualties` | perception | planner, console | `[{"id":"c1","pos":[x,y,z],"confidence":0.8,"clues":["pose","thermal","sound"],"vitals":{"breathing_rate":14,"simulated":true}}]` |
@@ -31,9 +31,10 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `gate/decision` | planner | console | `{"id":"d12","outcome":"act"\|"relook"\|"refer","confidence":0.6,"reason":"one line"}` |
 | `gate/request` | planner | console | `{"id":"g4","kind":"risky_move"\|"enter_at_risk"\|"emergency_call","summary":"...","route":"r3"}` |
 | `gate/answer` | console | planner | `{"id":"g4","approved":true,"by":"operator"}` |
-| `responder/action` | planner | sim | `{"action":"move"\|"place_supply"\|"grip"\|"release","route":"r3","item":"water"\|"first_aid_kit"\|"radio"}` |
+| `responder/action` | planner | sim | `{"action":"move"\|"place_supply"\|"grip"\|"release","route":"r3","item":"water"\|"first_aid_kit"\|"radio"\|"bandage"\|"splint"\|"thermal_blanket","block":"b11"}` (`block` optional, Y2: grip/release that block, e.g. debris to clear or a board used as a splint) |
 | `operator/command` | console (typed), voice (spoken) | planner, console | `{"text":"send water to the back room","source":"voice"\|"typed"}` (after any change of mind is resolved) |
 | `world/change` | sim | planner, perception, console | `{"kind":"aftershock"\|"block_added","t":0,"moved_blocks":["b7"]}` |
+| `world/debris` | sim | console, scoring (never perception: sim truth) | `{"t":0,"truth":true,"events":[{"id":"b8","kind":"moved"\|"fell"\|"settled","pos":[x,y,z],"moved_m":0.7,"drop_m":0.37}],"stacks":[{"ids":["b10","b8"],"risk":0.69,"worst":"b10","tilt_deg":30,"overhang":0.83,"motion_m":0,"top_z":0.72,"min_xy":[x,y],"max_xy":[x,y],"unstable":true}]}` (Y8) |
 | `log/decision` | planner | console | `{"t":0,"perception":"...","model":"...","physics":"...","outcome":"...","reason":"one line"}` |
 | `status/link` | sim, planner or console offline toggle | planner, console | `{"online":false}` |
 | `status/budget` | planner | console | `{"device":"<open>","mem_mb":0,"model":"gemma-4-e2b","ms_per_step":0,"limit":{...}}` |
@@ -55,6 +56,14 @@ run started. These are first drafts: the owning lane refines them by PR.
   are never retained in gateway history or replayed to browsers (T04).
 - T04 may include `motion: {"state":"idle"|"moving"|"arrived"|"blocked",
   "target":[x,y]|null}`. Motion is local sensor metadata, not a browser event.
+- `sensors/scout` may include `points: [[x,y,z], ...]`: up to 2048 points from the Scout's depth
+  camera (Y9), already in the scene frame (metres), downsampled. Perception (Z1) scores pile stability
+  from them; without them it maps from the 2D LiDAR alone. Sending them in every other frame or less is enough.
+  `points_from: [x,y,z]` (optional) is where the camera was for that frame, so perception can mark
+  the space along each ray as free and tell moving debris from a new viewpoint (L5).
+- `map/hazards` cells may carry `exclusion: true`: a keep-out zone around debris whose motion the
+  Scout sensed (L5). Routes never pass through it. It is a precaution from observed motion, not a
+  collapse prediction, and it is lifted only after fresh scans of the zone show no further motion.
 - `scene/loaded` block `size` is MuJoCo half-extents in metres (T03); Three.js uses `2 * size`.
 - T05 publishes `world/change.kind="block_added"` after an operator-injected block lands.
   It carries the block id in `moved_blocks`, invalidates the prior route and triggers a re-scan

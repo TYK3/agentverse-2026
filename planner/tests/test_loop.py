@@ -247,3 +247,33 @@ def test_gemini_off_marks_the_stand_in():
     bus, _lp, _ = setup(gem=gem)
     verify(bus, "r1", True)
     assert gem.asked == [] and gem.stand_ins == {"route_review"}
+
+
+def _rescan_and_verify(bus, clock, casualty):
+    clock.now += 10
+    asyncio.run(bus.publish("map/casualties", [casualty]))
+    asyncio.run(bus.publish("map/cells", two_gap_map()))
+    verify(bus, bus.of("route/proposed")[-1]["id"], True)
+
+
+def test_relook_that_does_not_raise_confidence_refers_instead_of_looping():
+    # Gemini off: vision is a stand-in, so thermal + sound cap a casualty at 0.7 and re-looks never reach 0.8.
+    stuck = {**CASUALTY, "confidence": 0.7}
+    bus, lp, clock = setup(casualty=stuck)
+    verify(bus, "r1", True)
+    assert bus.of("gate/decision")[-1]["outcome"] == "relook" and lp.waiting_scan
+    _rescan_and_verify(bus, clock, stuck)
+    d = bus.of("gate/decision")[-1]
+    assert d["outcome"] == "refer" and "did not raise confidence" in d["reason"]
+    req = bus.of("gate/request")[-1]
+    asyncio.run(bus.publish("gate/answer", {"id": req["id"], "approved": True, "by": "operator"}))
+    assert bus.of("responder/action")[-1]["route"] == req["route"] and lp.state == L.EXECUTING
+
+
+def test_relook_that_raises_confidence_may_look_again():
+    bus, _lp, clock = setup(casualty={**CASUALTY, "confidence": 0.6})
+    verify(bus, "r1", True)
+    _rescan_and_verify(bus, clock, {**CASUALTY, "confidence": 0.7})
+    assert bus.of("gate/decision")[-1]["outcome"] == "relook" and not bus.of("gate/request")
+    _rescan_and_verify(bus, clock, {**CASUALTY, "confidence": 0.85})
+    assert bus.of("gate/decision")[-1]["outcome"] == "act"

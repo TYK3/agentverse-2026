@@ -3,6 +3,11 @@
 A cell is `[i, j, k]` = floor(position / 0.05) in the scene frame. The LiDAR layer is k = 1 (0.075 m), but
 map/cells is a 2D plan for the planner, which routes on k = 0: each (i, j) column is sent once, as k = 0.
 Only `seen` cells were measured; `inferred` cells are guesses (a wall's hidden interior); a cell not in the map is `unknown`.
+
+Change detection (Z1) is a scan diff, never sim truth: `begin_change()` (called when a shake is felt)
+freezes what every seen cell was. After it, a cell that was well-seen free (3+ passes) and now returns
+2+ hits has `appeared` (debris landed there); a cell that was occupied and now has 3+ rays passing
+through it with no hit has `cleared` (what stood there moved), and is set free.
 """
 
 import math
@@ -14,6 +19,9 @@ MAX_RANGE = 6.0
 FACES = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
 SIDES = FACES[:4]     # in-layer neighbours: the map is one LiDAR layer thick, so up and down are unknown
 WALLED = 3            # an unknown cell with this many seen, occupied side neighbours is inferred
+APPEAR_HITS = 2       # returns after a change in a cell that was free before: something landed there
+CLEAR_PASSES = 3      # rays through a cell that was occupied before, with no return: it moved away
+FREE_PASSES = 3       # a cell counts as "free before" only after this many rays passed through it
 
 
 def cell_of(p, res=RES):
@@ -27,6 +35,12 @@ class Grid:
         self.cells = {}        # (i, j, k) -> {"state", "occupied", "hits"}; missing means unknown
         self.changed = set()   # cells whose state or occupied flag changed since the last message
         self.layers = set()    # every k a cell was ever set in (the LiDAR layer, k = 1, in practice)
+        self.before = None     # {cell: occupied} frozen by begin_change(), None before the first change
+        self.before_passes = {}  # cell -> rays that had passed through it by begin_change()
+        self.after = {}        # cell -> [hits, passes] since begin_change()
+        self.appeared = {}     # cell -> t: free before the change, returns hits now
+        self.cleared = {}      # cell -> t: occupied before the change, rays pass through now
+        self.t = 0.0           # time of the latest sweep
 
     def state(self, c):
         cur = self.cells.get(tuple(c))
@@ -36,7 +50,7 @@ class Grid:
         cur = self.cells.get(c)
         if cur is None:
             self.layers.add(c[2])
-            cur = self.cells[c] = {"state": state, "occupied": occupied, "hits": 0}
+            cur = self.cells[c] = {"state": state, "occupied": occupied, "hits": 0, "passes": 0}
             self.changed.add(c)
         elif (cur["state"], cur["occupied"]) != (state, occupied):
             cur["state"], cur["occupied"] = state, occupied
@@ -46,16 +60,49 @@ class Grid:
     def hit(self, c):
         """A LiDAR return in cell c: seen and occupied."""
         self._set(c, "seen", True)["hits"] += 1
+        if self.before is not None:
+            after = self.after.setdefault(c, [0, 0])
+            after[0] += 1
+            if after[0] >= APPEAR_HITS:
+                self.cleared.pop(c, None)         # returns again: it did not move away after all
+                if c not in self.appeared and self._free_before(c):
+                    self.appeared[c] = self.t
 
     def free(self, c):
         """A ray passed through cell c: seen and free, unless a ray has hit it before.
 
         A return beats a pass: a wall's face cell is partly free space, so a ray grazing the wall
-        can pass through it. Clearing cells a moved block left is the hazard re-scan's job.
+        can pass through it. After a change, a cell that was occupied is cleared only by CLEAR_PASSES
+        rays with no return since.
         """
         cur = self.cells.get(c)
+        if self.before is not None:
+            after = self.after.setdefault(c, [0, 0])
+            after[1] += 1
+            if self.before.get(c) and after[0] == 0 and after[1] >= CLEAR_PASSES and c not in self.cleared:
+                self.cleared[c] = self.t
+                if cur is not None:
+                    cur["hits"] = 0
         if cur is None or cur["hits"] == 0:
-            self._set(c, "seen", False)
+            self._set(c, "seen", False)["passes"] += 1
+
+    def _free_before(self, c):
+        """Seen free before the change, by FREE_PASSES rays, and not touching anything occupied then.
+
+        The neighbour rule drops returns that land one cell off a wall face (a grazing ray).
+        """
+        if self.before.get(c, True) or self.before_passes.get(c, 0) < FREE_PASSES:
+            return False
+        return not any(self.before.get((c[0] + f[0], c[1] + f[1], c[2])) for f in SIDES)
+
+    def begin_change(self, t=None):
+        """A shake was felt: freeze what every seen cell was, and diff the scans that follow against it."""
+        self.before = {c: cur["occupied"] for c, cur in self.cells.items() if cur["state"] == "seen"}
+        self.before_passes = {c: cur.get("passes", 0) for c, cur in self.cells.items()}
+        self.after = {}
+        self.appeared, self.cleared = {}, {}
+        if t is not None:
+            self.t = t
 
     def forget(self, cells):
         """Make cells unknown again (after a world/change), so the Scout re-scans them."""
@@ -107,6 +154,7 @@ class Grid:
 
     def add_sensors(self, data):
         """Update from one sensors/scout payload: {"pose": {"pos": [x, y, z], ...}, "lidar": [ranges]}."""
+        self.t = data.get("t", self.t)
         self.add_scan(data["pose"]["pos"], data["lidar"])
 
     def counts(self):
