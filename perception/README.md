@@ -56,6 +56,12 @@ Scout watches from room 2 opens a zone over b10 (seen up to 0.47 m), and 6 s of 
 
 ## Injury triage and first-aid gate (Y3, `perception/triage.py`)
 
+External Scout re-look goals that cannot be driven to straight use the existing
+seen-free path router. The intermediate waypoint is checked against occupied
+cells and forward clearance. Validated hub copies of the Explorer's own
+waypoints keep the original external goal, rather than replacing it with a
+temporary waypoint hold. Ordinary frontier routing retains its prior behaviour.
+
 Assesses casualty condition and determines first-aid intervention:
 - Fuses multi-modal observations: thermal signature, acoustic clues / sound level, camera posture check, and voice dialogue responses (via `voice.GUIDE.summary(cid)` or `casualty/answer`).
 - Powered by `gemini-4-argon` through `coord/gem.py` (`lead_reasoning`) with `GEMINI_MODE=live`. In `GEMINI_MODE=off`, uses deterministic clinical triage rules.
