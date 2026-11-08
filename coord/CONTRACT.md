@@ -42,6 +42,7 @@ run started. These are first drafts: the owning lane refines them by PR.
 | `say` | planner | voice, console (shown as text) | `{"to":"casualty"\|"operator","intent":"first_aid"\|"guide_exit"\|"reassure","text":"...","lang":"auto"}` |
 | `report/handover` | planner | console | Map, casualties with confidence, hazards, routes and re-plans, supplies delivered, human approvals |
 | `status/gemini` | hub | console | `{"mode":"off"\|"replay"\|"live","calls_last_hour":0,"stand_ins":["vision","tts"]}`, published every 2 s from `coord.gem.status()` |
+| `gemini/receipt` | hub from `coord.gem` | console, report | Completed call receipt (G1), shape below; browser read-only |
 
 ## T02 schema details (proposed, #10)
 
@@ -80,7 +81,32 @@ run started. These are first drafts: the owning lane refines them by PR.
   "stand_ins":[]}`. The hub publishes `coord.gem.status()` every 2 s once T26 is available; it
   makes no model calls. Until T26 merges, the publisher is skipped with a logged warning.
 
+## G1 Gemini receipts
+
+`gemini/receipt` has `id` (unique `gem-...` invocation ID), `schema_version: 1`,
+`started_at` (UTC ISO timestamp), `feature`, `model_key`, nullable
+`model_requested`/`model_reported`, `mode: off|replay|live`,
+`source: none|disabled|cache|live`, `outcome: ok|off|error|cap_reached`, nullable
+`route` (exactly the `permit/route.route` ID) and caller-owned `evidence_ids: [str]`.
+It also includes nullable `provider_id`, `source_call_id`, `usage` (provider token
+counts, nonnegative integers), `request_sha256`/`output_sha256`, `cache_write_error`,
+nonnegative `elapsed_ms`, and `live_attempts` counting the `sdk_called: true`
+entries in `attempts: [{attempt: int>=1, sdk_called: bool, outcome: ok|error,
+error_type: str|null}]`. Optional `error_type` contains the exception type only.
+
+Replay has a new invocation ID and zero live attempts, with no current provider
+ID/usage. Optional `cache_origin: {id,provider_id,model_requested,model_reported,
+usage}` attributes the original live call only when its cached output hash
+matches; its fields are nullable for legacy caches. Disabled calls have outcome
+`off`, no provider ID/usage and zero attempts. No prompt, media, model response
+text or exception text is carried. No receipt grants movement; physics and L1
+permission evidence remain separate and join by `route`. The hub forwards each
+completed receipt once per publisher lifetime; its existing 200-event replay bound
+still applies. This does not claim receipt coverage for existing direct Live
+session callers that only use `count_call()`.
+
 ## Rules the shapes encode
+
 - Only `seen` cells count as confirmed safe. A route through `inferred` or `unknown` cells is a re-look,
   not an act.
 - No message carries a face or an image crop of a person; casualties are positions and confidences.
