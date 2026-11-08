@@ -63,6 +63,28 @@ voice (spoken commands) --> planner        planner (say) --> voice (operator, ca
 ### Voice
 - Done: / In progress: / Needs from other lanes:
 
+## Gemini receipts (G1, current as of 8 Nov)
+
+- Shipped in [#107](https://github.com/TYK3/agentverse-2026/pull/107),
+  [#108](https://github.com/TYK3/agentverse-2026/pull/108) and
+  [#145](https://github.com/TYK3/agentverse-2026/pull/145). Historical proposal entries below remain unchanged.
+- `coord.gem.ask()` returns text; `ask_with_receipt()` returns `.text` and `.receipt`.
+  `er()` selects the embodied-reasoning model through the same cap/cache/receipt path.
+- Each invocation has a unique `gem-...` ID. `route` matches `permit/route.route`;
+  `evidence_ids` reference caller-owned observations. Receipts never grant movement:
+  physics and permit evidence remain separate and join by route ID.
+- `mode`, `source` and `outcome` distinguish live calls, replay, disabled calls and
+  errors. Replay gets a new ID and zero live attempts; hash-matched `cache_origin`
+  attributes the original call only. Missing provider identity/usage stays null.
+  Every real retry consumes the hourly cap. `elapsed_ms` is call wall time, not simulation time.
+- The hub forwards `gemini/receipt` on its two-second status poll, with a bounded
+  200-receipt source ring and deduplication of successful deliveries. Bad receipts,
+  snapshot failures and failed deliveries do not stop status updates; failed
+  deliveries retry on a later poll and cancellation still propagates (G1f).
+- Receipts omit prompts, media, response text and exception text. Browser clients
+  may read but cannot write them. Direct Live/session clients using only
+  `count_call()` share the cap but are not claimed as receipt-covered yet.
+
 ## Open decisions
 - Transport between lanes (for example one Python process with a WebSocket to the browser, or separate
   services). Blocks every lane.
