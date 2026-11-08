@@ -1,0 +1,14 @@
+{
+  "topic": "permit/route",
+  "data": {
+    "route": "r3",
+    "granted": false,
+    "t": 12.3,
+    "reason": "revoked: LiDAR hit inside the route at 2 cell(s), first [20, 10]",
+    "evidence": [
+      {"kind": "verified", "detail": "physics check passed for 20 cells", "t": 4.0},
+      {"kind": "clear", "detail": "no sensed hazard on the route", "t": 4.0},
+      {"kind": "shift", "detail": "LiDAR hit inside the route at 2 cell(s), first [20, 10]", "t": 12.3}
+    ]
+  }
+}
