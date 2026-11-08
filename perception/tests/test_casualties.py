@@ -139,13 +139,11 @@ def test_local_person_needs_agreement_with_thermal():
     assert local_person(_jpeg((150, 160)), 0.0) == 0.7  # small and upright: not lying
 
 
-def test_offline_camera_lifts_c1_to_0_8_with_gemini_off():
+def test_offline_camera_lifts_c1_to_0_8_with_gemini_off(require_camera_renderer):
     """Real sim frames facing c1: thermal + sound + the offline camera check give >= 0.8 (Gemini off)."""
     pytest.importorskip("PIL.Image")
     sim_world = pytest.importorskip("sim.world")
-    w = sim_world.World()
-    if w.renderer is None:
-        pytest.skip("no GL context for camera frames")
+    w = require_camera_renderer(sim_world.World())
     t = itertools.count()
     c = Casualties(vision_on=lambda: False, clock=lambda: float(next(t)))
     for x, y in [(0.8, 0.6), (1.0, 0.65), (1.2, 0.7), (1.45, 0.7), (1.45, 0.7), (1.45, 0.7), (1.45, 0.7)]:
@@ -201,13 +199,11 @@ def test_gem_ask_uses_interactions_content_blocks(monkeypatch):
     )]
 
 
-def test_b1_sim_frames_casualty_detection_offline_and_vision_fixture():
+def test_b1_sim_frames_casualty_detection_offline_and_vision_fixture(require_camera_renderer):
     """Real B1 sim frames (levels.xml): thermal + sound + camera locate c1 on B1 with z < -0.5."""
     pytest.importorskip("PIL.Image")
     sim_levels = pytest.importorskip("sim.levels")
-    w = sim_levels.LevelWorld(render=True)
-    if w.renderer is None:
-        pytest.skip("no GL context for camera frames")
+    w = require_camera_renderer(sim_levels.LevelWorld(render=True))
 
     b1_poses = [(1.6, 1.1), (1.1, 1.3), (0.85, 1.5), (0.45, 1.1), (0.45, 1.0)]
     b1_frames = []
