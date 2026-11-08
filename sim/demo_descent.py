@@ -1,16 +1,18 @@
-"""L4 proof: the Scout finds its own way from L1 down to the basement B1 in the real sim, no teleport.
+"""L4 proof: the Scout finds its own way from L1 down to a basement (B1, or B2 below it) in the real sim,
+no teleport.
 
-    python -m sim.demo_descent            # prints each re-plan and the result
+    python -m sim.demo_descent            # L1 -> B1, prints each re-plan and the result
+    python -m sim.demo_descent B2         # L1 -> B2 (b2: ground -> B1 on R1, then B1 -> B2 on R3)
 
 Loop: the sim ticks at 10 Hz (sim.levels.LevelWorld: height only from the floor under the Scout);
 every sensors/scout frame updates the multi-level map (perception.levels); whenever the Scout stops,
-the multi-level A* (planner.levels) plans from where it stands to the B1 goal. A route it can walk
+the multi-level A* (planner.levels) plans from where it stands to the goal. A route it can walk
 gives the next waypoint; an unknown goal gives the frontier closest to it in 3D; a frontier under
 the Scout's feet (a ramp the 2D LiDAR cannot map) gives a short probe step into the unknown, which
 the sim's floor check accepts or refuses. Nothing is scripted: no waypoint, ramp or level is given.
 
-run() returns a summary the tests check: reached the goal on B1, levels visited in order, the
-largest move per tick (no teleport), and a Responder route over the finished map from L1 to B1.
+run() returns a summary the tests check: reached the goal on its level, levels visited in order, the
+largest move per tick (no teleport), and a Responder route over the finished map from L1 to the goal.
 """
 
 import math
@@ -20,7 +22,11 @@ from planner.levels import NEIGHBOURS, find_route, waypoints
 from sim.levels import LevelWorld, max_jump
 
 RES = 0.05
-GOAL = (0.75, 1.55, -0.6)       # beside casualty c1 in B1 (sim/scenes/levels.xml)
+GOALS = {
+    "B1": (0.75, 1.55, -0.6),   # beside casualty c1 in B1 (sim/scenes/levels.xml)
+    "B2": (0.75, 0.8, -1.2),    # beside casualty c2 in B2
+}
+GOAL = GOALS["B1"]
 DT = 0.1
 SCAN_EVERY = 3                   # map every 3rd frame while driving, every frame when stopped
 PROBE = 0.15                     # metres stepped into the unknown
@@ -51,12 +57,14 @@ def probe_target(world, frontier, goal_cell, levels):
     return [float(x + dx / norm * PROBE), float(y + dy / norm * PROBE), float(world.floor_z)], n
 
 
-def run(max_t=600.0, verbose=False):
+def run(max_t=600.0, verbose=False, floor="B1"):
     from planner.levels import Levels
+
+    goal = GOALS[floor]
 
     w = LevelWorld(render=False)
     gl = GridLevels(RES)
-    goal_cell = cell(*GOAL)
+    goal_cell = cell(*goal)
     visited = [w.level()]
     plans = 0
     frame = 0
@@ -75,7 +83,7 @@ def run(max_t=600.0, verbose=False):
             gl.add_sensors(w.sensors_message(camera=False))
         if stopped:
             here = w.pos
-            if math.hypot(here[0] - GOAL[0], here[1] - GOAL[1]) < 0.15 and w.level() == "B1":
+            if math.hypot(here[0] - goal[0], here[1] - goal[1]) < 0.15 and w.level() == floor:
                 break
             if probing is not None and w.state == "blocked" and cell(*here[:2], w.floor_z)[:2] != list(probing[:2]):
                 gl.refuse(probing)      # the sim refused the step: that cell is not drivable
@@ -107,10 +115,10 @@ def run(max_t=600.0, verbose=False):
             visited.append(w.level())
 
     here = w.pos
-    reached = math.hypot(here[0] - GOAL[0], here[1] - GOAL[1]) < 0.15 and w.level() == "B1"
+    reached = math.hypot(here[0] - goal[0], here[1] - goal[1]) < 0.15 and w.level() == floor
     final = gl.message(w.t, everything=True)
     start = w.trace[0]
-    # The Responder's route: from the Scout's start on L1 to where the Scout stopped beside c1, over
+    # The Responder's route: from the Scout's start on L1 to where the Scout stopped by the casualty, over
     # the map the Scout built (the goal cell itself is in keep-out of the casualty marker).
     responder = find_route(final, [], cell(start[1], start[2], start[3] - 0.075),
                            cell(here[0], here[1], w.floor_z))
@@ -130,7 +138,9 @@ def _near(pos, wp, tol=0.05):
 
 
 if __name__ == "__main__":
-    out = run(verbose=True)
+    import sys
+
+    out = run(verbose=True, floor=sys.argv[1] if len(sys.argv) > 1 else "B1")
     for key in ("log", "map", "trail"):
         out.pop(key)
     print(out)
