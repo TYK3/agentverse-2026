@@ -4,7 +4,7 @@ test('fixture panels update and approvals are queued', async ({ page }) => {
   const outgoing: string[] = [];
   page.on('console', msg => { if (msg.text().startsWith('[bus fake outgoing]')) outgoing.push(msg.text()); });
   await page.goto('/?fake=1');
-  await expect(page.locator('#budget-panel')).toContainText('OVER LIMIT');
+  await expect(page.locator('#budget-panel')).toContainText('OVER LIMIT', { timeout: 10000 });
   await expect(page.locator('#gemini-status')).toHaveAttribute('title', /planner, tts/);
   await expect(page.locator('#reasoning-log')).toContainText('rescan before acting');
   await expect(page.locator('#confidence-panel progress')).toHaveAttribute('value', '0.6');

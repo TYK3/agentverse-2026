@@ -45,14 +45,13 @@ function fixtures(): Plugin {
       const demo = resolve(projectDir, 'fixtures/panels.json');
       if (existsSync(demo)) { copyFileSync(demo, join(target, 'panels.json')); names.push('panels.json'); }
 
-      // Y7c: Parse docs/hardware.md into hardware.json and copy hardware.md
+      // Y7c: Parse docs/hardware.md into hardware.json and copy hardware.md (asset, not a bus envelope)
       const hwDoc = resolve(projectDir, '../docs/hardware.md');
       if (existsSync(hwDoc)) {
         copyFileSync(hwDoc, join(target, 'hardware.md'));
         const text = readFileSync(hwDoc, 'utf8');
         const summaryRows = parseSummary(text);
         writeFileSync(join(target, 'hardware.json'), JSON.stringify(summaryRows, null, 2));
-        names.push('hardware.json');
       }
 
       writeFileSync(join(target, 'manifest.json'), JSON.stringify(names, null, 2));
