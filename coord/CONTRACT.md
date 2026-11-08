@@ -89,11 +89,11 @@ run started. These are first drafts: the owning lane refines them by PR.
   collapse prediction, and it is lifted only after fresh scans of the zone show no further motion.
 - `scene/loaded` block `size` is MuJoCo half-extents in metres (T03); Three.js uses `2 * size`.
 - SCENE-B2: `scene/loaded.scene="levels"` identifies the multi-level scene; L1,
-  ground, B1 and B2 are floor names within it, not separate scene values. Current
-  levels-scene floor heights are 0.6, 0, -0.6 and -1.2 m respectively. Scene-frame
+  ground, B1, B2 and B3 are floor names within it, not separate scene values. Current
+  levels-scene floor heights are 0.6, 0, -0.6, -1.2 and -1.8 m respectively. Scene-frame
   block positions and measured map/point coordinates retain negative basement z;
-  the hub does not flatten, shift or rescale them. A later B3 floor uses the same
-  `levels` identity and existing coordinate shape when its sim support lands.
+  the hub does not flatten, shift or rescale them. B3 uses the same `levels`
+  identity and existing coordinate shape as the other floors.
   Selecting this scene name does not prove descent or select the sim world class;
   the sim owner must wire LevelWorld and publish the explicit `levels` label.
 - T05 publishes `world/change.kind="block_added"` after an operator-injected block lands.
