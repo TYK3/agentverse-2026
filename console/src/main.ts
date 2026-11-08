@@ -14,6 +14,7 @@ import {
 import { setupPanels } from './panels';
 import { setupHardwarePanel } from './hardware';
 import { setupDemoAssets } from './assets';
+import { setupLiveControls } from './live-controls';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map-canvas')!;
 const mapViewer = new MapViewer(canvas);
@@ -37,6 +38,8 @@ document.querySelector<HTMLButtonElement>('#btn-demo-scene')?.addEventListener('
 document.querySelector<HTMLButtonElement>('#btn-demo-replan')?.addEventListener('click', () => {
   mapViewer.simulateAftershockAndReplan();
 });
+
+setupLiveControls();  // LIVE-UI-2: slab shift through the hub's /inject
 
 document.querySelector<HTMLButtonElement>('#btn-benchmark-100k')?.addEventListener('click', () => {
   mapViewer.generate100kBenchmark();
