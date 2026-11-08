@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import time
 
 from sim import debris, inject, responder, scene
@@ -17,7 +18,14 @@ async def run(world, bus, rate_hz=RATE_HZ):
     while True:
         started = time.monotonic()
         world.responder.step(dt)      # the Responder (T06) moves on the same tick as the physics
-        for topic, data in [*world.tick(dt), ("sensors/scout", world.sensors_message())]:
+        events = world.tick(dt)
+        sensors = world.sensors_message()
+        hw_robot = getattr(world, "hw", None)
+        if hw_robot is not None:  # Y10: through the chip driver stubs and the bridge
+            hw_robot.feed(sensors)
+        else:
+            events.append(("sensors/scout", sensors))
+        for topic, data in events:
             try:
                 await bus.publish(topic, data)
             except Exception:  # a rejected message must not stop the world
@@ -44,6 +52,10 @@ async def start(bus, loop=True):
     bus.subscribe("route/proposed", on_route)
     inject.install(world, bus)
     world.responder = responder.attach(world, bus)
+    if os.environ.get("AFTERSHOCK_HW") == "1":
+        import hw
+
+        world.hw = hw.attach(bus)
     if loop:
         debris.attach(world, bus)  # Y8: world/debris (sim truth, for scoring and the console)
         world.task = asyncio.create_task(run(world, bus))
