@@ -181,7 +181,17 @@ class Responder:
 
     def on_action(self, msg):
         """Run a responder/action now, or queue it behind the current move (the planner sends a whole
-        move -> grip -> place_supply -> release sequence at once and there is no completion message)."""
+        move -> grip -> place_supply -> release sequence at once and there is no completion message).
+
+        A move on a different route replaces the current one: the planner re-planned, so the old route's
+        remaining path and its queued actions are dropped (queueing it behind a route that may never finish,
+        e.g. one now blocked, left the Responder stuck)."""
+        if msg.get("action") == "move" and (self.state == "moving" or self.queue) and msg.get("route") != self.route:
+            old, dropped = self.route, len(self.queue)
+            self.path, self.queue, self.state = [], [], "idle"
+            self._decide("replaced", f"route {old} replaced by {msg.get('route')}: stopped it, dropped {dropped} "
+                                     f"queued action(s)", f"move {msg.get('route')}")
+            return self._run(msg)
         if self.state == "moving" or self.queue:
             self.queue.append(dict(msg))
             return self._decide("queued", f"{msg.get('action')} {msg.get('item')} waits for the current move "

@@ -361,3 +361,30 @@ def test_responder_hears_route_proposed_before_the_physics_check():
 
     bus, world = asyncio.run(go())
     assert bus.order[0] is world.responder
+
+
+def test_a_new_route_replaces_the_current_one(world, resp):
+    """#52 e2e: the planner re-plans to r3 while r2 runs; r3 must take over, not wait behind r2."""
+    route(resp, "r2", demo_responder.ROUTES["r1"])
+    for action in ("move", "place_supply", "release"):
+        resp.on_action({"action": action, "route": "r2", "item": "water"})
+    for _ in range(10):
+        resp.step(0.1)
+        world.tick(0.1)
+    here = resp.pos[:2].copy()
+    route(resp, "r3", [tuple(here), (here[0], here[1] + 0.4)])
+    for action in ("move", "place_supply", "release"):
+        resp.on_action({"action": action, "route": "r3", "item": "water"})
+    assert resp.route == "r3" and resp.state == "moving"
+    assert any(e["outcome"] == "replaced" for e in resp.log)
+    assert [m["route"] for m in resp.queue] == ["r3", "r3"], "r2's place/release were dropped"
+    drive(world, resp, seconds=10)
+    assert resp.state == "arrived" and not resp.holding("water"), "r3 completed and placed the water"
+
+
+def test_same_route_move_is_not_a_replacement(world, resp):
+    route(resp, "r1", demo_responder.ROUTES["r1"])
+    resp.on_action({"action": "move", "route": "r1", "item": "water"})
+    resp.step(0.1)
+    out = resp.on_action({"action": "move", "route": "r1", "item": "water"})
+    assert out["outcome"] == "queued" and not any(e["outcome"] == "replaced" for e in resp.log)
