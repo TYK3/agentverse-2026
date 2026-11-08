@@ -1,0 +1,373 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aftershock:run-log-line",
+  "title": "Run log line",
+  "description": "One JSON object per line, not a whole JSONL file. Covers tools/run_b2.py kind records and tools/demo60.py / sim/recorder.py bus envelopes on main. Topic payloads remain owned by coord/messages.py; rejected demo60 payloads may be invalid there. Optional wall is recorder elapsed wall time; t is simulation time for B2/recorder and elapsed wall time for demo60. tools/full_test.py writes a Markdown report rather than another JSONL shape. No run_levels format is assumed before that runner merges.",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/bus"
+    },
+    {
+      "$ref": "#/$defs/level"
+    },
+    {
+      "$ref": "#/$defs/pose"
+    },
+    {
+      "$ref": "#/$defs/plan"
+    },
+    {
+      "$ref": "#/$defs/mapped"
+    },
+    {
+      "$ref": "#/$defs/shift"
+    },
+    {
+      "$ref": "#/$defs/summary"
+    },
+    {
+      "$ref": "#/$defs/verdict"
+    }
+  ],
+  "$defs": {
+    "time": {
+      "type": "number",
+      "minimum": 0
+    },
+    "vector3": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "cell": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "step": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "t": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "t",
+        "detail"
+      ],
+      "additionalProperties": false
+    },
+    "bus": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/time"
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data": {},
+        "wall": {
+          "$ref": "#/$defs/time"
+        },
+        "rejected": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "t",
+        "topic",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "level": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/time"
+        },
+        "kind": {
+          "const": "level"
+        },
+        "level": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "level"
+      ],
+      "additionalProperties": false
+    },
+    "pose": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/time"
+        },
+        "kind": {
+          "const": "pose"
+        },
+        "pos": {
+          "$ref": "#/$defs/vector3"
+        },
+        "state": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "cell": {
+          "$ref": "#/$defs/cell"
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "pos",
+        "state",
+        "level",
+        "cell"
+      ],
+      "additionalProperties": false
+    },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/time"
+        },
+        "kind": {
+          "const": "plan"
+        },
+        "status": {
+          "type": "string"
+        },
+        "why": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/vector3"
+        },
+        "cells": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/cell"
+          }
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "status",
+        "why",
+        "cells"
+      ],
+      "additionalProperties": false
+    },
+    "mapped": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/time"
+        },
+        "kind": {
+          "const": "mapped"
+        },
+        "cells": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "cells",
+        "sources"
+      ],
+      "additionalProperties": false
+    },
+    "shift": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/time"
+        },
+        "kind": {
+          "const": "shift"
+        },
+        "xy": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "level": {
+          "type": "string"
+        },
+        "footprint": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "core": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "scout": {
+          "$ref": "#/$defs/vector3"
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "xy",
+        "level",
+        "footprint",
+        "core",
+        "scout"
+      ],
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/time"
+        },
+        "kind": {
+          "const": "summary"
+        },
+        "reached": {
+          "type": "boolean"
+        },
+        "final_pos": {
+          "$ref": "#/$defs/vector3"
+        },
+        "final_level": {
+          "type": "string"
+        },
+        "max_jump": {
+          "type": "number"
+        },
+        "route": {
+          "type": "string"
+        },
+        "route_k": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "floor": {
+          "type": "string",
+          "enum": [
+            "B1",
+            "B2",
+            "B3"
+          ]
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "reached",
+        "final_pos",
+        "final_level",
+        "max_jump",
+        "route",
+        "route_k"
+      ],
+      "additionalProperties": false
+    },
+    "verdict": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "$ref": "#/$defs/time"
+        },
+        "kind": {
+          "const": "verdict"
+        },
+        "steps": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/step"
+          }
+        },
+        "passed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "t",
+        "kind",
+        "steps",
+        "passed",
+        "failed"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

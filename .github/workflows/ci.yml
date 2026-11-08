@@ -98,8 +98,16 @@ jobs:
         if: steps.kind.outputs.kind == 'node' || steps.kind.outputs.kind == 'script'
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: console/package-lock.json
       - uses: astral-sh/setup-uv@v6
         if: steps.kind.outputs.kind == 'python' || steps.kind.outputs.kind == 'script'
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            **/uv.lock
+            **/pyproject.toml
+            **/*requirements*.txt
 
       - name: check.sh
         if: steps.kind.outputs.kind == 'script'
@@ -132,6 +140,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            coord/requirements.txt
+            voice/requirements.txt
       - name: Hub schemas and transport
         env:
           GEMINI_MODE: "off"
@@ -174,9 +187,47 @@ jobs:
           bad=$(git log --format='%h %ae%n%h %ce' "$RANGE" | sort -u | grep -vE " ${ALLOWED}\$" || true)
           [ -z "$bad" ] || { echo "Commits with a non-noreply email (fix with git rebase --exec 'git commit --amend --no-edit --reset-author'):"; echo "$bad" | cut -d' ' -f1 | sort -u; exit 1; }
 
+  # Whole-repo run (FULLTEST-3): every pytest suite, the sim demos and the e2e rescue via
+  # tools/full_test.py, plus the seed sweep. Slow (about 5 min), so it runs on pushes to main and
+  # by hand (Actions > ci > Run workflow), not on every PR. Each step skips cleanly until its
+  # script is on main. The report is uploaded as the full-test artifact.
+  full:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GEMINI_MODE: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            coord/requirements.txt
+            voice/requirements.txt
+      - name: Install
+        run: python -m pip install -r requirements.txt -r coord/requirements.txt psutil
+      - name: Full test (tools/full_test.py)
+        run: |
+          if [ -f tools/full_test.py ]; then python tools/full_test.py
+          else echo "tools/full_test.py not on this commit; skipping."; fi
+      - name: Seed sweep (tools/seed_sweep.py)
+        if: always()
+        run: |
+          if [ -f tools/seed_sweep.py ]; then python tools/seed_sweep.py
+          else echo "tools/seed_sweep.py not on this commit; skipping."; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-test
+          path: runs/full_test.md
+          if-no-files-found: ignore
+
   ci-ok:
     name: ci ok
-    needs: [changes, lane, coord, emails]
+    needs: [changes, lane, coord, emails, full]
     if: always()
     runs-on: ubuntu-latest
     steps:

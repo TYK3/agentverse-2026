@@ -158,7 +158,8 @@ def test_ask_er_goes_through_gem_with_the_frame_and_a_receipt():
     assert I.ask_er(gem, "QUJD") == ("[]", "gem-" + "b" * 32, "gemini-robotics-er-2-preview")
     key, feature, contents = gem.calls[0]
     assert key == "embodied_reasoning" and feature == "spatial_inspection"
-    assert contents[0]["parts"][0]["inline_data"] == {"mime_type": "image/jpeg", "data": "QUJD"}
+    assert contents == [{"type": "image", "mime_type": "image/jpeg", "data": "QUJD"},
+                        {"type": "text", "text": I.PROMPT}]
 
     class GeminiOff(Exception):
         pass

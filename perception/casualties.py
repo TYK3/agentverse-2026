@@ -6,6 +6,13 @@ Sound: the acoustic bearing, averaged over the last 5 samples (circular mean, in
 Fusion: rays (Scout position, scene bearing) from poses at least 1 m apart are intersected; the
 median of the intersections is the position, or the median thermal point while there is no pair.
 Confidence = 0.4*thermal + 0.3*sound + 0.3*vision, each clue scored 0..1.
+Provisional vs supported (CASUALTY-FUSE, #166): a thermal point is only the first LiDAR surface along
+the thermal bearing, which may be debris in front of the casualty. Until two rays cross, the casualty
+is a provisional track: there is at most one, and it follows the median thermal point wherever it
+drifts (one hypothesis moving, never a new casualty per drift). The first crossing turns that same
+track (same id, so the planner's queue entry moves with it) into a supported one at the triangulated
+point. A later supported estimate beyond MERGE from every supported track is a further casualty, as
+before. Confidence is not capped: Z3's thermal + sound + camera agreement still reaches >= 0.8 offline.
 Vision: the camera frame goes to gemini-3.8-flash through coord/gem.py, at most once a second and
 only when thermal or sound already suggests someone. With GEMINI_MODE=off (or no coord/gem.py) it is
 skipped and marked as a stand-in. The frame is dropped right after the call: never stored or sent.
@@ -40,9 +47,12 @@ CAM_FOVY = math.radians(60.0)   # sim/scenes/backup.xml scout_cam; horizontal FO
 AGREE_DEG = 12.0      # camera blob and thermal peak must point within this many degrees of each other
 MIN_BLOB = 0.002      # blob area as a fraction of the frame, below this it is noise
 CAM_STEP = 4          # check every 4th pixel each way (80x60 for a 320x240 frame)
-PROMPT = ('Is there a person-shaped figure lying or sitting in this image? Answer JSON only: '
-          '{"person": bool, "bbox": [x,y,w,h], "posture": "lying|sitting|standing|unknown"}. '
-          'Do not describe faces.')
+PROMPT = (
+    "Is there a person-shaped figure (or a red capsule/cylinder representing a trapped casualty "
+    "in this physics simulation) lying or sitting in this image? Answer JSON only: "
+    '{"person": bool, "bbox": [x,y,w,h], "posture": "lying|sitting|standing|unknown"}. '
+    "Do not describe faces."
+)
 
 try:
     from coord import gem
@@ -111,7 +121,7 @@ class Casualties:
         self.sound_rays = deque(maxlen=100)     # (xy, scene bearing), only loud, averaged samples
         self.crossings = deque(maxlen=300)      # triangulated points
         self.points = deque(maxlen=200)         # thermal + LiDAR range points
-        self.found = []                         # [{"pos", "z", "thermal", "sound", "vision"}]
+        self.found = []                         # [{"pos", "z", "thermal", "sound", "vision", "supported"}]
         self.last_vision = -math.inf
         self.vision_stand_in = False            # True once vision was skipped (Gemini off): flag it
         self.suggested = False                  # the last frame had a thermal or sound clue
@@ -155,7 +165,7 @@ class Casualties:
         estimate = self._estimate()
         if estimate is None:
             return False
-        changed = self._update(estimate, pos[2], thermal_score, sound_score)
+        changed = self._update(estimate, pos[2], thermal_score, sound_score, supported=bool(self.crossings))
         return self._local_vision(data, estimate) or changed
 
     def _local_vision(self, data, estimate):
@@ -235,17 +245,34 @@ class Casualties:
             return None
         return (statistics.median(x for x, _ in pts), statistics.median(y for _, y in pts))
 
-    def _update(self, xy, z, thermal, sound):
-        for c in self.found:
-            if math.dist(c["pos"], xy) < MERGE:
-                before = self._entry(c, 0)
-                c["pos"] = xy
-                c["thermal"] = max(c["thermal"], thermal)
-                c["sound"] = max(c["sound"], sound)
-                return self._entry(c, 0) != before
+    def _update(self, xy, z, thermal, sound, supported=True):
+        """Fold one estimate into the tracks; True if map/casualties changed.
+
+        Supported (triangulated) estimates merge into the supported track within MERGE, else take over
+        the provisional track, else start a new one. Unsupported estimates only ever move the single
+        provisional track: the median thermal point drifting is one hypothesis moving, not a new casualty.
+        """
+        provisional = next((c for c in self.found if not c.get("supported", True)), None)
+        target = None
+        if supported:
+            target = next((c for c in self.found if c.get("supported", True) and math.dist(c["pos"], xy) < MERGE),
+                          None) or provisional
+        elif provisional is not None:
+            target = provisional
+        elif any(math.dist(c["pos"], xy) < MERGE for c in self.found):
+            return False      # a stray thermal point beside a supported casualty: nothing new
+        if target is not None:
+            before = self._entry(target, 0)
+            target["pos"] = xy
+            target["z"] = z
+            target["thermal"] = max(target["thermal"], thermal)
+            target["sound"] = max(target["sound"], sound)
+            target["supported"] = target.get("supported", True) or supported
+            return self._entry(target, 0) != before
         if thermal == 0:
             return False      # sound alone gives a bearing, not a place
-        self.found.append({"pos": xy, "z": z, "thermal": thermal, "sound": sound, "vision": 0.0})
+        self.found.append({"pos": xy, "z": z, "thermal": thermal, "sound": sound, "vision": 0.0,
+                           "supported": supported})
         return True
 
     @staticmethod
@@ -289,7 +316,7 @@ def local_person(b64, thermal_rel):
     for j, y in enumerate(rows):
         for i, x in enumerate(cols):
             r, g, b = px[x, y]
-            if r > 140 and r > 1.5 * g and r > 1.5 * b:
+            if r > 90 and r > 1.5 * g and r > 1.5 * b:
                 warm.add((i, j))
     best, seen = None, set()
     for start in warm:
@@ -330,8 +357,8 @@ def gem_ask(prompt, b64):
     if gem is None:
         return None
     try:
-        contents = [{"role": "user", "parts": [{"inline_data": {"mime_type": "image/jpeg", "data": b64}},
-                                               {"text": prompt}]}]
+        contents = [{"type": "image", "mime_type": "image/jpeg", "data": b64},
+                    {"type": "text", "text": prompt}]
         return gem.ask("fast_subagent", contents, thinking="low", feature="vision")
     except gem.GeminiOff:
         gem.mark_stand_in("vision")
