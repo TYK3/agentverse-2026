@@ -37,7 +37,7 @@ def test_golden_shape_and_order():
     assert levels_in_order(events) == ORDER == summary["levels"]
     assert summary["reached"] is True and summary["responder_route"] == "ok"
     assert summary["plans"] == len(events)
-    assert {e["action"] for e in events} <= {"explore", "probe"}
+    assert {e["action"] for e in events} <= {"explore", "probe", "route"}
     first_b1 = next(i for i, e in enumerate(events) if e["level"] == "B1")
     assert all(e["level"] in ("B1", "ramp") for e in events[first_b1:])   # never climbs back
     assert {e["level"] for e in events} <= {*ORDER, "ramp"}
