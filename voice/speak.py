@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import logging
 import os
 import sys
 import threading
+import wave
 from typing import Any
 
 from voice import translate
@@ -63,6 +65,7 @@ def synthesise(text: str) -> bytes:
     from google.genai import types
 
     config = types.GenerateContentConfig(
+        http_options=types.HttpOptions(api_version="v1alpha"),  # speech_config is v1alpha only (#76 live test)
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
@@ -83,14 +86,28 @@ def synthesise(text: str) -> bytes:
     return data
 
 
-def play(pcm: bytes) -> None:
-    """Play 16-bit mono PCM on the default output device and wait until it finishes."""
+def decode(audio: bytes) -> tuple[bytes, int, int]:
+    """(16-bit PCM frames, sample rate, channels). The TTS answers with a WAV file (RIFF header);
+    raw headerless PCM at SAMPLE_RATE mono is accepted too."""
+    if audio[:4] == b"RIFF" and audio[8:12] == b"WAVE":
+        with wave.open(io.BytesIO(audio), "rb") as wf:
+            if wf.getsampwidth() != 2:
+                raise ValueError(f"expected 16-bit audio, got {8 * wf.getsampwidth()}-bit")
+            return wf.readframes(wf.getnframes()), wf.getframerate(), wf.getnchannels()
+    return audio[: len(audio) - len(audio) % 2], SAMPLE_RATE, 1
+
+
+def play(audio: bytes) -> None:
+    """Play TTS audio (WAV or raw 16-bit PCM) on the default output device and wait until it ends."""
     import numpy as np
     import sounddevice as sd
 
-    samples = np.frombuffer(pcm[: len(pcm) - len(pcm) % 2], dtype=np.int16)
+    pcm, rate, channels = decode(audio)
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    if channels > 1:
+        samples = samples.reshape(-1, channels)
     with _play_lock:
-        sd.play(samples, SAMPLE_RATE)
+        sd.play(samples, rate)
         sd.wait()
 
 
