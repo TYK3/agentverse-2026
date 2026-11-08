@@ -48,13 +48,16 @@ async def start(bus, loop=True):
     await bus.publish("scene/loaded", scene.scene_loaded(world.m, world.d, scene=name))
     bus.subscribe("scout/goto", world.goto)
     bus.subscribe("say", world.on_say)  # L2: the casualty knocks back when the Scout calls out
+    # The Responder subscribes to route/proposed first: the hub runs callbacks in order and the
+    # physics check below publishes route/verified, which can trigger the planner's whole
+    # move/place/release dispatch before later callbacks run (seen in a real-lane run).
+    world.responder = responder.attach(world, bus)
 
     async def on_route(route):
         await bus.publish("route/verified", world.verify(route))
 
     bus.subscribe("route/proposed", on_route)
     inject.install(world, bus)
-    world.responder = responder.attach(world, bus)
     if os.environ.get("AFTERSHOCK_HW") == "1":
         import hw
 

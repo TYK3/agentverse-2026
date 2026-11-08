@@ -80,6 +80,7 @@ class Responder:
         self.route = None
         self.state = "idle"        # idle | moving | arrived | blocked | frozen
         self.queue = []            # responder/action messages waiting for the current move to finish
+        self.failed_routes = set()  # routes whose move was refused: their other actions are refused too
         self.log = []              # every log/decision this Responder published
 
     # ---- pose -------------------------------------------------------------------
@@ -174,7 +175,13 @@ class Responder:
         action, item, route = msg.get("action"), msg.get("item"), msg.get("route")
         tag = f"{action} {item}"
         if action == "move":
-            return self.move(route)
+            out = self.move(route)
+            if out["outcome"] == "refused":
+                self.failed_routes.add(route)
+            return out
+        if route in self.failed_routes:
+            # Never place or drop a supply where the Responder did not drive (its move was refused).
+            return self._refuse(f"move on route {route} was refused; {action} {item} not done", tag)
         if item not in SUPPLIES:
             return self._refuse(f"unknown item {item!r}", tag)
         if action == "grip":

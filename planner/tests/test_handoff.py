@@ -146,6 +146,9 @@ def test_responder_blocked_resplits_to_the_scout_and_retries_after_a_rescan():
         assert w.handoff.active is None and w.handoff.waiting_scan
         await w.bus.publish("map/casualties", [casualty()])          # no retry before the re-scan
         assert w.handoff.active is None
+        await w.bus.publish("map/cells", map_cells())                 # too soon: not a re-scan yet
+        assert w.handoff.active is None
+        w.handoff.blocked_at -= H.RETRY_AFTER_S                        # time passes
         await w.bus.publish("map/cells", map_cells())                 # the Scout re-scanned
         retried = w.handoff.active
         await w.bus.publish("log/decision", sim_log("blocked", "collision ray: block ahead on route r2, stopped"))
