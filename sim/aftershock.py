@@ -15,7 +15,7 @@ import math
 import mujoco
 import numpy as np
 
-from sim import scene
+from sim import breakage, scene
 
 AMPLITUDE = 0.015      # metres; 0.012-0.018 all fail the same pair (b10, b8) in the backup scene
 FREQ = 4.0             # Hz
@@ -62,9 +62,11 @@ def aftershock_effects(m, d, threshold=MOVED):
     start_pos = sim.xpos[ids].copy()
     k = ground_mocap(m)
     base = sim.mocap_pos[k].copy()
+    breaker = breakage.Breaker(m)                 # welds that break past their limit (generated building)
     for step in range(round(DURATION / m.opt.timestep)):
         sim.mocap_pos[k] = base + shake_offset(step * m.opt.timestep)
         mujoco.mj_step(m, sim)
+        breaker.step(m, sim)
     sim.mocap_pos[k] = base
     moved = [i for i, p0 in zip(ids, start_pos, strict=True) if np.linalg.norm(sim.xpos[i] - p0) > threshold]
     return moved, {i: (start[i], _box(m, sim, i)) for i in moved}
