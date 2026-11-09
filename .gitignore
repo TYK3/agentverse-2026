@@ -11,6 +11,8 @@ __pycache__/
 # Claude Code: per-person settings and subagent worktrees (each is a whole checkout)
 .claude/settings.local.json
 .claude/worktrees/
+# tools/run_scenario.py and tools/run_demo.sh logs
+runs/
 # Gemini answers cached by coord/gem.py (replay mode)
 .gem_cache/
 
