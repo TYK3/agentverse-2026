@@ -97,17 +97,23 @@ class Permits:
     def __init__(self, res: float = RES) -> None:
         self.res = res
         self.proposed: dict[str, list] = {}
+        self.pending_verified: dict[str, tuple[dict[str, Any], float]] = {}
         self.permits: dict[str, Permit] = {}
         self.hazards: dict[tuple[int, int], dict] = {}
 
     # ---- inputs ----------------------------------------------------------------------------
     def on_route_proposed(self, data: dict[str, Any]) -> list:
-        self.proposed[data["id"]] = data["cells"]
-        return []
+        route_id = data["id"]
+        self.proposed[route_id] = data["cells"]
+        pending = self.pending_verified.pop(route_id, None)
+        return self.on_route_verified(*pending) if pending else []
 
     def on_route_verified(self, data: dict[str, Any], t: float) -> list:
         cells = self.proposed.get(data["id"])
         if cells is None:
+            # A sim-first subscriber may publish its verdict before our route/proposed
+            # subscriber runs. Keep the verdict inert until the matching cells arrive.
+            self.pending_verified[data["id"]] = (data, t)
             return []
         p = self.permits[data["id"]] = Permit(data["id"], cells)
         if not data.get("ok"):
@@ -257,7 +263,10 @@ def start(bus, clock=None):
             if topic in topics:
                 await bus.publish(topic, payload)
 
-    bus.subscribe("route/proposed", permits.on_route_proposed)
+    async def proposed(d):
+        await emit(permits.on_route_proposed(d))
+
+    bus.subscribe("route/proposed", proposed)
 
     async def verified(d):
         await emit(permits.on_route_verified(d, now()))
