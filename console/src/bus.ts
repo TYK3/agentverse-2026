@@ -8,6 +8,71 @@ let socket: WebSocket | null = null;
 let retry: number | undefined;
 let stopped = false;
 
+type ReplayStatus = { state: 'ready' | 'playing' | 'paused' | 'done' | 'stopped'; t: number; duration?: number };
+type ReplayController = { start: () => void; pause: () => void; status: () => ReplayStatus };
+let replayControls: { root: HTMLElement; button: HTMLButtonElement; slider: HTMLInputElement;
+                      time: HTMLElement; seeking: boolean } | null = null;
+
+function updateReplayControls(status: ReplayStatus): void {
+  if (!new URLSearchParams(window.location.search).has('run')) return;
+  const mode = document.getElementById('mode-label');
+  if (mode) mode.textContent = 'REPLAY · recording';
+  const connection = document.getElementById('connection-status');
+  if (connection) connection.textContent = 'Recording replay';
+  if (!replayControls) {
+    const root = document.createElement('div');
+    root.id = 'replay-controls';
+    root.setAttribute('aria-label', 'Recording playback');
+    root.style.cssText = 'position:fixed;left:50%;bottom:5.5rem;transform:translateX(-50%);z-index:50;'
+      + 'display:flex;align-items:center;gap:.6rem;padding:.55rem .8rem;border:1px solid #54718b;'
+      + 'border-radius:.5rem;background:#102337;color:#edf5fa;box-shadow:0 4px 16px #0009';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('aria-label', 'Pause replay');
+    button.addEventListener('click', () => {
+      const player = (window as unknown as { activeReplayPlayer?: ReplayController }).activeReplayPlayer;
+      if (!player) return;
+      if (player.status().state === 'done') {
+        const params = new URLSearchParams(window.location.search);
+        params.delete('seek');
+        window.location.search = params.toString();
+      } else if (player.status().state === 'playing') player.pause();
+      else player.start();
+    });
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '0';
+    slider.step = '0.1';
+    slider.setAttribute('aria-label', 'Seek replay time');
+    slider.style.width = 'min(34vw, 22rem)';
+    const time = document.createElement('span');
+    time.style.cssText = 'font:12px ui-monospace,monospace;white-space:nowrap';
+    slider.addEventListener('input', () => {
+      if (!replayControls) return;
+      replayControls.seeking = true;
+      time.textContent = `${Number(slider.value).toFixed(1)} / ${Number(slider.max).toFixed(1)} s`;
+    });
+    slider.addEventListener('change', () => {
+      const params = new URLSearchParams(window.location.search);
+      params.set('seek', slider.value);
+      window.location.search = params.toString();
+    });
+    root.append(button, slider, time);
+    document.body.appendChild(root);
+    replayControls = { root, button, slider, time, seeking: false };
+  }
+  const { button, slider, time } = replayControls;
+  button.textContent = status.state === 'playing' ? 'Pause' : status.state === 'done' ? 'Restart' : 'Play';
+  button.setAttribute('aria-label', `${button.textContent} replay`);
+  slider.max = String(status.duration ?? 0);
+  slider.disabled = !(status.duration && status.duration > 0);
+  if (!replayControls.seeking) {
+    slider.value = String(status.t);
+    time.textContent = `${status.t.toFixed(1)} / ${(status.duration ?? 0).toFixed(1)} s`;
+  }
+}
+
 export function on(topic: string, handler: Handler): () => void {
   const handlers = listeners.get(topic) ?? new Set<Handler>();
   handlers.add(handler);
@@ -17,6 +82,7 @@ export function on(topic: string, handler: Handler): () => void {
 
 function dispatch(message: Envelope): void {
   console.log('[bus]', message.topic, message.data);
+  if (message.topic === 'console/replay') updateReplayControls(message.data as ReplayStatus);
   listeners.get(message.topic)?.forEach(handler => handler(message.data));
   listeners.get('*')?.forEach(handler => handler(message));
 }
